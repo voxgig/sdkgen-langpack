@@ -71,6 +71,45 @@ designing an entity layer for the language, which is a decision in its own
 right rather than a port of an existing one. The suite pins the current shape
 so the difference stays deliberate.
 
+## dart and lean carry the secrets feature
+
+Both declare `provides: { sekreto: true }` and ship a vendored
+[sekreto](https://github.com/voxgig/sekreto) port — dart under
+`.sdk/tm/dart/lib/feature/secrets/` (34 files), lean under
+`.sdk/tm/lean/src/feature/secrets/{sekreto,plugin}` (38 files). Every file
+keeps the `VENDORED:` provenance header naming its upstream tag. A project
+that turns the feature on in its own model —
+
+```
+main: kit: feature: secrets: { active: true plugin: vault: active: true }
+```
+
+— gets exactly the plugin definitions its active groups name, the inactive
+groups' files trimmed from the tree, the secrets suite registered, and a
+`secrets()` accessor on the SDK. A project without the feature, or with it
+`active: false`, generates exactly as before.
+
+**The feature MODEL is sdkgen's, not this package's.**
+`model/feature/secrets.aon` in `@voxgig/sdkgen` carries the `path` lists and
+the `def: dart:` and `def: lean:` maps; packs consume core feature models
+rather than copying them. Those entries ship from 4.10.0 on, which is what
+`engines.sdkgen` here pins. Against an older sdkgen the feature emits no
+plugin definitions at all, and each target's secrets test says so by name.
+
+**Lean builds through make.** A plugin GROUP (vault, aws, ...) binds libcurl
+through two sdkgen-owned C stubs under `src/feature/secrets/ffi/`. Lake TOML
+cannot compile C, so `make ffi` uses the system compiler and writes a link
+response file that the lakefile reads — which means a plugin-bearing lean SDK
+is built and run with `make build`, `make test`, `make exe EXE=secrets`, not
+bare `lake exe`, which fails at link. Secrets on with no group, off, or
+absent: no libcurl, and the target's zero-dependency promise holds.
+
+**Vendoring is a manual copy.** The dart and lean trees were carried over
+verbatim from sdkgen, headers included. This repository has no vendor tool or
+manifest of its own yet, so resyncing from upstream is by hand until it grows
+one. Nothing here guards those files the way sdkgen's `make vendor-check`
+guards its own.
+
 ## Developing
 
 ```bash

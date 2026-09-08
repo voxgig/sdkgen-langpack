@@ -12,6 +12,14 @@ import VoxgigStruct
 import SdkJson
 import SdkUtility
 import SdkFeature
+-- The one feature that lives OUTSIDE this module: `secrets` sits in its own
+-- container (src/feature/secrets/) so `feature add`/`target add` can trim it
+-- with the vendored sekreto port it wraps. Main_lean fills the three
+-- secrets marker lines in this module (here, in `makeFeature` and in
+-- `featureNames`) only when the model activates the feature; an unconditional
+-- import would break every SDK that ships without the container. The markers
+-- are blanked otherwise.
+-- #SecretsImport
 
 open VoxgigStruct
 open SdkFeature
@@ -776,12 +784,19 @@ def makeFeature (name : String) : SIO Feature :=
   | "proxy" => proxyFeature
   | "netsim" => netsimFeature
   | "cost" => costFeature
+  -- #SecretsMakeFeature
   | _ => baseFeature
 
-/-- The catalog order: transport wrappers compose in this order. -/
+/-- The catalog order: transport wrappers compose in this order, the LAST
+    name outermost. `secrets` (when the model ships it) goes last: it must
+    write the credential onto the request before any other wrapper sees it,
+    and its fail-closed refusal must reach the caller untouched rather than
+    be retried by `retry` or rewritten by `netsim`. -/
 def featureNames : Array String :=
   #["log", "rbac", "idempotency", "clienttrack", "paging", "streaming",
     "metrics", "telemetry", "debug", "audit",
-    "cost", "cache", "ratelimit", "timeout", "retry", "proxy", "netsim"]
+    "cost", "cache", "ratelimit", "timeout", "retry", "proxy", "netsim"
+    -- #SecretsFeatureName
+    ]
 
 end SdkFeatures

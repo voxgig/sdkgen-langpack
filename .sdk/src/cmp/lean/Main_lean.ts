@@ -1,6 +1,7 @@
 import {
   cmp, each,
   File, Content, Copy, Folder,
+  srcFeatureExcludes, pluginExcludes,
 } from '@voxgig/sdkgen'
 
 import type {
@@ -15,6 +16,7 @@ import {
 import { Package } from './Package_lean'
 import { Config } from './Config_lean'
 import { Gitignore } from './Gitignore_lean'
+import { leanSecrets } from './utility_lean'
 
 
 // Op name -> generated wrapper. list/load/remove take a match; create takes
@@ -49,14 +51,85 @@ const Main = cmp(async function Main(props: any) {
   Package({ target })
   Gitignore({})
 
+  // THE SECRETS FEATURE'S MARKER FILLS. lean keeps every feature inside one
+  // static module (src/SdkFeatures.lean), so the one feature that lives in
+  // its own trimmable container is reached through three comment-marker
+  // slots there, plus two in the Makefile and two in the feature source
+  // itself - all filled here and only here, from the same reading of the
+  // model Package_lean uses for the lakefile. Inactive: every marker is
+  // blanked, and SdkFeatures.lean is byte-for-byte the catalog it was.
+  //
+  // The markers are literal strings, not jostraca's `#Name` tags: those
+  // are defined on a `//` comment, which neither Lean (`--`) nor make
+  // (`#`) writes.
+  const secrets = leanSecrets(model, target)
+
+  // The Makefile's ffi rules, present only with a plugin group on. Upstream
+  // sekreto's recipe, in three parts: the stubs are compiled by the SYSTEM
+  // C compiler against the toolchain's <lean/lean.h>; the link goes through
+  // the system compiler too (LEAN_CC - the bundled clang links against the
+  // toolchain's own, older glibc, and the system libcurl needs the system
+  // one; mixing the two fails on __libc_csu_init), which then needs the
+  // toolchain lib dir back for -lc++/-lc++abi/-luv; and the machine-specific
+  // half - that dir, and where the compiler finds libcurl - is WRITTEN into
+  // link.rsp for the static lakefile to read. Single `$` throughout: `$$` in
+  // a template is a jostraca model ref. Recipe lines carry a real tab.
+  const T = '\t'
+  const ffiRules = !secrets.ffi ? '' : [
+    'export LEAN_CC ?= cc',
+    'CC ?= cc',
+    'LEANPREFIX := $(shell lean --print-prefix)',
+    'SECRETS_FFI_DIR := src/feature/secrets/ffi',
+    'SECRETS_FFI_OBJS := $(SECRETS_FFI_DIR)/sekreto_curl.o $(SECRETS_FFI_DIR)/sekreto_clock.o',
+    'SECRETS_FFI_RSP := $(SECRETS_FFI_DIR)/link.rsp',
+    'SECRETS_FFI := $(SECRETS_FFI_OBJS) $(SECRETS_FFI_RSP)',
+    '# Where the compiler finds libcurl (multiarch on Debian, lib64 on Fedora),',
+    '# asked rather than guessed; a bare name back means no development package.',
+    'SECRETS_LIBCURL := $(shell $(CC) -print-file-name=libcurl.so)',
+    '',
+    '$(SECRETS_FFI_DIR)/%.o: $(SECRETS_FFI_DIR)/%.c',
+    T + '$(CC) -c -o $@ $< -I$(LEANPREFIX)/include -fPIC -std=c11 -Wall -Wextra',
+    '',
+    '$(SECRETS_FFI_RSP): $(SECRETS_FFI_OBJS) lakefile.toml',
+    T + '@test "$(SECRETS_LIBCURL)" != "libcurl.so" || { echo "secrets: libcurl ' +
+      'development files not found (libcurl4-openssl-dev / libcurl-devel)" >&2; exit 1; }',
+    T + String.raw`printf '%s\n' $(SECRETS_FFI_OBJS) -L$(LEANPREFIX)/lib ` +
+      String.raw`-L$(dir $(SECRETS_LIBCURL)) -lcurl -lssl -lcrypto > $@`,
+    '',
+  ].join('\n')
+
+  const secretsMarkers = {
+    '-- #SecretsImport': secrets.active ? 'import SecretsFeature' : '',
+    '-- #SecretsMakeFeature': secrets.active ?
+      '| "secrets" => SecretsFeature.secretsFeature' : '',
+    '-- #SecretsFeatureName': secrets.active ? ', "secrets"' : '',
+    '-- #SecretsPluginImports': secrets.imports
+      .map((m: string) => 'import ' + m).join('\n'),
+    '-- #SecretsPluginDefs': secrets.defs.join(', '),
+    '# #SecretsTest': secrets.active ? '\tlake exe secrets' : '',
+    '# #SecretsFfi': ffiRules,
+  }
+
   // Copy tm/lean verbatim (placeholder substitution applies): the runtime under
-  // src/ (VoxgigStruct, Vregex, SdkJson, SdkRuntime), plus LICENSE/VERSION. The
-  // per-feature custom-source scaffold under src/feature is excluded.
+  // src/ (VoxgigStruct, Vregex, SdkJson, SdkRuntime), plus LICENSE/VERSION.
+  //
+  // The feature containers are trimmed the ts way: a DECLARED-but-inactive
+  // feature's src/feature/<name>/ stays out (srcFeatureExcludes), and an
+  // active feature's inactive plugin groups stay out by their declared
+  // paths (pluginExcludes; the model's paths are target-root-relative,
+  // which is this Copy's root). The former blanket `src/feature/` exclude
+  // would have dropped the secrets container with everything else. The
+  // `.gitkeep` placeholders and the container README are scaffolding for
+  // the neutral feature tooling, not SDK source, and stay out as before.
   Copy({
     from: 'tm/' + target.name,
-    exclude: [/src\/feature\//],
+    exclude: [
+      /\.gitkeep$/, /src\/feature\/README\.md$/,
+      ...srcFeatureExcludes(model), ...pluginExcludes(model),
+    ],
     replace: {
       ...props.ctx$.stdrep,
+      ...secretsMarkers,
     }
   })
 

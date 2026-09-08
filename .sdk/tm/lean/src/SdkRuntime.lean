@@ -39,9 +39,17 @@ def gpS (v : Value) (k : String) : SIO String := do pure (asStr (← gp v k))
 -- Transport: shell out to curl. Returns (status, body).
 -- ---------------------------------------------------------------------------
 
-def curlFetch (method url : String) (body : Option String) : IO (Nat × String) := do
+-- `headers` is every header the pipeline prepared - options.headers, the
+-- authorization header prepareAuth built, whatever a feature added - each
+-- passed as its own `-H`. They used to be dropped here and only a
+-- Content-Type sent, so a live lean SDK never carried its credential (see
+-- runOp: prepareAuth was not called either; the two defects hid each other).
+def curlFetch (method url : String) (headers : Array (String × String))
+    (body : Option String) : IO (Nat × String) := do
   let base := #["-s", "-w", "\n%{http_code}", "--max-time", "20", "-X", method]
-  let hdr  := if body.isSome then #["-H", "Content-Type: application/json"] else #[]
+  let hasCT := headers.any (fun kv => kv.1.toLower == "content-type")
+  let hdr := headers.foldl (fun acc kv => acc ++ #["-H", kv.1 ++ ": " ++ kv.2]) #[]
+  let hdr := if body.isSome && !hasCT then hdr ++ #["-H", "Content-Type: application/json"] else hdr
   let dat  := match body with | some b => #["-d", b] | none => #[]
   let out ← IO.Process.output { cmd := "curl", args := base ++ hdr ++ dat ++ #[url] }
   if out.exitCode != 0 then
@@ -199,7 +207,18 @@ def liveFetcher : SdkFeature.Fetcher := fun _ctx url fetchdef => do
   let method := asStr (← gp fetchdef "method")
   let bodyV ← gp fetchdef "body"
   let bodyStr ← if isNv bodyV then pure none else (do pure (some (← jsonify bodyV)))
-  let (st, respBody) ← curlFetch (if method == "" then "GET" else method) url bodyStr
+  let headersV ← gp fetchdef "headers"
+  let mut headers : Array (String × String) := #[]
+  match headersV with
+  | .map _ =>
+    for k in (← keysof headersV) do
+      let v ← gp headersV k
+      match v with
+      | .str s => headers := headers.push (k, s)
+      | .num n => headers := headers.push (k, toString n)
+      | _ => pure ()
+  | _ => pure ()
+  let (st, respBody) ← curlFetch (if method == "" then "GET" else method) url headers bodyStr
   let json ← SdkJson.jsonRead respBody
   let resp ← newMap #[("status", .num st.toFloat), ("statusText", .str "OK"),
                       ("body", json), ("headers", ← emptyMap)]
@@ -246,10 +265,10 @@ def resolveFeatureOpts (client : Value) : SIO Value := do
   SdkUtility.sp client "featureopts" fo
   pure fo
 
-/-- Construct and initialise every configured feature for this client. -/
-def initFeatures (client : Value) : SIO Unit := do
+/-- Construct and initialise every configured feature for this client, over
+    the given BASE transport (the innermost fetcher every feature wraps). -/
+def initFeaturesWith (client : Value) (baseF : SdkFeature.Fetcher) : SIO Unit := do
   let fo ← resolveFeatureOpts client
-  let baseF := if (← gpS client "mode") == "test" then testFetcher else liveFetcher
   SdkFeature.setFetcher client baseF
   let ctx ← newMap #[("client", client)]
   let mut ids : Array Value := #[]
@@ -261,6 +280,12 @@ def initFeatures (client : Value) : SIO Unit := do
       ids := ids.push (.num id.toFloat)
       f.init ctx opts
   SdkUtility.sp client "features" (← newList ids)
+
+/-- Construct and initialise every configured feature for this client: the
+    base transport is the seeded store in test mode, curl otherwise. -/
+def initFeatures (client : Value) : SIO Unit := do
+  let baseF := if (← gpS client "mode") == "test" then testFetcher else liveFetcher
+  initFeaturesWith client baseF
 
 -- ---------------------------------------------------------------------------
 -- The generic operation, with feature hooks at every pipeline stage.
@@ -303,6 +328,15 @@ def runOp (client : Value) (entityName opName : String)
                       ("headers", headers), ("step", .str "start")]
   SdkUtility.sp ctx "spec" spec
   SdkUtility.sp spec "query" (← emptyMap)
+  -- The credential: `apikey` with the configured prefix becomes the
+  -- authorization header, and `auth: null` removes it. This call was
+  -- missing - prepareAuth was reached only from the primary-utility corpus
+  -- lane, so a live lean SDK with an apikey sent no authorization header at
+  -- all (and curlFetch dropped every header anyway). Before PreSpec, as
+  -- makeSpec orders it, so a feature hook sees the finished header.
+  match ← SdkUtility.prepareAuth ctx with
+  | (_, some e) => throw (IO.userError (← gpS e "message"))
+  | _ => pure ()
   SdkFeature.dispatch client "PreSpec" ctx
 
   let hasBody := method == "POST" || method == "PUT" || method == "PATCH"
@@ -355,6 +389,21 @@ def mkClientV (options : Value) (configJson : String) : SIO Value := do
   let config ← SdkJson.jsonRead configJson
   let c ← newMap #[("options", opts), ("config", config), ("mode", .str "live")]
   initFeatures c
+  pure c
+
+/-- A LIVE-mode client over a caller-supplied base transport.
+
+    The lean spelling of the `options.utility.fetcher` seam every dynamically
+    typed target honours: a struct `Value` cannot carry a closure, so the
+    transport is a constructor argument instead of an option. Every feature
+    wraps `base` exactly as it wraps curl, which is what lets a shipped test
+    drive a live client and count what reaches the wire. -/
+def mkClientWith (options : Value) (configJson : String) (base : SdkFeature.Fetcher)
+    : SIO Value := do
+  let opts ← (match options with | .map _ => pure options | _ => emptyMap)
+  let config ← SdkJson.jsonRead configJson
+  let c ← newMap #[("options", opts), ("config", config), ("mode", .str "live")]
+  initFeaturesWith c base
   pure c
 
 /-- A test-mode client: operations are answered from an in-memory store seeded

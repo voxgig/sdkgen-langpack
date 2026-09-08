@@ -8,6 +8,15 @@ main: kit: target: lean: {
   base: 'BASE'
   srcfeature: false
 
+  # Applicability tags (docs/design/feature-tags.md). A vendored sekreto
+  # port lives in this target's feature container (src/feature/secrets/
+  # {sekreto,plugin}), so the `secrets` feature applies here. The port's
+  # provider plugins bind libcurl through two C stubs under
+  # src/feature/secrets/ffi/ - linked ONLY when the model selects a plugin
+  # group, so an SDK without secrets (or with the four built-in kinds
+  # alone) keeps the zero-dependency promise below.
+  provides: { sekreto: true }
+
   # RETIREMENT. Retired by the move to the vendored @voxgig/omni corpus
   # runner (vendor-tag rollout): NOTHING, deliberately, and the empty list
   # says so rather than leaving the key off.
@@ -85,7 +94,16 @@ main: kit: target: lean: publish: {
 # Feature source is NOT trimmed to the model's selection here: every
 # feature lives inside a single generated module (src/SdkFeatures.lean),
 # not in per-feature source files, so there is nothing per-feature to
-# leave out. Trimming waits on that module becoming model-driven.
+# leave out.
+#
+# `secrets` is the first exception, and the shape of the eventual fix:
+# it lives in its own container (src/feature/secrets/), and SdkFeatures.lean
+# reaches it through three comment-marker slots (`-- #SecretsImport`,
+# `-- #SecretsMakeFeature`, `-- #SecretsFeatureName`) that Main_lean fills
+# only when the feature is active - the import, the `makeFeature` case and
+# the catalog entry. The container itself is trimmed the ts way
+# (srcFeatureExcludes + pluginExcludes on Main_lean's Copy). Turning
+# `trim` on for the OTHER features waits on the same treatment for each.
 main: kit: target: lean: feature: {
   trim: false
 }

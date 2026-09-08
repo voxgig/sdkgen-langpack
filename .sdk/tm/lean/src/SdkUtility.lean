@@ -266,6 +266,25 @@ def prepareHeaders (ctx : Value) : SIO Value := do
   | .map i => clone (.map i)
   | _ => newMap #[("content-type", .str "application/json")]
 
+/-- The credential prefix (`Bearer`): the caller's `options.auth.prefix` when
+    the caller passed an `auth` map, else the one the API model declares in
+    `config.options.auth.prefix`, else none.
+
+    runOp hands the pipeline the caller's RAW options - lean's client never
+    runs them through makeOptions, so the model's declared prefix was never
+    in `options` and a live SDK built `authorization: <key>` for a bearer
+    API. The corpus lane, which does merge, is unaffected: with `auth`
+    present in options the first branch answers exactly as before. Shared
+    with the secrets feature, whose transport wrapper rewrites the header
+    from the same rule. -/
+def authPrefix (ctx : Value) : SIO String := do
+  let options ← gp ctx "options"
+  match (← gp options "auth") with
+  | .map _ => gpS (← gp options "auth") "prefix"
+  | _ =>
+    let copts ← gp (← gp ctx "config") "options"
+    gpS (← gp copts "auth") "prefix"
+
 /-- apikey (with the configured auth prefix) becomes the authorization header. -/
 def prepareAuth (ctx : Value) : SIO (Value × Option Value) := do
   let specV ← gp ctx "spec"
@@ -289,7 +308,7 @@ def prepareAuth (ctx : Value) : SIO (Value × Option Value) := do
       dp headers "authorization"
       pure (specV, none)
     else do
-      let pfx ← gpS (← gp options "auth") "prefix"
+      let pfx ← authPrefix ctx
       let authval := if pfx != "" then pfx ++ " " ++ apikey else apikey
       sp headers "authorization" (.str authval)
       pure (specV, none)
