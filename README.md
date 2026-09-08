@@ -49,6 +49,37 @@ generation, component type-checking and per-target behaviour, and the corpus
 runs where the SDK is generated. Do not read a green build here as a green
 corpus.
 
+## Dart carries the secrets feature
+
+`dart` declares `provides: { sekreto: true }` and ships a vendored
+[sekreto](https://github.com/voxgig/sekreto) port under
+`.sdk/tm/dart/lib/feature/secrets/` (34 files, each with a `VENDORED:`
+provenance header naming the upstream tag). A project that turns the feature
+on in its own model —
+
+```
+main: kit: feature: secrets: { active: true plugin: vault: active: true }
+```
+
+— gets `lib/Config.dart` importing exactly the plugin definitions its active
+groups name, the inactive groups' files trimmed from the tree, the suite in
+`test/feature/secrets/` registered in `test/main.dart`, and a `secrets()`
+accessor on the SDK. A project without the feature, or with it `active:
+false`, generates exactly as before.
+
+**What that needs from sdkgen.** The feature MODEL is sdkgen's, not this
+package's: `model/feature/secrets.aon` in `@voxgig/sdkgen` carries dart's
+plugin `path` lists and `def: dart:` maps, and packs consume core feature
+models rather than copying them. The published 4.9.0 predates those entries,
+so against 4.9.0 dart's secrets feature emits no plugin definitions at all —
+the suite's dart secrets test says so by name. It needs the first
+`@voxgig/sdkgen` release cut from sdkgen `main` at or after `26658608`; when
+that release exists, `engines.sdkgen` here should move to it.
+
+**Vendoring.** The 34 files were carried over verbatim from sdkgen, headers
+included. This repository has no vendor tool or manifest of its own yet, so a
+resync from upstream is a manual copy until it grows one.
+
 ## Lean is deliberately different
 
 Lean has no entity object. Its operations are namespaced free functions over
