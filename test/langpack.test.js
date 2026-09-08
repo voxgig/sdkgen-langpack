@@ -438,4 +438,194 @@ describe('sdkgen-langpack', () => {
       'dart: a model without the feature still received the vendored ' +
       'secrets source — the add-time feature trim did not run')
   })
+
+
+  // A consumer with the bundled `secrets` feature installed and `extra`
+  // (its activation) in force BEFORE `package add`, generated once. The
+  // model is compiled twice on purpose: the add actions read `actx.model`
+  // and nothing recompiles it mid-process, so the copy `setModel` installs
+  // has to carry the activation the later generate compiles again.
+  async function generateSecrets(extra) {
+    const consumer = stageConsumer({ recordLog: true })
+    try {
+      await consumer.add('feature', 'secrets')
+      consumer.setModel(consumerModel(consumer.sdk, extra))
+      await consumer.addPackage(PKG)
+      consumer.compile()
+      return await generateInto(consumer, { model: consumerModel(consumer.sdk, extra) })
+    }
+    finally {
+      consumer.cleanup()
+    }
+  }
+
+
+  // LEAN CARRIES THE SECRETS FEATURE TOO — sdkgen's own generate guard for
+  // it, moved here with the target.
+  //
+  // lean is the one target whose feature catalog is a STATIC module
+  // (src/SdkFeatures.lean), so the container-bound secrets feature reaches
+  // it through three comment-marker slots Main_lean fills only when the
+  // feature is active. The vendored trees are Lake srcDir roots (no import
+  // adaptation at all), and the plugin groups bind libcurl through two
+  // sdkgen-owned C stubs under src/feature/secrets/ffi/ — linked (a
+  // response file on the lakefile, LEAN_CC and the ffi rules in the
+  // Makefile) ONLY when a group is on, so the built-ins-only and inactive
+  // shapes keep the target's zero-dependency promise. Three models: vault
+  // on, secrets on with no group, secrets declared and off.
+  //
+  // As for dart, the plugin `def: lean:` maps live in sdkgen's core
+  // secrets.aon, so the first assertion names that dependency.
+  test('lean: active secrets emits plugin defs and trims inactive groups', async () => {
+    const P = 'lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/'
+
+    // The dependency, checked on the model before anything is generated.
+    {
+      const probe = stageConsumer()
+      try {
+        await probe.add('feature', 'secrets')
+        const vault = consumerModel(probe.sdk).main.kit.feature.secrets.plugin.vault
+        ok(null != vault.def && null != vault.def.lean,
+          'the installed @voxgig/sdkgen ships a core secrets model with no ' +
+          'lean plugin definitions (`def: lean:`), so lean\'s secrets feature ' +
+          'cannot emit any — it needs the sdkgen release that carries them')
+      }
+      finally {
+        probe.cleanup()
+      }
+    }
+
+    // VAULT ON.
+    const { files: out, leaks } = await generateSecrets(
+      'main: kit: feature: secrets: { active: true plugin: vault: active: true }')
+    deepStrictEqual(leaks.filter((l) => l.startsWith('lean/')), [],
+      'lean: a placeholder survived into the secrets output')
+
+    // The definitions list — the emission that can silently no-op while
+    // everything else stays green — and the imports it needs, one per
+    // module, derived from the def paths.
+    const feature = out['lean/src/feature/secrets/SecretsFeature.lean']
+    ok(null != feature, 'lean: the secrets feature source was not generated')
+    ok(/^import SekretoPlugins\.Boru$/m.test(feature) &&
+      /^import SekretoPlugins\.Hashicorp$/m.test(feature),
+      'lean: the vault plugin modules are not imported:\n' +
+      (feature.match(/^import [\s\S]*?^open/m) || ['(no imports)'])[0])
+    ok(/^  Sekreto\.boru, Sekreto\.hashicorp$/m.test(feature),
+      'lean: featurePlugins is missing the vault definitions')
+    ok(!/SekretoPlugins\.(Aws|Gcpsecrets|Azuresecrets|Doppler|Infisical|Onepassword|Secretspec|Sigv4|Crypto|Clock)/
+      .test(feature),
+      'lean: an INACTIVE group\'s module reached SecretsFeature.lean')
+    ok(!/#Secrets|ProjectName|PROJECTENV/.test(feature),
+      'lean: a marker or placeholder survived in SecretsFeature.lean')
+
+    // THE TRIM, from the file list. Lake compiles an import closure, not a
+    // directory, so a file the trim left behind compiles nowhere and only
+    // this test can see it. Httpjson and Proc are the two ungrouped shared
+    // helpers (Boru reaches both); the BARREL is never vendored.
+    for (const kind of ['Hashicorp', 'Boru', 'Httpjson', 'Proc']) {
+      ok(null != out[P + kind + '.lean'],
+        'lean: the ACTIVE vault group (or a shared helper) lost ' + kind)
+    }
+    for (const kind of ['Aws', 'Sigv4', 'Crypto', 'Clock', 'Gcpsecrets', 'Azuresecrets',
+      'Onepassword', 'Doppler', 'Infisical', 'Secretspec']) {
+      ok(null == out[P + kind + '.lean'],
+        'lean: an INACTIVE group still ships ' + kind)
+    }
+    ok(null == out['lean/src/feature/secrets/sekreto/plugins/SekretoPlugins.lean'],
+      'lean: the full-set barrel SekretoPlugins.lean must never ship')
+    for (const core of ['sekreto/Sekreto.lean', 'sekreto/Sekreto/Chain.lean',
+      'plugin/Plugin.lean', 'plugin/Plugin/Host.lean',
+      'ffi/sekreto_curl.c', 'ffi/sekreto_clock.c']) {
+      ok(null != out['lean/src/feature/secrets/' + core],
+        'lean: ' + core + ' did not reach the SDK')
+    }
+
+    // REGISTERED: the three marker slots in the static catalog, filled, and
+    // no marker text left behind.
+    const catalog = out['lean/src/SdkFeatures.lean']
+    ok(null != catalog, 'lean: no src/SdkFeatures.lean generated')
+    ok(/^import SecretsFeature$/m.test(catalog) &&
+      /^  \| "secrets" => SecretsFeature\.secretsFeature$/m.test(catalog) &&
+      /^    , "secrets"$/m.test(catalog),
+      'lean: SdkFeatures.lean does not import, construct and list the secrets feature:\n' +
+      catalog.split('\n').filter((l) => /secrets|Secrets/.test(l)).join('\n'))
+    ok(!/#Secrets/.test(catalog), 'lean: a marker survived in SdkFeatures.lean')
+
+    // The build: the four libs, the suite's executable, and the libcurl link
+    // through the response file `make ffi` writes; the Makefile runs the
+    // suite, sets LEAN_CC and carries the ffi rules.
+    const lake = out['lean/lakefile.toml']
+    ok(null != lake, 'lean: no lakefile.toml generated')
+    for (const lib of ['Plugin', 'Sekreto', 'SekretoPlugins', 'SecretsFeature']) {
+      ok(new RegExp('^name = "' + lib + '"$', 'm').test(lake),
+        'lean: lakefile.toml declares no lean_lib ' + lib)
+    }
+    ok(/^name = "secrets"\nsrcDir = "test\/feature\/secrets"\nroot = "TSecrets"$/m.test(lake),
+      'lean: lakefile.toml has no `secrets` executable rooted at TSecrets')
+    ok(/^moreLinkArgs = \["@src\/feature\/secrets\/ffi\/link\.rsp"\]$/m.test(lake),
+      'lean: the vault group is on but lakefile.toml does not link the ffi response file')
+    const mk = out['lean/Makefile']
+    ok(null != mk, 'lean: no Makefile generated')
+    ok(/^\tlake exe secrets$/m.test(mk), 'lean: `make test` does not run `lake exe secrets`')
+    ok(/^export LEAN_CC \?= cc$/m.test(mk) && /-lcurl -lssl -lcrypto/.test(mk) &&
+      /^ffi: \$\(SECRETS_FFI\)$/m.test(mk),
+      'lean: the Makefile lacks the ffi rules a plugin group needs')
+    ok(!/#Secrets/.test(mk), 'lean: a marker survived in the Makefile')
+    const suite = out['lean/test/feature/secrets/TSecrets.lean']
+    ok(null != suite, 'lean: the gated secrets suite was not generated')
+    ok(!/ProjectName|PROJECTENV/.test(suite), 'lean: a placeholder survived in TSecrets.lean')
+
+    // Scaffolding for the neutral feature tooling never reaches an SDK.
+    deepStrictEqual(Object.keys(out).filter((p) => /\.gitkeep$|src\/feature\/README\.md$/.test(p)), [],
+      'lean: .gitkeep placeholders or the container README leaked into the SDK')
+
+    // BUILT-INS ONLY: secrets on, no group. The feature and its suite ship,
+    // the vendored cores ship, the shared helpers ship — and NOTHING binds
+    // libcurl: no response file on the lakefile, no LEAN_CC, no ffi rules.
+    const { files: bout } = await generateSecrets(
+      'main: kit: feature: secrets: { active: true }')
+    const bfeature = bout['lean/src/feature/secrets/SecretsFeature.lean']
+    ok(null != bfeature && !/^import SekretoPlugins\./m.test(bfeature) &&
+      /featurePlugins : List Plugin\.Definition := \[\n  \n  \]/.test(bfeature),
+      'lean: built-ins only must import no plugin module and list no definition')
+    ok(null != bout[P + 'Httpjson.lean'] && null == bout[P + 'Hashicorp.lean'],
+      'lean: built-ins only keeps the shared helpers and trims every kind')
+    const blake = bout['lean/lakefile.toml']
+    ok(/^name = "SecretsFeature"$/m.test(blake) && !/moreLinkArgs|link\.rsp/.test(blake),
+      'lean: built-ins only must ship the feature lib and must NOT link libcurl')
+    const bmk = bout['lean/Makefile']
+    // Anchored on RULE lines: the static Makefile's prose names LEAN_CC and
+    // -lcurl while explaining why they are absent.
+    ok(/^\tlake exe secrets$/m.test(bmk) &&
+      !/^export LEAN_CC|^SECRETS_FFI_OBJS :=|^\$\(SECRETS_FFI_RSP\):/m.test(bmk) &&
+      /^ffi: \$\(SECRETS_FFI\)$/m.test(bmk),
+      'lean: built-ins only must run the suite and define no ffi rules (ffi stays a no-op)')
+
+    // DECLARED AND OFF. The container is trimmed (srcFeatureExcludes —
+    // declared-but-inactive is the case it exists for; lean's target model
+    // keeps `feature.trim: false`, so `target add` leaves every feature's
+    // source in place and this generate-time exclude is the trim), the
+    // markers are blank, and lakefile and Makefile carry nothing of it.
+    const { files: off } = await generateSecrets(
+      'main: kit: feature: secrets: { active: false }')
+    deepStrictEqual(Object.keys(off).filter((p) => /src\/feature\/secrets\//.test(p)), [],
+      'lean: an inactive model still ships the secrets container')
+    const offclean = (files, label) => {
+      const cat = files['lean/src/SdkFeatures.lean']
+      ok(null != cat && !/SecretsFeature|"secrets"|#Secrets/.test(cat),
+        'lean: ' + label + ' still registers the secrets feature in SdkFeatures.lean')
+      const lk = files['lean/lakefile.toml']
+      ok(null != lk && !/Sekreto|SecretsFeature|secrets|moreLinkArgs/.test(lk),
+        'lean: ' + label + ' still declares secrets libs in lakefile.toml')
+      const m = files['lean/Makefile']
+      ok(null != m && !/^\tlake exe secrets$|^export LEAN_CC|#Secrets/m.test(m) &&
+        /^ffi: \$\(SECRETS_FFI\)$/m.test(m),
+        'lean: ' + label + ' still runs the secrets suite or carries ffi rules')
+    }
+    offclean(off, 'an inactive model')
+
+    // And the suite's shared consumer, whose model never mentions the
+    // feature: the same three files must be clean there too.
+    offclean(generated.files, 'a model without the feature')
+  })
 })

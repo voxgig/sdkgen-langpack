@@ -5,6 +5,11 @@ import {
   walk,
 } from '@voxgig/struct'
 
+import {
+  each,
+  targetFeatures,
+} from '@voxgig/sdkgen'
+
 
 function projectPath(suffix?: string): string {
   return Path.normalize(Path.join(__dirname, '../../..', suffix ?? ''))
@@ -120,8 +125,66 @@ function clean(o: any, dropDefaults?: boolean): any {
 }
 
 
+
+// THE SECRETS FEATURE'S SHAPE FOR THIS TARGET, read in one place.
+//
+// Package_lean (the lakefile) and Main_lean (the SdkFeatures/Makefile marker
+// fills and the Copy excludes) both need the same three answers - is the
+// feature in this SDK, which plugin definitions did the model select, and
+// therefore does the build bind libcurl - and two readings of the model
+// could disagree, which is how a lakefile links an object the Makefile never
+// compiled. The reading goes through targetFeatures, the one applicability
+// rule (helpers/applicability), so a target without `provides: sekreto`
+// never sees the feature at all.
+//
+// `def.lean` keys are qualified definitions (`Sekreto.hashicorp`), and the
+// import each needs is derived from the path's module tail
+// (`.../SekretoPlugins/Hashicorp.lean` -> `SekretoPlugins.Hashicorp`), so a
+// one-file-two-definitions entry (aws) yields one import line.
+function leanSecrets(model: any, target: any): {
+  active: boolean, imports: string[], defs: string[], ffi: boolean,
+} {
+  const feature = targetFeatures(model, target)
+  const secrets = feature.secrets
+
+  if (null == secrets) {
+    return { active: false, imports: [], defs: [], ffi: false }
+  }
+
+  const imports = new Set<string>()
+  const defs: string[] = []
+
+  each(secrets.plugin, (plugin: any) => {
+    // Filter on `active` HERE rather than trusting the feature object to
+    // arrive filtered (see Config_ts.pluginImports): the wrong reading
+    // emits an import for a module the plugin trim just deleted.
+    if (false === plugin.active || null == plugin.active) return
+
+    for (const [sym, one] of Object.entries(plugin.def?.lean || {})) {
+      const mod = String(one)
+        .replace(/^src\/feature\/secrets\/sekreto\/plugins\//, '')
+        .replace(/\.lean$/, '')
+        .replace(/\//g, '.')
+      imports.add(mod)
+      defs.push(sym)
+    }
+  })
+
+  return {
+    active: true,
+    imports: Array.from(imports).sort(),
+    defs: defs.sort(),
+    // A plugin group is what reaches the two externs (curl, the clock);
+    // the four built-in kinds reach neither, so the binding is gated on
+    // the DEFINITIONS, not on the feature.
+    ffi: 0 < defs.length,
+  }
+}
+
+
 export {
   clean,
+  leanSecrets,
   leanString,
   leanVarName,
   pkgName,

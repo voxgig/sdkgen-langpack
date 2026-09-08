@@ -86,9 +86,88 @@ def findSubject : SIO (Option (String × Value × Bool)) := do
           fallback := some (name, seed, false)
   pure fallback
 
+/-- Is `h` the credential `token`, under whatever prefix this API declares?
+    The template cannot know the prefix (`Bearer <token>` for an http/bearer
+    scheme, the bare token for an apiKey scheme), so the check is on the
+    credential. -/
+def credentialIs (h : Option String) (token : String) : Bool :=
+  match h with
+  | some s => s == token || s.endsWith (" " ++ token)
+  | none => false
+
+/-- The first entity with a `list` op whose points carry no path parameter:
+    a subject the pipeline can drive with an empty match. -/
+def findListEntity : SIO (Option String) := do
+  let config ← SdkJson.jsonRead SdkConfig.configJson
+  let ents ← gp config "entity"
+  for name in (← keysof ents) do
+    let e ← gp ents name
+    match (← gp (← gp e "op") "list") with
+    | .map _ =>
+      let mut plain := true
+      match (← gp (← gp (← gp e "op") "list") "points") with
+      | .list i =>
+        for pt in (← listItems i) do
+          if (← gpS pt "path").any (· == '{') then plain := false
+      | _ => pure ()
+      if plain then return some name
+    | _ => pure ()
+  return none
+
 def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
+    -- pipeline: the apikey option reaches the wire. REGRESSION PIN: runOp
+    -- built its headers with prepareHeaders and never called prepareAuth,
+    -- and curlFetch sent no header but Content-Type, so a live lean SDK
+    -- with an apikey set sent no credential at all. Driven through a LIVE
+    -- client over a counting transport (SdkRuntime.mkClientWith), so the
+    -- header asserted on is the one the wire would carry - and needs no
+    -- seed data, so it runs in every project.
+    (do
+      match (← findListEntity) with
+      | none => IO.println "skip - pipeline apikey: no entity with a parameterless list op"
+      | some ent =>
+        let mt ← emptyMap
+        let sent ← IO.mkRef 0
+        let seen ← IO.mkRef (none : Option String)
+        let stub : SdkFeature.Fetcher := fun _ _ f => do
+          sent.modify (· + 1)
+          match (← gp f "headers") with
+          | .map _ =>
+            match (← gp (← gp f "headers") "authorization") with
+            | .str a => seen.set (some a)
+            | _ => pure ()
+          | _ => pure ()
+          let resp ← newMap #[("status", .num 200.0), ("statusText", .str "OK"),
+                              ("body", ← emptyMap), ("headers", ← emptyMap)]
+          pure (resp, none)
+        let opts ← newMap #[("apikey", .str "WIREKEY01")]
+        let c ← SdkRuntime.mkClientWith opts SdkConfig.configJson stub
+        let _ ← SdkRuntime.opList c ent mt mt
+        check ((← sent.get) == 1) "pipeline: the live client reached the transport exactly once"
+        check (credentialIs (← seen.get) "WIREKEY01")
+          "pipeline: apikey reaches the wire as the authorization header"
+        -- and `auth: null` keeps it off, chain or no chain
+        let sent2 ← IO.mkRef 0
+        let seen2 ← IO.mkRef (none : Option String)
+        let stub2 : SdkFeature.Fetcher := fun _ _ f => do
+          sent2.modify (· + 1)
+          match (← gp f "headers") with
+          | .map _ =>
+            match (← gp (← gp f "headers") "authorization") with
+            | .str a => seen2.set (some a)
+            | _ => pure ()
+          | _ => pure ()
+          let resp ← newMap #[("status", .num 200.0), ("statusText", .str "OK"),
+                              ("body", ← emptyMap), ("headers", ← emptyMap)]
+          pure (resp, none)
+        let opts2 ← newMap #[("apikey", .str "WIREKEY01"), ("auth", .null)]
+        let c2 ← SdkRuntime.mkClientWith opts2 SdkConfig.configJson stub2
+        let _ ← SdkRuntime.opList c2 ent mt mt
+        check ((← sent2.get) == 1 && (← seen2.get).isNone)
+          "pipeline: auth null suppresses the credential on the wire")
+
     match (← findSubject) with
     | none => IO.println "skip - no entity with list op and seed data"
     | some (ent, seed, hasCreate) => do

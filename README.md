@@ -76,9 +76,27 @@ the suite's dart secrets test says so by name. It needs the first
 `@voxgig/sdkgen` release cut from sdkgen `main` at or after `26658608`; when
 that release exists, `engines.sdkgen` here should move to it.
 
-**Vendoring.** The 34 files were carried over verbatim from sdkgen, headers
-included. This repository has no vendor tool or manifest of its own yet, so a
-resync from upstream is a manual copy until it grows one.
+**Lean carries it too.** `lean` declares `provides: { sekreto: true }` and
+ships its own vendored sekreto and plugin ports under
+`.sdk/tm/lean/src/feature/secrets/{sekreto,plugin}` (38 files, `VENDORED:`
+headers, no import adaptation: each tree is a Lake `srcDir` root). The
+static feature catalog `src/SdkFeatures.lean` gains the feature through
+three marker slots that `Main_lean` fills only when the model activates it,
+and `lakefile.toml` gains the `Plugin`, `Sekreto`, `SekretoPlugins` and
+`SecretsFeature` libraries plus a `secrets` executable rooted at
+`test/feature/secrets/TSecrets.lean`. A plugin GROUP (vault, aws, ...)
+binds libcurl through two sdkgen-owned C stubs under
+`src/feature/secrets/ffi/`, built by `make ffi` and linked through a
+response file on the lakefile — so a plugin-bearing lean SDK is built and
+run through make (`make build`, `make test`, `make exe EXE=secrets`), not
+bare `lake exe`, which fails at link. Secrets on with no group, off, or
+absent: no libcurl, and the target's zero-dependency promise holds. It has
+the same sdkgen-release dependency as dart: the `def: lean:` maps are in
+sdkgen's core `secrets.aon`, after 4.9.0.
+
+**Vendoring.** The 34 dart and 38 lean files were carried over verbatim from
+sdkgen, headers included. This repository has no vendor tool or manifest of
+its own yet, so a resync from upstream is a manual copy until it grows one.
 
 ## Lean is deliberately different
 
