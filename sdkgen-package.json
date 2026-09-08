@@ -1,0 +1,22 @@
+{
+  "sdkgen": {
+    "package": 1
+  },
+  "name": "@voxgig/sdkgen-langpack",
+  "version": "1.0.0",
+  "engines": {
+    "sdkgen": ">=4.9.0"
+  },
+  "provides": {
+    "target": [
+      "dart",
+      "haskell",
+      "lean"
+    ]
+  },
+  "parity": {
+    "dart": "FULL",
+    "haskell": "MIRRORED",
+    "lean": "FULL"
+  }
+}
