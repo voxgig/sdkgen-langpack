@@ -1,0 +1,71 @@
+{
+  "name": "@voxgig/sdkgen-langpack",
+  "version": "1.0.0",
+  "description": "Additional language targets for the Voxgig SDK Generator: Dart, Haskell and Lean.",
+  "type": "commonjs",
+  "license": "MIT",
+  "keywords": [
+    "voxgig",
+    "sdkgen",
+    "sdkgen-package",
+    "dart",
+    "haskell",
+    "lean"
+  ],
+  "author": "Richard Rodger (http://richardrodger.com)",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/voxgig/sdkgen-langpack.git"
+  },
+  "files": [
+    ".sdk",
+    "sdkgen-package.json"
+  ],
+  "scripts": {
+    "check-cmp": "tsc -p tsconfig.json",
+    "check-package": "voxgig-sdkgen package check .",
+    "test": "npm run check-cmp && node --test test/*.test.js",
+    "build": "npm run check-cmp"
+  },
+  "_peer_comment": [
+    "A PACKAGED TARGET INHERITS SDKGEN'S PEERS AS ITS OWN. All three targets'",
+    "components import @voxgig/sdkgen, @voxgig/apidef and @voxgig/struct BY",
+    "NAME, which resolved silently while they lived in the bundled scaffold",
+    "beside sdkgen's own node_modules. Out here they have to be declared, or",
+    "the components fail to type-check for the author and fail to resolve for",
+    "anyone who installs this package without sdkgen's peers present.",
+    "",
+    "Peers rather than dependencies: a consumer necessarily has these already,",
+    "via sdkgen, and a second copy at a different version is the one outcome",
+    "worth preventing.",
+    "",
+    "VERIFIED AS REAL MODULE IMPORTS, not grepped. A generator's components",
+    "are mostly strings containing other languages' source, so a text search",
+    "cannot tell an import from a `require` line the component EMITS — that",
+    "is how the seneca-provider migration nearly declared @seneca/maintain a",
+    "peer. Each name here was traced to a top-level import statement:",
+    "@voxgig/struct to utility_{dart,haskell,lean}.ts and TestEntity_dart.ts.",
+    "",
+    "THE SDKGEN FLOOR IS THE OLDEST PUBLISHED VERSION THIS SUITE IS RUN",
+    "AGAINST, which is 4.9.0. Not the oldest that might work: a floor nobody",
+    "tests is the shape of haskell's old >=3.5.0, which accepted versions",
+    "where a target's components would install and then die at generation on",
+    "a missing export. 4.9.0 is also the first release carrying the test kit",
+    "this suite runs on."
+  ],
+  "peerDependencies": {
+    "@voxgig/apidef": ">=8.2.2",
+    "@voxgig/sdkgen": ">=4.9.0",
+    "@voxgig/struct": ">=0.2"
+  },
+  "devDependencies": {
+    "@voxgig/apidef": ">=8.2.2",
+    "@voxgig/sdkgen": ">=4.9.0",
+    "@voxgig/struct": ">=0.2",
+    "@types/node": ">=24",
+    "aontu": ">=0.52",
+    "memfs": "4.68.1",
+    "sucrase": "3.35.1",
+    "typescript": "7.0.2"
+  }
+}
