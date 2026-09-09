@@ -103,6 +103,10 @@ const Config = cmp(async function Config(props: any) {
             Line(`  '${f.name}': () => ${nom(f, 'Name')}Feature(),`)
           }),
 
+          '// #ImportPlugins': () => pluginImports(feature),
+
+          '// #FeaturePlugins': () => pluginDefs(feature),
+
           "'CONFIGJSON'": dartStringLiteral(configJson),
         }
       })
@@ -146,6 +150,10 @@ const Config = cmp(async function Config(props: any) {
           Line(`  '${f.name}': () => ${nom(f, 'Name')}Feature(),`)
         }),
 
+        '// #ImportPlugins': () => pluginImports(feature),
+
+        '// #FeaturePlugins': () => pluginDefs(feature),
+
         // Rendered from configDefinition's def, not from f.config, so the
         // literal carries the feature's `transport` role (station design
         // §8.4) beside its options and cannot drift from the data rep.
@@ -169,6 +177,70 @@ const Config = cmp(async function Config(props: any) {
     })
   })
 })
+
+
+// PLUGIN DEFINITION IMPORTS AND THE FEATURE_PLUGINS MAP (the dart peer of
+// Config_ts's pluginImports/pluginDefs and Config_go's featurePlugins).
+//
+// Upstream sekreto replaced its self-registration registry with
+// voxgig/plugin definitions: a provider kind the caller did not pass in via
+// `plugins: [...]` is unknown to that Sekreto. So Config imports each active
+// plugin's exported Definition BY NAME - the model's per-target `def` map,
+// a plain top-level `final Definition` in this port - and hands the list to
+// the feature through FEATURE_PLUGINS.
+//
+// The `def` map is declared in the model rather than derived from filenames
+// because one file may export several definitions (sekreto's aws.dart
+// exports awssecrets AND awsparams), which is exactly why the imports are
+// grouped by PATH here: two `show` clauses for one library would be two
+// imports of the same file.
+function pluginImports(feature: any) {
+  each(feature, (f: any) => {
+    // path -> [symbol, ...], so one import line serves a two-definition
+    // library.
+    const bypath: Record<string, string[]> = {}
+
+    each(f.plugin, (plugin: any) => {
+      // Filter on `active` HERE rather than trusting the feature object to
+      // arrive filtered. Whether a model path was read with `only_active`
+      // varies by call site, and getting it wrong in this direction emits
+      // an import for a file the plugin trim just deleted - which
+      // `dart analyze` fails the whole package on, not merely an SDK
+      // carrying too much. (Config_ts documents the same trap.)
+      if (false === plugin.active || null == plugin.active) return
+
+      for (const [sym, one] of Object.entries(plugin.def?.dart || {})) {
+        const path = String(one)
+          ; (bypath[path] = bypath[path] || []).push(sym)
+      }
+    })
+
+    for (const path of Object.keys(bypath).sort()) {
+      // The model's paths are target-root-relative (`lib/feature/...`) and
+      // Config.dart is itself in `lib/`, so the import spec is that path
+      // with the leading `lib/` dropped.
+      const spec = path.replace(/^lib\//, '')
+      const syms = Array.from(new Set(bypath[path])).sort()
+      Line(`import '${spec}' show ${syms.join(', ')};`)
+    }
+  })
+}
+
+
+// The FEATURE_PLUGINS entries: one line per feature that has any active
+// plugin definitions, listing the imported symbols.
+function pluginDefs(feature: any) {
+  each(feature, (f: any) => {
+    const syms: string[] = []
+    each(f.plugin, (plugin: any) => {
+      if (false === plugin.active || null == plugin.active) return
+      syms.push(...Object.keys(plugin.def?.dart || {}))
+    })
+    if (0 < syms.length) {
+      Line(`  '${f.name}': [${Array.from(new Set(syms)).sort().join(', ')}],`)
+    }
+  })
+}
 
 
 export {

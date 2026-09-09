@@ -267,3 +267,162 @@ describe('sdkgen-langpack', () => {
       'AGENTS.md needs revisiting')
   })
 })
+
+
+// THE DART SECRETS SEAM, and the two hazards only dart has.
+//
+// This test moved here from sdkgen's `generate.test.ts` with the dart target
+// — a target's coverage travels with the target. It gets its own staged
+// consumer because it is the only test in this file that needs the secrets
+// FEATURE installed, and installing it into the shared one would change
+// what every other test sees generated.
+//
+// An ACTIVE secrets model must emit the `show` imports and the
+// FEATURE_PLUGINS entries into lib/Config.dart, and the INACTIVE groups'
+// vendored files must stay out of the tree (Main_dart's pluginExcludes),
+// while the shared httpjson helper (in no group) ships regardless.
+//
+// FIRST DART HAZARD: the whole sekreto CORE lives at `sekreto/src/*.dart`,
+// upstream's layout. Main_dart's Copy excluded `/src\//` unanchored — for the
+// `tm/dart/src/feature/<name>/` copy-target dirs — and that pattern matched
+// the vendored core too, so the entire secrets library was dropped from the
+// package while the plugins beside it survived. `dart analyze` reported it as
+// undefined symbols in httpjson.dart, naming nothing that would lead you to
+// the Copy.
+//
+// SECOND DART HAZARD: test/main.dart is a HAND-LISTED suite entry — dart has
+// no `go test ./...` or pytest discovery — so the secrets suite must be
+// registered there or it ships and never runs, with the lane green.
+describe('sdkgen-langpack: dart secrets', () => {
+
+  let consumer
+  let active
+  let plain
+
+  before(async () => {
+    consumer = stageConsumer({ recordLog: false })
+    await consumer.addPackage(PKG)
+    // The feature model is sdkgen's, not this pack's: `def: dart` lives in
+    // the SHARED `model/feature/secrets.aon` beside every other language's,
+    // which is why this pack's manifest requires an sdkgen that carries it.
+    await consumer.add('feature', consumer.bundledRef('feature', 'secrets'))
+    consumer.compile()
+
+    active = (await generateInto(consumer, {
+      model: consumerModel(consumer.sdk,
+        'main: kit: feature: secrets: { active: true ' +
+        'plugin: { vault: active: true aws: active: true } }'),
+    })).files
+
+    plain = (await generateInto(consumer, {
+      model: consumerModel(consumer.sdk),
+    })).files
+  })
+
+  after(() => {
+    if (null != consumer) consumer.cleanup()
+  })
+
+
+  // Suffix match, so an assertion names the path a reader would recognise
+  // rather than the generated tree's `dart/` prefix.
+  function findFile(files, suffix) {
+    const hit = Object.keys(files).find((p) => p.endsWith(suffix))
+    return null == hit ? null : String(files[hit])
+  }
+
+
+  test('active secrets emits plugin defs and trims inactive groups', () => {
+    const config = findFile(active, 'lib/Config.dart')
+    ok(null != config, 'dart: no lib/Config.dart generated')
+
+    // The NAMED imports and the definitions list — the two emissions that
+    // can silently no-op while everything else stays green.
+    ok(/import 'feature\/secrets\/sekreto\/plugins\/hashicorp\.dart' show hashicorp;/
+      .test(config),
+      'dart: active vault group did not emit the hashicorp plugin import')
+    // ONE file, TWO definitions: aws.dart carries awssecrets and awsparams,
+    // so the imports are grouped by path or the library is imported twice.
+    ok(/import 'feature\/secrets\/sekreto\/plugins\/aws\.dart' show awsparams, awssecrets;/
+      .test(config),
+      'dart: the two aws definitions did not share one import')
+    ok(/'secrets': \[awsparams, awssecrets, boru, hashicorp\],/.test(config),
+      'dart: FEATURE_PLUGINS is missing the active definitions:\n' +
+      (config.match(/FEATURE_PLUGINS = <String, List<dynamic>>\{[^}]*\}/) ||
+        ['(no FEATURE_PLUGINS)'])[0])
+  })
+
+
+  test('the vendored sekreto core survives the Copy exclude', () => {
+    // Without this the tree still carries the plugins and Config still names
+    // them, so every assertion above passes on a package that does not
+    // compile.
+    for (const core of ['sekreto/src/sekreto.dart', 'sekreto/src/providers.dart',
+      'sekreto/src/support.dart', 'sekreto/src/spec.dart']) {
+      ok(null != findFile(active, 'lib/feature/secrets/' + core),
+        'dart: the vendored sekreto core file ' + core + ' was excluded from ' +
+        'the package — check Main_dart\'s `^src/` Copy exclude is ANCHORED')
+    }
+    // And the copy-target dirs that exclude is FOR are still gone.
+    ok(null == findFile(active, 'dart/src/feature/secrets/.gitkeep'),
+      'dart: the feature-add copy-target dir leaked into the package')
+  })
+
+
+  test('inactive plugin groups are trimmed, shared helpers are not', () => {
+    ok(null == findFile(active, 'sekreto/plugins/gcpsecrets.dart'),
+      'dart: the inactive cloud group still ships gcpsecrets')
+    ok(null == findFile(active, 'sekreto/plugins/secretspec.dart'),
+      'dart: the inactive secretspec group still ships its CLI plugin')
+    ok(null != findFile(active, 'sekreto/plugins/hashicorp.dart'),
+      'dart: the ACTIVE vault group lost hashicorp')
+    ok(null != findFile(active, 'sekreto/plugins/httpjson.dart'),
+      'dart: the shared httpjson helper must ship with the feature core')
+    // crypto.dart is THIS PORT'S SHA-256/HMAC and sigv4.dart is its only
+    // caller, so it belongs to the aws group and to no other. Trimming it
+    // away from an active aws group is nine `dart analyze` errors.
+    ok(null != findFile(active, 'sekreto/plugins/sigv4.dart'),
+      'dart: the ACTIVE aws group lost sigv4')
+    ok(null != findFile(active, 'sekreto/plugins/crypto.dart'),
+      'dart: the ACTIVE aws group lost crypto, which sigv4 compiles against')
+  })
+
+
+  test('the secrets suite is registered in the hand-listed test entry', () => {
+    const main = findFile(active, 'test/main.dart')
+    ok(null != main, 'dart: no test/main.dart generated')
+    ok(/import 'feature\/secrets\/secrets_test\.dart' as secrets_test;/.test(main),
+      'dart: the secrets suite is not imported by test/main.dart')
+    ok(/secrets_test\.tests\(\);/.test(main),
+      'dart: the secrets suite is imported but never RUN')
+  })
+
+
+  // The inactive-model baseline: no secrets machinery anywhere the feature
+  // did not put it.
+  //
+  // The SOURCE trim is not asserted here: this harness copies the whole
+  // staged tm/ tree, while a real project's `target add` drops an undeclared
+  // feature before generate ever runs.
+  test('an inactive secrets model emits no secrets machinery', () => {
+    const config = findFile(plain, 'lib/Config.dart')
+    ok(null != config, 'dart: no lib/Config.dart generated')
+    ok(!/sekreto\/plugins/.test(config),
+      'dart: an inactive model still emitted plugin imports')
+    ok(!/import 'feature\/secrets\/SecretsFeature\.dart';/.test(config),
+      'dart: an inactive model still imported the secrets feature')
+    ok(/FEATURE_PLUGINS = <String, List<dynamic>>\{\s*\r?\n\};/.test(config),
+      'dart: an inactive model must emit an EMPTY FEATURE_PLUGINS map')
+
+    const main = findFile(plain, 'test/main.dart')
+    ok(null != main, 'dart: no test/main.dart generated')
+    ok(!/secrets_test/.test(main),
+      'dart: an inactive model still registers the secrets suite, which is ' +
+      'an import of a file `target add` removed')
+
+    const sdk = findFile(plain, 'lib/DemoSDK.dart')
+    ok(null != sdk, 'dart: no SDK entry generated')
+    ok(!/dynamic secrets\(\)/.test(sdk),
+      'dart: an inactive model still emitted the secrets() accessor')
+  })
+})
