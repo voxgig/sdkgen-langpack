@@ -255,10 +255,18 @@ class SecretsFeature extends BaseFeature {
   String get credential => _cred;
 
   // Resolve the secret. Concurrent operations share the one IN-FLIGHT
-  // future; a settled SUCCESS is kept only when caching is on (`cache:
-  // false` means every resolve asks the chain again). A FAILURE is always
-  // cleared, so a transient vault outage never poisons the client
-  // permanently - the next operation asks the chain again.
+  // future; a settled HIT is kept only when caching is on (`cache: false`
+  // means every resolve asks the chain again). A FAILURE is always cleared,
+  // so a transient vault outage never poisons the client permanently - the
+  // next operation asks the chain again.
+  //
+  // A MISS is cleared too, however caching is set. That rule is sekreto's,
+  // not this feature's: `A miss is never cached: the next read asks again`,
+  // in sekreto's own source (sekreto/src/sekreto.dart). Keeping a settled
+  // miss here would override that from the layer above, and a secret
+  // provisioned after startup - a mounted file, a policy granted a minute
+  // late - would never be picked up for the life of the client. `cache` is
+  // about caching a HIT; it was never a promise to keep saying no.
   Future<void> resolve() {
     final err = _initerr;
     if (null != err) {
@@ -270,8 +278,8 @@ class SecretsFeature extends BaseFeature {
       return current;
     }
 
-    final inflight = _resolveonce().then((_) {
-      if (!_cache) {
+    final inflight = _resolveonce().then((bool hit) {
+      if (!_cache || !hit) {
         _resolving = null;
       }
     }, onError: (Object e) {
@@ -284,10 +292,13 @@ class SecretsFeature extends BaseFeature {
     return inflight;
   }
 
-  Future<void> _resolveonce() async {
+  // Resolve once, reporting whether a credential came out of it. That bool
+  // is the whole of what resolve() needs to tell a cacheable HIT from a miss
+  // it must not keep.
+  Future<bool> _resolveonce() async {
     final sek = _sekreto;
     if (null == sek) {
-      return;
+      return false;
     }
 
     // `tryget` is FutureOr: a chain of purely local stores answers without
@@ -303,7 +314,7 @@ class SecretsFeature extends BaseFeature {
       // lost here - it seats FIRST in the chain as a memory provider, so
       // the chain HITS while one is set and this branch writes it back.)
       _cred = found ?? '';
-      return;
+      return null != found;
     }
 
     // Exchanging: what the chain resolved is the REFRESH token, kept for
@@ -321,10 +332,23 @@ class SecretsFeature extends BaseFeature {
       // Spend it: if it is stale the API answers with an expiry status and
       // the transport wrapper buys another, which is the same path expiry
       // takes anyway.
-      return;
+      return true;
+    }
+
+    // `auth: null` is the documented way to send NO credential, and a
+    // purchase is a credential-bearing call: the refresh token goes to the
+    // token endpoint in the request body. _withRefresh honours suppression
+    // for the RETRY, but it runs after this - by then the refresh token has
+    // already left the process, and no later check can call it back. The
+    // suppression has to be honoured here, before the first purchase, or it
+    // only ever half-held.
+    if (null == _rawauth()) {
+      return false;
     }
 
     _cred = await _buy();
+
+    return true;
   }
 
   // The transport wrapper: the ONE seam every wire path crosses.

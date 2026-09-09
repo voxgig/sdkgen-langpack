@@ -696,6 +696,40 @@ void tests() {
     });
 
 
+    // A MISS IS NOT A CACHEABLE ANSWER - sekreto's own rule, which this
+    // feature used to override from the layer above.
+    //
+    // DEFAULT caching here, which is the whole point: `cache: true` is
+    // about holding a HIT (the test above pins that half), and keeping the
+    // settled future after a miss meant the chain was never asked again for
+    // the life of the client. A secret provisioned after startup (a mounted
+    // file, a vault policy granted a minute late) was invisible forever,
+    // and the only workaround was giving up hit caching entirely.
+    test('cache true re-asks after a MISS, so a late secret is picked up',
+        (t) async {
+      final wire = Wire();
+      final late = LateProvider();
+      final sdk = rawSdk(wire, [late]);
+
+      await sdk.direct(<String, dynamic>{'path': '/one'});
+      equal(null, wire.calls[0]['auth'],
+          'the chain has nothing yet, so no credential should go out');
+
+      final asked = late.asked;
+      ok(0 < asked, 'the chain was never asked');
+
+      // The secret is provisioned while the client is live.
+      late.present = true;
+
+      await sdk.direct(<String, dynamic>{'path': '/two'});
+
+      ok(asked < late.asked,
+          'the MISS was cached: a secret that appears later can never be '
+          'picked up');
+      credentialIs(wire.calls[1]['auth'], 'LATEKEY01');
+    });
+
+
     test('cache false asks the chain on every request', (t) async {
       // `cache: false` is documented as "every resolve asks the chain
       // again". Caching the settled future made that a lie.
@@ -1001,6 +1035,14 @@ void tests() {
       equal(1, wire.api().length, 'a suppressed request must not be retried');
       equal(null, wire.api()[0]['auth'],
           'no credential may be sent when auth is suppressed');
+
+      // AND NO PURCHASE. resolve() runs before _withRefresh's suppression
+      // check, so the refresh token used to go to the token endpoint in a
+      // request body even here. Stopping the retry does not unsend it, and
+      // only the token endpoint can see this.
+      equal(0, wire.token().length,
+          'auth null suppressed the credential but the refresh token was '
+          'still POSTed to the exchange endpoint');
     });
 
 
@@ -1038,6 +1080,22 @@ void tests() {
 
 
 // A store whose secret is REVOKED partway through the run.
+// Absent until `present` is set, then answers: a secret provisioned while
+// the client is already live.
+class LateProvider extends Provider {
+  bool present = false;
+  int asked = 0;
+
+  @override
+  FutureOr<String?> lookup(String _name) {
+    asked++;
+    return present ? 'LATEKEY01' : null;
+  }
+
+  @override
+  String describe() => 'late:test';
+}
+
 class RetractingProvider extends Provider {
   bool revoked = false;
 
