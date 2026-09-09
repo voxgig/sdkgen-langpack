@@ -1,0 +1,74 @@
+{
+ "note": [
+  "The language pack's vendoring route table: which upstream files, from",
+  "which repo at the shared tag, land where in this pack's scaffold — and",
+  "how they are adapted on the way in. Hand-maintained.",
+  "`node build/vendor.js` executes it and writes test/vendored.json (the",
+  "manifest the guard reads); --check verifies without writing.",
+  "",
+  "THIS ROOT EXISTS BECAUSE THE PACK'S SCAFFOLD IS OUTSIDE SDKGEN'S.",
+  "sdkgen's own ts/vendor/routes.json records dart, haskell and lean as",
+  "EXCLUDED, saying they need their own route root in this repository. This",
+  "is it. Without one, a pack's vendored files are committed content with",
+  "nothing verifying they still match upstream — which is what they were",
+  "between the pack's creation and this table.",
+  "",
+  "`version` is HAND-SET per route: the port's own declared version at the",
+  "tag where it declares one, the tag string where it declares none.",
+  "",
+  "haskell's omni port is what makes the target FULL tier: driving the",
+  "shared corpus needs the shared runner, and every FULL target has it."
+ ],
+ "tag": "sdk-20260908-1556-0",
+ "repo": {
+  "omni": {
+   "url": "https://github.com/voxgig/omni",
+   "local": "~/Projects/voxgig/omni"
+  }
+ },
+ "lang": {
+  "dart": { "comment": "//" },
+  "haskell": { "comment": "--" },
+  "lean": { "comment": "--" }
+ },
+ "route": [
+  {
+   "lib": "omni",
+   "port": "dart",
+   "lang": "dart",
+   "version": "sdk-20260908-1556-0",
+   "dir": [
+    "tm/dart/test/vendor/omni"
+   ],
+   "file": {
+    "dart/lib/omni.dart": "tm/dart/test/vendor/omni/omni.dart",
+    "dart/lib/runner.dart": "tm/dart/test/vendor/omni/runner.dart",
+    "dart/lib/util.dart": "tm/dart/test/vendor/omni/util.dart"
+   }
+  },
+  {
+   "lib": "omni",
+   "port": "haskell",
+   "lang": "haskell",
+   "version": "sdk-20260908-1556-0",
+   "dir": [
+    "tm/haskell/test/vendor/omni"
+   ],
+   "file": {
+    "haskell/src/Omni.hs": "tm/haskell/test/vendor/omni/Omni.hs"
+   }
+  },
+  {
+   "lib": "omni",
+   "port": "lean",
+   "lang": "lean",
+   "version": "sdk-20260908-1556-0",
+   "dir": [
+    "tm/lean/test/vendor/omni"
+   ],
+   "file": {
+    "lean/Omni.lean": "tm/lean/test/vendor/omni/Omni.lean"
+   }
+  }
+ ]
+}

@@ -333,7 +333,15 @@ prepareMethodUtil ctx = do
       op <- readIORef (cOp ctx)
       pure $ case opName op of
         "create" -> "POST"; "update" -> "PUT"; "load" -> "GET"
-        "list" -> "GET"; "remove" -> "DELETE"; "patch" -> "PATCH"; _ -> "GET"
+        "list" -> "GET"; "remove" -> "DELETE"; "patch" -> "PATCH"
+        -- NO CATCH-ALL GET. The ts reference returns methodMap[key], which is
+        -- undefined for an op the map does not name — the request is then
+        -- rejected rather than silently issued. A `_ -> "GET"` here turned
+        -- every unrecognised op into a GET, which is both a divergence from
+        -- the corpus (which expects no method for opname "bad") and the more
+        -- dangerous of the two behaviours: a mistyped or unsupported op
+        -- quietly fetched. Found by the primary corpus on its first run.
+        _ -> ""
 
 prepareHeadersUtil :: Context -> IO Value
 prepareHeadersUtil ctx = do
@@ -1066,7 +1074,7 @@ fetcherUtil ctx fullurl fetchdef = do
 
 optSpecValue :: IO Value
 optSpecValue = do
-  auth <- jo [("prefix", VStr "")]
+  auth <- jo [("prefix", VStr ""), ("basic", VBool False)]
   hdrs <- jo [("`$CHILD`", VStr "`$STRING`")]
   -- OpenAPI server-variable defaults, carried by the generated config whenever
   -- the spec's server URL is templated. Accepted here so validation does not
