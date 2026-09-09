@@ -43,6 +43,170 @@
      "upstream": "lean/Omni.lean"
     }
    }
+  },
+  "plugin/dart": {
+   "repo": "https://github.com/voxgig/plugin",
+   "commit": "48392f5e2b6d1434ee9b1a4a9a11f4480aaeb46a",
+   "version": "sdk-20260908-1556-0",
+   "tag": "sdk-20260908-1556-0",
+   "file": {
+    "tm/dart/lib/feature/secrets/plugin/capability.dart": {
+     "sha256": "f07832dd78100639908a14f05e53519acb668d6073b1483c38c9996ce24cce93",
+     "upstream": "dart/lib/capability.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/catalog.dart": {
+     "sha256": "816db82925933ee690f49a980b28cef9c4f1764a5a13019f2b463efb3fd42536",
+     "upstream": "dart/lib/catalog.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/config.dart": {
+     "sha256": "e23b01a9d1b5d256eeaa51b81c52bed31ed35e05753098487be467560288dee2",
+     "upstream": "dart/lib/config.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/depend.dart": {
+     "sha256": "848bb10da70c581867fe045175e8ca05dc260787c46859a8d7374de324ac0521",
+     "upstream": "dart/lib/depend.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/env.dart": {
+     "sha256": "7d38ccf60b9971da5c385f4ae3abcbe4f2efe543081b10ac728bec324d179368",
+     "upstream": "dart/lib/env.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/export.dart": {
+     "sha256": "0f5f3a51e9695a0a3c393b6b16345db6f6192cbe65f2070ce44c1161d12316fa",
+     "upstream": "dart/lib/export.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/graph.dart": {
+     "sha256": "2b7751b688913541a253e2ed2fc8ea2884423439c12c62dbfc4d5cc7ee0cf1bb",
+     "upstream": "dart/lib/graph.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/host.dart": {
+     "sha256": "0e0190c7c033dc67e38b861dbe8cfca3a8d746391898c7f39a07b775b08e78d0",
+     "upstream": "dart/lib/host.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/order.dart": {
+     "sha256": "920c7cae603e6fb413977f13e45bc69186db5167ea4265f9b236560aee38ffff",
+     "upstream": "dart/lib/order.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/plugin.dart": {
+     "sha256": "503682ce87de9b22226193add98bbb02dd057a539e7d2682a492567511061e69",
+     "upstream": "dart/lib/plugin.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/point.dart": {
+     "sha256": "5d5f9a56edcba838cd3b631accd6492f28f10374d1615b5c62ae776e4a9a4d12",
+     "upstream": "dart/lib/point.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/ref.dart": {
+     "sha256": "80c6cb6765713b77188baa8b502207311b9a150d693097a32a673d671071841f",
+     "upstream": "dart/lib/ref.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/resolve.dart": {
+     "sha256": "2486c96a91192bd51ac1959194cd5b1080dc649f89d10829d61192b651dc83a9",
+     "upstream": "dart/lib/resolve.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/types.dart": {
+     "sha256": "9b9b768a7c54087f9c283d28532f94aa0d05a8b67a94b724ffa59ee8b0c32f7c",
+     "upstream": "dart/lib/types.dart"
+    },
+    "tm/dart/lib/feature/secrets/plugin/version.dart": {
+     "sha256": "251f8a73d5f1c29a6e804971c43d6138b69f66e66b1ab5ae7f3839f966bfc083",
+     "upstream": "dart/lib/version.dart"
+    }
+   }
+  },
+  "sekreto/dart": {
+   "repo": "https://github.com/voxgig/sekreto",
+   "commit": "1267ee2e5f49566bc92695bc9eb3a60ef4924998",
+   "version": "sdk-20260908-1556-0",
+   "tag": "sdk-20260908-1556-0",
+   "file": {
+    "tm/dart/lib/feature/secrets/sekreto/plugins/aws.dart": {
+     "sha256": "3987f3c1ecc7b5dcaec8eac4ec05f7816806cbdef27124d04469d99337395280",
+     "upstream": "dart/plugins/aws.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/plugins/azuresecrets.dart": {
+     "sha256": "bbec34f6d1afb9743381f6474a6a3eaef135b0827cc33fbdfe15234b405dced4",
+     "upstream": "dart/plugins/azuresecrets.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/plugins/boru.dart": {
+     "sha256": "a2cb719027626de6a9b8dbfdaae81b5e705c6bf043c80459541d97c979accacf",
+     "upstream": "dart/plugins/boru.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/plugins/crypto.dart": {
+     "sha256": "7c293eb217bdd81053ccb91be89ba7044768fb330222e8da7dd443c3e4d62e7c",
+     "upstream": "dart/plugins/crypto.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/plugins/doppler.dart": {
+     "sha256": "356fa9cd92fe43733789a505580db5b0357b0383e7461222ee6d54c72845ba8f",
+     "upstream": "dart/plugins/doppler.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/plugins/gcpsecrets.dart": {
+     "sha256": "fee86d4b0cf7ddecc0fff6d5173d80fb6777fe0ce64a2faf08ffe93ec2adbd81",
+     "upstream": "dart/plugins/gcpsecrets.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/plugins/hashicorp.dart": {
+     "sha256": "5cde86443c068fab3b8bea3eaf3893e6001157377d72e5ad8f8df1c9b689605e",
+     "upstream": "dart/plugins/hashicorp.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/plugins/httpjson.dart": {
+     "sha256": "7fd25623bb04fe6f9927f5aa32e0d88b690388af705c59c1a32b2b9f0bfef262",
+     "upstream": "dart/plugins/httpjson.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/plugins/infisical.dart": {
+     "sha256": "9964271b9730f49d2683fbb075db773247776d363297ac0a1ab2b195042f0900",
+     "upstream": "dart/plugins/infisical.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/plugins/onepassword.dart": {
+     "sha256": "55364e400262e102af834d0c88c02204e8c930b6cda8000eff02f0f3ea6af91d",
+     "upstream": "dart/plugins/onepassword.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/plugins/secretspec.dart": {
+     "sha256": "9424c23c072a09528e4e47eee9d833aaa5e9ea7c008cb1b85d3893834bb58cfe",
+     "upstream": "dart/plugins/secretspec.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/plugins/sigv4.dart": {
+     "sha256": "82df03f049f447e68839f2dda137db5e201ad94afe861f7a5bd9919e95737691",
+     "upstream": "dart/plugins/sigv4.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/src/addr.dart": {
+     "sha256": "cccb3c457d3fb1ee92b6d8544dfc4a9e9e6c61c7ac2966011ee0ea3868f917fd",
+     "upstream": "dart/src/addr.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/src/json.dart": {
+     "sha256": "7aac6da2415901cc91d3772200d5d01e9db6a4174a33ca95035f2d4b66f01216",
+     "upstream": "dart/src/json.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/src/provider.dart": {
+     "sha256": "f5bbe79b1ef2b8a9ad62a080a5978ab9ab29a661ffcbc570cb7234c959779e94",
+     "upstream": "dart/src/provider.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/src/providers.dart": {
+     "sha256": "75f5f9ea30613775f1f1c352f1f5dc25f2647e4fee4c6679c139f0fb19230986",
+     "upstream": "dart/src/providers.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/src/sekreto.dart": {
+     "sha256": "f6adf9c9b3fc4ce1625bcdd147c55119f6af0ada81405ab0e100cc784a4db389",
+     "upstream": "dart/src/sekreto.dart",
+     "adapt": [
+      {
+       "from": "'package:voxgig_plugin/plugin.dart'",
+       "to": "'../../plugin/plugin.dart'"
+      }
+     ]
+    },
+    "tm/dart/lib/feature/secrets/sekreto/src/spec.dart": {
+     "sha256": "34915ff2323ae056d775245e9e3778e68c91e19f66233aeb507c0486e2638623",
+     "upstream": "dart/src/spec.dart"
+    },
+    "tm/dart/lib/feature/secrets/sekreto/src/support.dart": {
+     "sha256": "a29b4df73fd47677c937412def378dc329bf494defa3c2e8b3e18fcc8a5996bc",
+     "upstream": "dart/src/support.dart",
+     "adapt": [
+      {
+       "from": "'package:voxgig_plugin/plugin.dart'",
+       "to": "'../../plugin/plugin.dart'"
+      }
+     ]
+    }
+   }
   }
  },
  "tag": "sdk-20260908-1556-0",

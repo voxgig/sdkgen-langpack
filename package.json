@@ -55,12 +55,12 @@
   ],
   "peerDependencies": {
     "@voxgig/apidef": ">=8.2.2",
-    "@voxgig/sdkgen": ">=4.9.0",
+    "@voxgig/sdkgen": ">=4.10.0",
     "@voxgig/struct": ">=0.2"
   },
   "devDependencies": {
     "@voxgig/apidef": ">=8.2.2",
-    "@voxgig/sdkgen": ">=4.9.0",
+    "@voxgig/sdkgen": ">=4.10.0",
     "@voxgig/struct": ">=0.2",
     "@types/node": ">=24",
     "aontu": ">=0.52",

@@ -17,13 +17,27 @@
   "tag where it declares one, the tag string where it declares none.",
   "",
   "haskell's omni port is what makes the target FULL tier: driving the",
-  "shared corpus needs the shared runner, and every FULL target has it."
+  "shared corpus needs the shared runner, and every FULL target has it.",
+  "",
+  "dart's plugin and sekreto ports arrived with secrets tranche B, which",
+  "landed in sdkgen AFTER this pack forked and was stranded by the",
+  "migration: the trees were removed from sdkgen (correctly — dart lives",
+  "here) and never added here. Recovered at the same tag, through this",
+  "table rather than by hand."
  ],
  "tag": "sdk-20260908-1556-0",
  "repo": {
   "omni": {
    "url": "https://github.com/voxgig/omni",
    "local": "~/Projects/voxgig/omni"
+  },
+  "plugin": {
+   "url": "https://github.com/voxgig/plugin",
+   "local": "~/Projects/voxgig/plugin"
+  },
+  "sekreto": {
+   "url": "https://github.com/voxgig/sekreto",
+   "local": "~/Projects/voxgig/sekreto"
   }
  },
  "lang": {
@@ -69,6 +83,71 @@
    "file": {
     "lean/Omni.lean": "tm/lean/test/vendor/omni/Omni.lean"
    }
+  },
+  {
+   "lib": "plugin",
+   "port": "dart",
+   "lang": "dart",
+   "version": "sdk-20260908-1556-0",
+   "dir": [
+    "tm/dart/lib/feature/secrets/plugin"
+   ],
+   "file": {
+    "dart/lib/plugin.dart": "tm/dart/lib/feature/secrets/plugin/plugin.dart",
+    "dart/lib/types.dart": "tm/dart/lib/feature/secrets/plugin/types.dart",
+    "dart/lib/ref.dart": "tm/dart/lib/feature/secrets/plugin/ref.dart",
+    "dart/lib/version.dart": "tm/dart/lib/feature/secrets/plugin/version.dart",
+    "dart/lib/capability.dart": "tm/dart/lib/feature/secrets/plugin/capability.dart",
+    "dart/lib/resolve.dart": "tm/dart/lib/feature/secrets/plugin/resolve.dart",
+    "dart/lib/export.dart": "tm/dart/lib/feature/secrets/plugin/export.dart",
+    "dart/lib/order.dart": "tm/dart/lib/feature/secrets/plugin/order.dart",
+    "dart/lib/point.dart": "tm/dart/lib/feature/secrets/plugin/point.dart",
+    "dart/lib/config.dart": "tm/dart/lib/feature/secrets/plugin/config.dart",
+    "dart/lib/env.dart": "tm/dart/lib/feature/secrets/plugin/env.dart",
+    "dart/lib/graph.dart": "tm/dart/lib/feature/secrets/plugin/graph.dart",
+    "dart/lib/depend.dart": "tm/dart/lib/feature/secrets/plugin/depend.dart",
+    "dart/lib/catalog.dart": "tm/dart/lib/feature/secrets/plugin/catalog.dart",
+    "dart/lib/host.dart": "tm/dart/lib/feature/secrets/plugin/host.dart"
+   }
+  },
+  {
+   "lib": "sekreto",
+   "port": "dart",
+   "lang": "dart",
+   "version": "sdk-20260908-1556-0",
+   "dir": [
+    "tm/dart/lib/feature/secrets/sekreto",
+    "tm/dart/lib/feature/secrets/sekreto/src",
+    "tm/dart/lib/feature/secrets/sekreto/plugins"
+   ],
+   "file": {
+    "dart/src/sekreto.dart": "tm/dart/lib/feature/secrets/sekreto/src/sekreto.dart",
+    "dart/src/provider.dart": "tm/dart/lib/feature/secrets/sekreto/src/provider.dart",
+    "dart/src/providers.dart": "tm/dart/lib/feature/secrets/sekreto/src/providers.dart",
+    "dart/src/spec.dart": "tm/dart/lib/feature/secrets/sekreto/src/spec.dart",
+    "dart/src/support.dart": "tm/dart/lib/feature/secrets/sekreto/src/support.dart",
+    "dart/src/addr.dart": "tm/dart/lib/feature/secrets/sekreto/src/addr.dart",
+    "dart/src/json.dart": "tm/dart/lib/feature/secrets/sekreto/src/json.dart",
+    "dart/plugins/httpjson.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/httpjson.dart",
+    "dart/plugins/hashicorp.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/hashicorp.dart",
+    "dart/plugins/boru.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/boru.dart",
+    "dart/plugins/gcpsecrets.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/gcpsecrets.dart",
+    "dart/plugins/azuresecrets.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/azuresecrets.dart",
+    "dart/plugins/onepassword.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/onepassword.dart",
+    "dart/plugins/doppler.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/doppler.dart",
+    "dart/plugins/infisical.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/infisical.dart",
+    "dart/plugins/secretspec.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/secretspec.dart",
+    "dart/plugins/aws.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/aws.dart",
+    "dart/plugins/sigv4.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/sigv4.dart",
+    "dart/plugins/crypto.dart": "tm/dart/lib/feature/secrets/sekreto/plugins/crypto.dart"
+   },
+   "adapt": [
+    {
+     "match": "sekreto/src/(sekreto|support)\\.dart$",
+     "from": "'package:voxgig_plugin/plugin.dart'",
+     "to": "'../../plugin/plugin.dart'"
+    }
+   ]
   }
  ]
 }
