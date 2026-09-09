@@ -16,7 +16,7 @@
   },
   "parity": {
     "dart": "FULL",
-    "haskell": "MIRRORED",
+    "haskell": "FULL",
     "lean": "FULL"
   }
 }

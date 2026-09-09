@@ -37,8 +37,17 @@ Declared per target in `sdkgen-package.json`:
 | target | tier | what that means |
 |---|---|---|
 | `dart` | `FULL` | drives the shared corpus for every section |
-| `haskell` | `MIRRORED` | has a primary-utility suite, but mirrors the corpus by hand rather than executing it, so cases can drift |
+| `haskell` | `FULL` | drives the shared corpus for every section |
 | `lean` | `FULL` | drives the shared corpus for every section |
+
+`haskell` was `MIRRORED` until it gained an omni port: driving the shared
+corpus needs the shared runner, and hand-written cases cannot fail when the
+reference changes. Its first corpus run found two real defects — see
+`.sdk/tm/haskell/test/TPrimaryCorpus.hs`.
+
+A tier here is checked, not just declared: `test/parity.test.js` reads the
+`parity` map and verifies each claim against what the target's suite actually
+does.
 
 **A caveat that belongs with those two FULL tiers.** The shared corpus is
 materialised into each project as `.sdk/test/test.json`, so a real generated

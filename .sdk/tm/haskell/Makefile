@@ -11,12 +11,12 @@ BUILDDIR := .hsbuild
 # reads the shared spec at ../.sdk/test/test.json (run from this directory).
 test:
 	@mkdir -p $(BUILDDIR)
-	ghc -O0 -isrc -itest -outputdir $(BUILDDIR) -o $(BUILDDIR)/runner test/Runner.hs
+	ghc -O0 -isrc -itest -itest/vendor/omni -outputdir $(BUILDDIR) -o $(BUILDDIR)/runner test/Runner.hs
 	$(BUILDDIR)/runner
 
 # Type-check only (a clean compile = pass).
 build:
-	ghc -fno-code -isrc -itest test/Runner.hs
+	ghc -fno-code -isrc -itest -itest/vendor/omni test/Runner.hs
 
 clean:
 	rm -rf $(BUILDDIR) src/*.hi src/*.o test/*.hi test/*.o

@@ -2,3 +2,7 @@ node_modules/
 package-lock.json
 *.tsbuildinfo
 .jostraca/
+
+# The vendoring runner clones upstream repos here to read content at the
+# shared tag. Rebuilt on demand; never part of the pack.
+.cache/
