@@ -22,6 +22,7 @@ const { ok, strictEqual, deepStrictEqual } = require('node:assert')
 
 const Fs = require('node:fs')
 const Path = require('node:path')
+const { execFileSync } = require('node:child_process')
 
 const { Aontu } = require('aontu')
 
@@ -29,6 +30,20 @@ const { stageConsumer, generateInto } = require('@voxgig/sdkgen/testkit')
 
 
 const PKG = Path.resolve(__dirname, '..')
+
+// Run the same npm build against the components installed in the consumer.
+function compile(consumer) {
+  const config = Path.join(consumer.root, 'tsconfig.json')
+  const outdir = Path.join(consumer.sdk, 'dist', 'cmp')
+  Fs.copyFileSync(Path.join(PKG, 'tsconfig.json'), config)
+  execFileSync(process.execPath, [process.env.npm_execpath,
+    'run', 'build', '--', '--project', config, '--outDir', outdir,
+  ], { cwd: PKG, stdio: 'inherit' })
+  Fs.cpSync(Path.join(consumer.sdk, 'src', 'cmp'), outdir, {
+    recursive: true,
+    filter: (path) => !path.endsWith('.ts') && Path.basename(path) !== 'fragment',
+  })
+}
 
 // The targets this package provides, read from the manifest rather than
 // restated. A target added to the pack without a line here would otherwise
@@ -121,7 +136,7 @@ describe('sdkgen-langpack', () => {
   before(async () => {
     consumer = stageConsumer({ recordLog: true })
     await consumer.addPackage(PKG)
-    consumer.compile()
+    compile(consumer)
 
     // Generated ONCE and shared: generation is the slow part, and every test
     // below asks a different question of the same output.
@@ -306,7 +321,7 @@ describe('sdkgen-langpack: dart secrets', () => {
     // the SHARED `model/feature/secrets.aon` beside every other language's,
     // which is why this pack's manifest requires an sdkgen that carries it.
     await consumer.add('feature', consumer.bundledRef('feature', 'secrets'))
-    consumer.compile()
+    compile(consumer)
 
     active = (await generateInto(consumer, {
       model: consumerModel(consumer.sdk,

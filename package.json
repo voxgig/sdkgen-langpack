@@ -1,6 +1,6 @@
 {
   "name": "@voxgig/sdkgen-langpack",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Additional language targets for the Voxgig SDK Generator: Dart, Haskell and Lean.",
   "type": "commonjs",
   "license": "MIT",
@@ -22,10 +22,18 @@
     "sdkgen-package.json"
   ],
   "scripts": {
-    "check-cmp": "tsc -p tsconfig.json",
-    "check-package": "voxgig-sdkgen package check .",
-    "test": "npm run check-cmp && node --test test/*.test.js",
-    "build": "npm run check-cmp"
+    "test": "node --enable-source-maps --test test/*.test.js",
+    "test-some": "node --enable-source-maps --test-name-pattern=\"$npm_config_pattern\" --test test/*.test.js",
+    "watch": "tsc -w",
+    "build": "tsc",
+    "clean": "rm -rf node_modules yarn.lock package-lock.json .build",
+    "reset": "npm run clean && npm i && npm run build && npm test",
+    "repo-tag": "REPO_VERSION=`node -e \"console.log(require('./package').version)\"` && echo TAG: v$REPO_VERSION && git commit -a -m v$REPO_VERSION && git push && git tag v$REPO_VERSION && git push --tags;",
+    "repo-publish": "npm run clean && npm i && npm run repo-publish-quick",
+    "repo-publish-quick": "npm run build && npm run test && npm run repo-tag && npm publish --registry https://registry.npmjs.org --access=public",
+    "resset": "npm run reset",
+    "check-cmp": "tsc -p tsconfig.json --noEmit",
+    "check-package": "voxgig-sdkgen package check ."
   },
   "_peer_comment": [
     "A PACKAGED TARGET INHERITS SDKGEN'S PEERS AS ITS OWN. All three targets'",
@@ -65,7 +73,6 @@
     "@types/node": ">=24",
     "aontu": ">=0.52",
     "memfs": "4.68.1",
-    "sucrase": "3.35.1",
     "typescript": "7.0.2"
   }
 }
