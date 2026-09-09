@@ -1,6 +1,6 @@
 {
   "name": "@voxgig/sdkgen-langpack",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Additional language targets for the Voxgig SDK Generator: Dart, Haskell and Lean.",
   "type": "commonjs",
   "license": "MIT",
