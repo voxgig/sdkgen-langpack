@@ -11,7 +11,13 @@
 // The RULE — which upstream file, at which tag, lands where — lives in
 // vendor/routes.json, one per repository. Only the executor is duplicated,
 // and it must track sdkgen's: if that one gains a behaviour (the stale-section
-// pruning it grew when dart and lean left), bring it across.
+// pruning it grew when dart and lean left), bring it across. That cuts BOTH
+// ways — two known weaknesses are sdkgen's and are deliberately NOT patched
+// here, because a fork of the executor is worse than a shared bug:
+// voxgig/sdkgen#127 (an offline --check skips route-to-manifest comparison,
+// so a changed tag or a new destination still reports clean; and a
+// destination dropped from a route keeps its file in the tree, unverified
+// and still shipped).
 //
 // For each route, file CONTENT is read with `git show <tag>:<path>` — never
 // from a working tree — so a dirty or moved local checkout cannot leak local
