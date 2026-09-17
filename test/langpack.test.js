@@ -626,8 +626,11 @@ describe('sdkgen-langpack: dart secrets', () => {
     }
     offclean(off, 'an inactive model')
 
-    // And the suite's shared consumer, whose model never mentions the
-    // feature: the same three files must be clean there too.
-    offclean(generated.files, 'a model without the feature')
+    // And this suite's own shared consumer, which HAS the feature installed
+    // but never activates it in its model: the same three files must be
+    // clean there too. (In sdkgen this was the whole-suite consumer, which
+    // had no feature added at all; here the stronger case is the one that
+    // has the sources on disk and still must emit none of them.)
+    offclean(plain, 'a model without the feature')
   })
 })
