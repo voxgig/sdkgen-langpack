@@ -251,7 +251,6 @@ function generateDirectLoad(model: Model, entity: ModelEntity) {
   const allLoadParamsHaveExamples =
     loadParams.length > 0 && liveExampleParams.length === loadParams.length
 
-  // Set of idmap keys this test reads in live mode: used to skip-on-missing.
   let liveIdKeys: string[] = []
 
   const mockParamLines = loadParams.map((p: any, i: number) =>

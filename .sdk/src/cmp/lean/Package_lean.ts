@@ -29,34 +29,8 @@ const Package = cmp(async function Package(props: any) {
   const libBlocks = LIBS.map((n) =>
     `[[lean_lib]]\nname = "${n}"\nsrcDir = "src"\n`).join('\n')
 
-  // THE SECRETS FEATURE, when the model ships it (utility_lean.leanSecrets
-  // is the one reading Package_lean and Main_lean share).
-  //
-  // Each vendored tree is its own Lake srcDir root, so upstream's
-  // `import Sekreto.Core` / `import Plugin` / `import SekretoPlugins.X`
-  // resolve with NO import rewriting - lean is the one target whose
-  // vendored sources carry no adapt at all. The glob spelling is
-  // `["X", "X.*"]` (the root and its submodules) rather than `"X.+"`,
-  // which an older lake did not read as including the root.
-  // SekretoPlugins has no root module ON PURPOSE: upstream's
-  // SekretoPlugins.lean is the full-set barrel that imports all ten kinds,
-  // which is exactly what a trimmed SDK must not contain (vendored.test.ts
-  // pins its absence), so the lib is its submodules alone and each active
-  // kind is imported by name from SecretsFeature.lean.
   const secrets = leanSecrets(model, target)
 
-  // The libcurl binding, ONLY with a plugin group on. The plugins reach the
-  // network through `@[extern "sekreto_curl_fetch"]` and the clock through
-  // `@[extern "sekreto_epoch_seconds"]`; the two C stubs behind them are
-  // compiled by `make ffi` (Lake's TOML manifest cannot compile C, and its
-  // bundled clang cannot see <curl/curl.h> - see the Makefile), which also
-  // writes the ONE response file named here: the objects, the machine's
-  // library directories and -lcurl -lssl -lcrypto. A lakefile is static and
-  // where libcurl lives is not, so the machine-specific half is computed by
-  // make and read by clang through `@file`. Package level, because every
-  // test executable imports SdkClient and so links the feature. Without a
-  // plugin group nothing here is emitted and the SDK keeps its
-  // zero-dependency link (ldd shows no libcurl).
   const ffiBlock = !secrets.ffi ? '' : `
 # SECRETS FFI (see Makefile): the plugin groups this model selected bind
 # libcurl through src/feature/secrets/ffi/*.c. \`make ffi\` compiles them and

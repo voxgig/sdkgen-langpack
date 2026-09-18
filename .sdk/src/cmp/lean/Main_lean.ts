@@ -51,29 +51,8 @@ const Main = cmp(async function Main(props: any) {
   Package({ target })
   Gitignore({})
 
-  // THE SECRETS FEATURE'S MARKER FILLS. lean keeps every feature inside one
-  // static module (src/SdkFeatures.lean), so the one feature that lives in
-  // its own trimmable container is reached through three comment-marker
-  // slots there, plus two in the Makefile and two in the feature source
-  // itself - all filled here and only here, from the same reading of the
-  // model Package_lean uses for the lakefile. Inactive: every marker is
-  // blanked, and SdkFeatures.lean is byte-for-byte the catalog it was.
-  //
-  // The markers are literal strings, not jostraca's `#Name` tags: those
-  // are defined on a `//` comment, which neither Lean (`--`) nor make
-  // (`#`) writes.
   const secrets = leanSecrets(model, target)
 
-  // The Makefile's ffi rules, present only with a plugin group on. Upstream
-  // sekreto's recipe, in three parts: the stubs are compiled by the SYSTEM
-  // C compiler against the toolchain's <lean/lean.h>; the link goes through
-  // the system compiler too (LEAN_CC - the bundled clang links against the
-  // toolchain's own, older glibc, and the system libcurl needs the system
-  // one; mixing the two fails on __libc_csu_init), which then needs the
-  // toolchain lib dir back for -lc++/-lc++abi/-luv; and the machine-specific
-  // half - that dir, and where the compiler finds libcurl - is WRITTEN into
-  // link.rsp for the static lakefile to read. Single `$` throughout: `$$` in
-  // a template is a jostraca model ref. Recipe lines carry a real tab.
   const T = '\t'
   const ffiRules = !secrets.ffi ? '' : [
     'export LEAN_CC ?= cc',
@@ -110,17 +89,6 @@ const Main = cmp(async function Main(props: any) {
     '# #SecretsFfi': ffiRules,
   }
 
-  // Copy tm/lean verbatim (placeholder substitution applies): the runtime under
-  // src/ (VoxgigStruct, Vregex, SdkJson, SdkRuntime), plus LICENSE/VERSION.
-  //
-  // The feature containers are trimmed the ts way: a DECLARED-but-inactive
-  // feature's src/feature/<name>/ stays out (srcFeatureExcludes), and an
-  // active feature's inactive plugin groups stay out by their declared
-  // paths (pluginExcludes; the model's paths are target-root-relative,
-  // which is this Copy's root). The former blanket `src/feature/` exclude
-  // would have dropped the secrets container with everything else. The
-  // `.gitkeep` placeholders and the container README are scaffolding for
-  // the neutral feature tooling, not SDK source, and stay out as before.
   Copy({
     from: 'tm/' + target.name,
     exclude: [
