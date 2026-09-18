@@ -19,3 +19,11 @@ Archives are appropriate when testing package contents or installation from a
 packed release. Put those artifacts in a temporary test directory and clean
 up artifacts created by the test afterward; do not scatter them across repos.
 
+
+## Source code comments
+
+Follow [COMMENT-POLICY.md](COMMENT-POLICY.md): comments are sparse and terse,
+only for intricate or surprising code. Names carry intent; documents carry
+requirements. Run `make comments comments-test` after editing source.
+
+Durable implementation rationale is in [COMMENT-NOTES.md](COMMENT-NOTES.md).
