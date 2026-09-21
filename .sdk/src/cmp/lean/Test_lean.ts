@@ -18,7 +18,7 @@ function hasParamFreePoint(op: any): boolean {
   if (null == op) return false
   const points = op.points || []
   for (const pt of points) {
-    const params = ((pt.args || {}).params) || []
+    const params = ((pt.g || {}).params) || []
     if (params.length === 0) return true
   }
   return false
@@ -33,7 +33,7 @@ function selectsByParams(op: any): boolean {
   if (null == op) return false
   const points = op.points || []
   for (const pt of points) {
-    const params = ((pt.args || {}).params) || []
+    const params = ((pt.g || {}).params) || []
     if (0 < params.length) return true
   }
   return false
@@ -43,9 +43,9 @@ function selectsByParams(op: any): boolean {
 function synthData(fields: any): any {
   const o: any = {}
   each(fields, (f: any) => {
-    if (f.req && f.name !== 'id') {
-      const t = String(f.type || '').toLowerCase()
-      o[f.name] =
+    if (f.r && f.n !== 'id') {
+      const t = String(f.t || '').toLowerCase()
+      o[f.n] =
         (t.includes('number') || t.includes('integer') || t.includes('decimal')) ? 42
           : t.includes('bool') ? true
             : 'leantest'

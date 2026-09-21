@@ -68,27 +68,27 @@ main: kit: entity: planet: {
     title:  { name: "title",  kind: "field", type: "\`$STRING\`", required: true }
     radius: { name: "radius", kind: "field", type: "\`$NUMBER\`" }
   }
-  fields: [
-    { name: "id",     req: true,  type: "\`$STRING\`" }
-    { name: "radius", req: false, type: "\`$NUMBER\`" }
-    { name: "title",  req: true,  type: "\`$STRING\`" }
-  ]
+  fields: {
+    "id": { h: 'Id', n: "id",     r: true,  t: "\`$STRING\`" }
+    "radius": { h: 'Radius', n: "radius", r: false, t: "\`$NUMBER\`" }
+    "title": { h: 'Title', n: "title",  r: true,  t: "\`$STRING\`" }
+  }
   op: {
     list: {
       name: "list"
       points: [ {
-        args: {}, method: "GET", orig: "/planet", segments: [{ lit: "planet" }]
-        transform: { req: "\`reqdata\`", res: "\`body\`" }
+        g: {}, m: "GET", o: "/planet", s: [{ lit: "planet" }]
+        t: { req: "\`reqdata\`", res: "\`body\`" }
       } ]
     }
     load: {
       name: "load"
       points: [ {
-        args: { params: [
-          { kind: "param", name: "id", orig: "id", reqd: true, type: "\`$STRING\`", example: "p01" }
+        g: { params: [
+          { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "p01" }
         ] }
-        method: "GET", orig: "/planet/{id}", segments: [{ lit: "planet" }, { var: "id" }]
-        transform: { req: "\`reqdata\`", res: "\`body\`" }
+        m: "GET", o: "/planet/{id}", s: [{ lit: "planet" }, { var: "id" }]
+        t: { req: "\`reqdata\`", res: "\`body\`" }
       } ]
     }
   }
@@ -97,8 +97,8 @@ main: kit: entity: planet: {
 main: kit: flow: BasicPlanetFlow: {
   entity: "planet", kind: "basic", name: "BasicPlanetFlow"
   step: [
-    { op: "list" }
-    { op: "load", input: {
+    { o: "list" }
+    { o: "load", i: {
         ref: "planet_ref01", srcdatavar: "planet_ref01_data", suffix: "_dt0" } }
   ]
 }
