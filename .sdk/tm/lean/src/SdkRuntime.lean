@@ -2,10 +2,14 @@
 
    Following the Haskell target's model, entities are NOT generated per-entity;
    the whole SDK is driven by the API model (a struct `Value` parsed from the
-   embedded config). A client holds `options` + `config`; an operation looks up
-   `config.entity.<name>.op.<op>.points`, selects the matching endpoint, builds
-   the URL/method/body, calls the `curl` transport, parses the JSON response,
-   and applies the response transform.
+   embedded config). A client holds `options` + `config`; an operation runs
+   the same stages as the ts reference, each through `SdkUtility`, so the
+   request that reaches the wire is the one the shared corpus verifies:
+
+     makeContext, PrePoint, makePoint, PreSpec, makeSpec, PreRequest,
+     makeUrl + makeFetchDef + the transport, PreResponse, makeResponse,
+     PreResult, transformResponse, PreDone, done (or the error exit, which
+     dispatches PreUnexpected).
 
    The struct `Value` is the single data model throughout (like map[string]any
    in the Go/Python SDKs); everything runs in struct's `SIO` monad. -/
@@ -36,95 +40,113 @@ def gp (v : Value) (k : String) : SIO Value := getprop v (.str k) .noval
 def gpS (v : Value) (k : String) : SIO String := do pure (asStr (← gp v k))
 
 -- ---------------------------------------------------------------------------
--- Transport: shell out to curl. Returns (status, body).
+-- Transport: shell out to curl.
 -- ---------------------------------------------------------------------------
 
--- `headers` is every header the pipeline prepared - options.headers, the
--- authorization header prepareAuth built, whatever a feature added - each
--- passed as its own `-H`. They used to be dropped here and only a
--- Content-Type sent, so a live lean SDK never carried its credential (see
--- runOp: prepareAuth was not called either; the two defects hid each other).
+structure CurlResponse where
+  status : Nat
+  statusText : String
+  headers : Array (String × String)
+  body : String
+  deriving Inhabited
+
+/-- One `Name: value` line, name lower-cased; a line without a colon is
+    dropped. Splits at the FIRST colon: values carry colons (dates, urls). -/
+def parseHeaderLine (line : String) : Option (String × String) :=
+  match line.toList.span (· != ':') with
+  | (name, ':' :: rest) =>
+    some ((String.ofList name).trimAscii.toString.toLower, (String.ofList rest).trimAscii.toString)
+  | _ => none
+
+def addHeader (acc : Array (String × String)) (kv : String × String) : Array (String × String) :=
+  match acc.findIdx? (·.1 == kv.1) with
+  | some i => acc.modify i (fun (k, v) => (k, v ++ ", " ++ kv.2))
+  | none => acc.push kv
+
+/-- Curl's `-i` output: the final header block gives statusText and headers,
+    the rest is the body. Interim 1xx blocks (Expect: 100-continue) precede
+    the real one and are skipped. -/
+partial def parseCurlOutput (raw : String) : CurlResponse :=
+  if raw.startsWith "HTTP/" then
+    let parts := raw.splitOn "\r\n\r\n"
+    let block := parts.headD ""
+    let rest := "\r\n\r\n".intercalate (parts.drop 1)
+    let lines := block.splitOn "\r\n"
+    let words := (lines.headD "").splitOn " "
+    let code := (words[1]?.getD "").toNat?.getD 0
+    if 100 <= code && code < 200 then parseCurlOutput rest
+    else
+      { status := code
+      , statusText := " ".intercalate (words.drop 2)
+      , headers := ((lines.drop 1).filterMap parseHeaderLine).foldl addHeader #[]
+      , body := rest }
+  else { status := 0, statusText := "", headers := #[], body := raw }
+
+/-- `headers` is every header the pipeline prepared (options.headers, the
+    authorization header, whatever a feature added), each its own `-H`. -/
 def curlFetch (method url : String) (headers : Array (String × String))
-    (body : Option String) : IO (Nat × String) := do
-  let base := #["-s", "-w", "\n%{http_code}", "--max-time", "20", "-X", method]
+    (body : Option String) (timeoutSec : Float) (proxy : String) : IO CurlResponse := do
+  let secs := if timeoutSec > 0.0 then timeoutSec else 20.0
+  let base := #["-s", "-S", "-i", "-w", "\n%{http_code}", "--max-time", numToString secs,
+                "-X", method]
   let hasCT := headers.any (fun kv => kv.1.toLower == "content-type")
   let hdr := headers.foldl (fun acc kv => acc ++ #["-H", kv.1 ++ ": " ++ kv.2]) #[]
   let hdr := if body.isSome && !hasCT then hdr ++ #["-H", "Content-Type: application/json"] else hdr
-  let dat  := match body with | some b => #["-d", b] | none => #[]
-  let out ← IO.Process.output { cmd := "curl", args := base ++ hdr ++ dat ++ #[url] }
+  let dat := match body with | some b => #["--data-raw", b] | none => #[]
+  let px := if proxy == "" then #[] else #["--proxy", proxy]
+  let out ← IO.Process.output { cmd := "curl", args := base ++ hdr ++ dat ++ px ++ #[url] }
   if out.exitCode != 0 then
-    throw (IO.userError s!"curl failed ({out.exitCode}): {out.stderr}")
+    throw (IO.userError s!"curl failed ({out.exitCode}): {out.stderr.trimAscii}")
   let lines := out.stdout.splitOn "\n"
-  let status := (lines.getLastD "0").toNat!
-  let bodyStr := String.intercalate "\n" lines.dropLast
-  return (status, bodyStr)
+  let status := (lines.getLastD "").toNat?.getD 0
+  let parsed := parseCurlOutput (String.intercalate "\n" lines.dropLast)
+  pure { parsed with status := if status > 0 then status else parsed.status }
 
--- ---------------------------------------------------------------------------
--- Point selection (mirrors SdkRuntime.hs prepareOperation): all select.exist
--- keys must be present in match/data, and select.$action must equal the
--- caller's $action (both absent = the plain point).
--- ---------------------------------------------------------------------------
+/-- The fetchdef's header map as wire pairs (string and number values only). -/
+def headerPairs (headersV : Value) : SIO (Array (String × String)) := do
+  let mut headers : Array (String × String) := #[]
+  match headersV with
+  | .map _ =>
+    for k in (← keysof headersV) do
+      match (← gp headersV k) with
+      | .str s => headers := headers.push (k, s)
+      | .num n => headers := headers.push (k, numToString n)
+      | _ => pure ()
+  | _ => pure ()
+  pure headers
 
-def existOk (point matchV dataV : Value) : SIO Bool := do
-  let sel ← gp point "select"
-  match (← gp sel "exist") with
-  | .list id => do
-    let mut ok := true
-    for ek in (← listItems id) do
-      let k := asStr ek
-      if isNv (← gp matchV k) && isNv (← gp dataV k) then ok := false
-    pure ok
-  | _ => pure true
+/-- Decode the body as JSON when the server says so or it looks like JSON;
+    anything else (an HTML error page) stays text on the result. -/
+def readBody (headers : Value) (body : String) : SIO Value := do
+  let ct := (asStr (← gp headers "content-type")).toLower
+  let t := body.trimAscii.toString
+  if t.isEmpty then pure .noval
+  else if (ct.splitOn "json").length > 1 || t.startsWith "{" || t.startsWith "[" then
+    SdkJson.jsonRead body
+  else pure (.str body)
 
-def actionOk (point matchV : Value) : SIO Bool := do
-  let sel ← gp point "select"
-  pure ((← gp sel "$action") == (← gp matchV "$action"))
-
-def selectPoint (points matchV dataV : Value) : SIO Value := do
-  match points with
-  | .list id => do
-    let pts ← listItems id
-    if pts.size == 1 then pure pts[0]!
-    else do
-      for pt in pts do
-        if (← existOk pt matchV dataV) && (← actionOk pt matchV) then return pt
-      pure .noval
-  | _ => pure .noval
-
--- ---------------------------------------------------------------------------
--- Request building + response transform.
--- ---------------------------------------------------------------------------
-
-/-- Substitute a `{name}` path segment from match (falling back to data). -/
-def resolvePart (seg : String) (matchV dataV : Value) : SIO String := do
-  if seg.startsWith "{" && seg.endsWith "}" then
-    let key := (seg.replace "{" "").replace "}" ""
-    let mv ← gp matchV key
-    let v ← if isNv mv then gp dataV key else pure mv
-    pure (asStr v)
-  else pure seg
-
-def buildUrl (base : String) (point matchV dataV : Value) : SIO String := do
-  match (← gp point "parts") with
-  | .list id => do
-    let mut segs : Array String := #[]
-    for p in (← listItems id) do
-      segs := segs.push (← resolvePart (asStr p) matchV dataV)
-    pure (base ++ "/" ++ String.intercalate "/" segs.toList)
-  | _ => pure base
-
-/-- Strip surrounding backticks from a transform expression. -/
-def unquote (s : String) : String := s.replace "`" ""
-
-/-- Apply transform.res: `body`, `body.entity`, etc. -/
-def resTransform (point body : Value) : SIO Value := do
-  let tr ← gp point "transform"
-  let e := unquote (← gpS tr "res")
-  let segs := e.splitOn "."
-  let mut cur := body
-  for s in segs.drop 1 do
-    cur ← gp cur s
-  pure cur
+/-- The base transport: curl for a live client. `timeout` and `proxy` are
+    the fetchdef fields the timeout and proxy features set. A failed curl is
+    a transport error, not a thrown exception, so retry sees it. -/
+def liveFetcher : SdkFeature.Fetcher := fun _ctx url fetchdef => do
+  let method := asStr (← gp fetchdef "method")
+  let bodyV ← gp fetchdef "body"
+  let bodyStr ← if isNv bodyV then pure none else (do pure (some (← jsonify bodyV)))
+  let headers ← headerPairs (← gp fetchdef "headers")
+  let timeout := match (← gp fetchdef "timeout") with | .num n => n | _ => 0.0
+  let proxy ← gpS fetchdef "proxy"
+  try
+    let r ← curlFetch (if method == "" then "GET" else method) url headers bodyStr timeout proxy
+    let hmap ← emptyMap
+    for (k, v) in r.headers do
+      SdkUtility.sp hmap k (.str v)
+    let resp ← newMap #[("status", .num r.status.toFloat), ("statusText", .str r.statusText),
+                        ("body", ← readBody hmap r.body), ("headers", hmap)]
+    pure (resp, none)
+  catch e =>
+    let resp ← newMap #[("status", .num (-1.0)), ("statusText", .str ""),
+                        ("headers", ← emptyMap)]
+    pure (resp, some (← SdkUtility.mkErr "request_transport" (toString e)))
 
 -- ---------------------------------------------------------------------------
 -- Test mode: an in-memory mock transport.
@@ -193,37 +215,6 @@ def mockOp (client : Value) (entityName opName : String)
     | _ => emptyMap
   | _ => emptyMap
 
--- ---------------------------------------------------------------------------
--- Feature wiring
---
--- The client carries: `featureopts` (name -> options), `features` (registry
--- indices, in add order) and `fetcher` (the head of the transport chain). Each
--- active feature's `init` wraps the current fetcher, so the LAST feature added
--- is outermost; the base of the chain is the mock (test mode) or curl (live).
--- ---------------------------------------------------------------------------
-
-/-- The base transport: curl for a live client. -/
-def liveFetcher : SdkFeature.Fetcher := fun _ctx url fetchdef => do
-  let method := asStr (← gp fetchdef "method")
-  let bodyV ← gp fetchdef "body"
-  let bodyStr ← if isNv bodyV then pure none else (do pure (some (← jsonify bodyV)))
-  let headersV ← gp fetchdef "headers"
-  let mut headers : Array (String × String) := #[]
-  match headersV with
-  | .map _ =>
-    for k in (← keysof headersV) do
-      let v ← gp headersV k
-      match v with
-      | .str s => headers := headers.push (k, s)
-      | .num n => headers := headers.push (k, toString n)
-      | _ => pure ()
-  | _ => pure ()
-  let (st, respBody) ← curlFetch (if method == "" then "GET" else method) url headers bodyStr
-  let json ← SdkJson.jsonRead respBody
-  let resp ← newMap #[("status", .num st.toFloat), ("statusText", .str "OK"),
-                      ("body", json), ("headers", ← emptyMap)]
-  pure (resp, none)
-
 /-- THE MOCK HAS TO AGREE WITH THE MODEL. A point carrying
     `transform.res: `body.item`` describes an API that answers {"item": {...}}
     and the response transform unwraps that key on the way back. Returning the
@@ -236,7 +227,7 @@ def mockEnvelope (ctx : Value) (data : Value) : SIO Value := do
     -- Exactly `body.<key>`; a deeper path is not an envelope this mock can
     -- synthesise, so it is left alone rather than guessed at.
     if spec.startsWith "`body." && spec.endsWith "`" && spec.length > 7 then
-      let inner := ((spec.drop 6).dropRight 1).toString
+      let inner := ((spec.drop 6).dropEnd 1).toString
       if inner.isEmpty || inner.contains '.' then pure data
       else newMap #[(inner, data)]
     else pure data
@@ -265,6 +256,15 @@ def resolveFeatureOpts (client : Value) : SIO Value := do
   SdkUtility.sp client "featureopts" fo
   pure fo
 
+-- ---------------------------------------------------------------------------
+-- Feature wiring
+--
+-- The client carries: `featureopts` (name -> options), `features` (registry
+-- indices, in add order) and `fetcher` (the head of the transport chain). Each
+-- active feature's `init` wraps the current fetcher, so the LAST feature added
+-- is outermost; the base of the chain is the mock (test mode) or curl (live).
+-- ---------------------------------------------------------------------------
+
 /-- Construct and initialise every configured feature for this client, over
     the given BASE transport (the innermost fetcher every feature wraps). -/
 def initFeaturesWith (client : Value) (baseF : SdkFeature.Fetcher) : SIO Unit := do
@@ -291,82 +291,106 @@ def initFeatures (client : Value) : SIO Unit := do
 -- The generic operation, with feature hooks at every pipeline stage.
 -- ---------------------------------------------------------------------------
 
+/-- The error exit shared by every stage: the shaped error is exposed on
+    `ctrl.err` (the thrown IO error carries only its message), features see
+    the failure through PreUnexpected, and the caller's `ctrl.throw: false`
+    turns the throw into a plain return. -/
+def failOp (client ctx : Value) (errv : Value) : SIO Value := do
+  let result ← gp ctx "result"
+  SdkUtility.sp result "ok" (.bool false)
+  let e ← SdkUtility.makeError ctx errv
+  let orig ← if (← SdkUtility.isErrV errv) then pure errv else gp result "err"
+  let code ← gpS orig "code"
+  if code != "" then SdkUtility.sp e "code" (.str code)
+  SdkUtility.sp e "status" (← gp result "status")
+  SdkUtility.sp e "result" (← SdkUtility.clean ctx result)
+  SdkUtility.sp e "spec" (← SdkUtility.clean ctx (← gp ctx "spec"))
+  let ctrl ← gp ctx "ctrl"
+  SdkUtility.sp ctrl "err" e
+  let explain ← gp ctrl "explain"
+  if SdkUtility.isMapV explain then SdkUtility.sp explain "err" e
+  SdkFeature.dispatch client "PreUnexpected" ctx
+  match (← getpropRaw ctrl "throw") with
+  | .bool false => gp result "resdata"
+  | _ => throw (IO.userError (← gpS e "message"))
+
+/-- Run the transport chain. A returned or thrown error lands on
+    `response.err`, so the result stages and every remaining hook still run
+    and the failure is priced, logged and measured like any other. -/
+def fetchResponse (fetch : SdkFeature.Fetcher) (ctx : Value) (url : String)
+    (fetchdef : Value) : SIO Value := do
+  let (resp, ferr) ← (try fetch ctx url fetchdef
+    catch e => do pure (.noval, some (← SdkUtility.mkErr "request_fetch" (toString e))))
+  let response ← match resp with
+    | .map i => pure (Value.map i)
+    | _ => newMap #[("status", .num (-1.0)), ("statusText", .str ""), ("headers", ← emptyMap)]
+  if let some e := ferr then SdkUtility.sp response "err" e
+  pure response
+
+/-- A hook may have provided the stage's output on `ctx.out` already. -/
+def hookOut (out : Value) (key : String) (make : SIO Value) : SIO Value := do
+  let v ← gp out key
+  if isNv v then make else pure v
+
 def runOp (client : Value) (entityName opName : String)
-    (matchV dataV _callopts : Value) : SIO Value := do
+    (matchV dataV callopts : Value) : SIO Value := do
   let options ← gp client "options"
   let config  ← gp client "config"
-  let op ← newMap #[("name", .str opName), ("entity", .str entityName),
-                    ("input", .str (SdkUtility.opInputOf opName))]
-  let out ← emptyMap
-  let ctx ← newMap #[("client", client), ("options", options), ("config", config),
-                     ("opname", .str opName), ("op", op), ("out", out),
-                     ("reqmatch", matchV), ("reqdata", dataV),
-                     ("match", matchV), ("data", dataV)]
+  let opcfg ← gp (← gp (← gp (← gp config "entity") entityName) "op") opName
+  let op ← SdkUtility.operator (← newMap #[("entity", .str entityName), ("name", .str opName),
+                                            ("input", .str (SdkUtility.opInputOf opName)),
+                                            ("points", ← gp opcfg "points")])
+  -- The caller's own map: `ctrl.err` is where a non-throwing failure is read.
+  let ctrl ← SdkUtility.asMap callopts
+  let reqmatch ← SdkUtility.asMap matchV
+  let reqdata ← SdkUtility.asMap dataV
+  let ctx ← SdkUtility.makeContext (← newMap #[
+    ("client", client), ("options", options), ("config", config),
+    ("opname", .str opName), ("op", op), ("ctrl", ctrl), ("out", ← emptyMap),
+    ("reqmatch", reqmatch), ("reqdata", reqdata), ("match", reqmatch), ("data", reqdata)])
   let _ ← SdkUtility.makeResult ctx
+  let out ← gp ctx "out"
+  let explain ← gp ctrl "explain"
 
-  -- PrePoint: a feature may short-circuit here (rbac denies by setting out.point).
   SdkFeature.dispatch client "PrePoint" ctx
-  let denied ← gp out "point"
-  if (← SdkUtility.isErrV denied) then
-    throw (IO.userError (← gpS denied "message"))
-
-  let ent ← gp (← gp config "entity") entityName
-  let opcfg ← gp (← gp ent "op") opName
-  let point ← selectPoint (← gp opcfg "points") matchV dataV
+  let point ← hookOut out "point" (SdkUtility.makePoint ctx)
+  if (← SdkUtility.isErrV point) then return (← failOp client ctx point)
   if isNv point then
-    throw (IO.userError s!"Operation \"{opName}\" has no matching endpoint for {entityName}.")
+    return (← failOp client ctx (← SdkUtility.mkErr "point_no_points"
+      s!"Operation \"{opName}\" has no endpoint definitions."))
   SdkUtility.sp ctx "point" point
 
-  -- PreSpec: build the request description.
-  let userBase ← gpS options "base"
-  let base ← if userBase != "" then pure userBase
-             else gpS (← gp config "options") "base"
-  let url ← buildUrl base point matchV dataV
-  let method ← gpS point "method"
-  let headers ← SdkUtility.prepareHeaders ctx
-  let spec ← newMap #[("base", .str base), ("method", .str method),
-                      ("headers", headers), ("step", .str "start")]
-  SdkUtility.sp ctx "spec" spec
-  SdkUtility.sp spec "query" (← emptyMap)
-  -- The credential: `apikey` with the configured prefix becomes the
-  -- authorization header, and `auth: null` removes it. This call was
-  -- missing - prepareAuth was reached only from the primary-utility corpus
-  -- lane, so a live lean SDK with an apikey sent no authorization header at
-  -- all (and curlFetch dropped every header anyway). Before PreSpec, as
-  -- makeSpec orders it, so a feature hook sees the finished header.
-  match ← SdkUtility.prepareAuth ctx with
-  | (_, some e) => throw (IO.userError (← gpS e "message"))
-  | _ => pure ()
   SdkFeature.dispatch client "PreSpec" ctx
+  let (_, serr) ← SdkUtility.makeSpec ctx
+  if let some e := serr then return (← failOp client ctx e)
+  let spec ← gp ctx "spec"
 
-  let hasBody := method == "POST" || method == "PUT" || method == "PATCH"
-  if hasBody then SdkUtility.sp spec "body" dataV
-
-  -- PreRequest: last chance to alter headers/transport (idempotency, clienttrack).
   SdkFeature.dispatch client "PreRequest" ctx
-
+  let _ ← SdkUtility.makeRequest ctx
+  let (urlV, uerr) ← SdkUtility.makeUrl ctx
+  if let some e := uerr then return (← failOp client ctx e)
+  let url := asStr urlV
+  SdkUtility.sp spec "url" (.str url)
   let fetchdef ← SdkUtility.makeFetchDef ctx
-  let fetch ← SdkFeature.getFetcher client
-  let (resp, ferr) ← fetch ctx url fetchdef
-  match ferr with
-  | some e => throw (IO.userError (← gpS e "message"))
-  | none => pure ()
-  SdkUtility.sp ctx "response" resp
+  SdkUtility.sp fetchdef "url" (.str url)
+  if SdkUtility.isMapV explain then SdkUtility.sp explain "fetchdef" fetchdef
+  SdkUtility.sp spec "step" (.str "prerequest")
+  let response ← fetchResponse (← SdkFeature.getFetcher client) ctx url fetchdef
+  SdkUtility.sp spec "step" (.str "postrequest")
+  SdkUtility.sp ctx "response" response
 
-  -- PreResponse / PreResult: fold the response into the result.
   SdkFeature.dispatch client "PreResponse" ctx
-  let body ← gp resp "body"
-  let resdata ← resTransform point body
-  let result ← gp ctx "result"
-  SdkUtility.sp result "body" body
-  SdkUtility.sp result "resdata" resdata
-  SdkUtility.sp result "status" (← gp resp "status")
-  SdkUtility.sp result "ok" (.bool true)
-  SdkFeature.dispatch client "PreResult" ctx
+  let _ ← SdkUtility.makeResponse ctx
 
-  -- PreDone: metrics/telemetry/audit close out here.
+  SdkFeature.dispatch client "PreResult" ctx
+  SdkUtility.sp spec "step" (.str "result")
+  let _ ← SdkUtility.transformResponse ctx
+  let result ← gp ctx "result"
+  if SdkUtility.isMapV explain then SdkUtility.sp explain "result" result
+
   SdkFeature.dispatch client "PreDone" ctx
-  pure resdata
+  if SdkUtility.truthy (← gp result "ok") then gp result "resdata"
+  else failOp client ctx .noval
 
 -- Entity operation wrappers.
 def opList   (c : Value) (e : String) (m co : Value) : SIO Value := do runOp c e "list"   m (← emptyMap) co
@@ -375,19 +399,22 @@ def opCreate (c : Value) (e : String) (d co : Value) : SIO Value := do runOp c e
 def opUpdate (c : Value) (e : String) (m d co : Value) : SIO Value := do runOp c e "update" m d co
 def opRemove (c : Value) (e : String) (m co : Value) : SIO Value := do runOp c e "remove" m (← emptyMap) co
 
+/-- The client value: options resolved through makeOptions (defaults, then
+    the model's config.options, then the caller's), as every other target
+    does before its first operation. -/
+def mkClientBase (options config : Value) (mode : String) : SIO Value := do
+  let opts ← SdkUtility.makeOptions config options
+  newMap #[("options", opts), ("config", config), ("mode", .str mode)]
+
 /-- Build a client Value from options + config JSON strings. -/
 def mkClient (optionsJson configJson : String) : SIO Value := do
-  let options ← SdkJson.jsonRead optionsJson
-  let config  ← SdkJson.jsonRead configJson
-  let c ← newMap #[("options", options), ("config", config), ("mode", .str "live")]
+  let c ← mkClientBase (← SdkJson.jsonRead optionsJson) (← SdkJson.jsonRead configJson) "live"
   initFeatures c
   pure c
 
 /-- Build a client from an options `Value` (the generated `newSdk` entry). -/
 def mkClientV (options : Value) (configJson : String) : SIO Value := do
-  let opts ← (match options with | .map _ => pure options | _ => emptyMap)
-  let config ← SdkJson.jsonRead configJson
-  let c ← newMap #[("options", opts), ("config", config), ("mode", .str "live")]
+  let c ← mkClientBase options (← SdkJson.jsonRead configJson) "live"
   initFeatures c
   pure c
 
@@ -400,23 +427,19 @@ def mkClientV (options : Value) (configJson : String) : SIO Value := do
     drive a live client and count what reaches the wire. -/
 def mkClientWith (options : Value) (configJson : String) (base : SdkFeature.Fetcher)
     : SIO Value := do
-  let opts ← (match options with | .map _ => pure options | _ => emptyMap)
-  let config ← SdkJson.jsonRead configJson
-  let c ← newMap #[("options", opts), ("config", config), ("mode", .str "live")]
+  let c ← mkClientBase options (← SdkJson.jsonRead configJson) "live"
   initFeaturesWith c base
   pure c
 
 /-- A test-mode client: operations are answered from an in-memory store seeded
     with the entity test data, so entity behaviour is verifiable offline. -/
 def mkTestClientV (options : Value) (configJson : String) (seed : Value) : SIO Value := do
-  let opts ← (match options with | .map _ => pure options | _ => emptyMap)
-  let config ← SdkJson.jsonRead configJson
+  let c ← mkClientBase options (← SdkJson.jsonRead configJson) "test"
   let existing ← gp seed "existing"
   let store ← (match existing with
     | .map _ => clone existing
     | _ => emptyMap)
-  let c ← newMap #[("options", opts), ("config", config), ("mode", .str "test"),
-                   ("store", store)]
+  SdkUtility.sp c "store" store
   initFeatures c
   pure c
 
