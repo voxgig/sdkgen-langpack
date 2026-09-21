@@ -458,7 +458,8 @@ def pagingFeature : SIO Feature := do
   pure { name := "paging"
        , init := fun _ opts => do optsR.set (← toOptsMap opts)
        , hook := fun stage ctx => do
-           if stage == "PreSpec" then do
+           -- After makeSpec, whose prepareQuery would replace the query map.
+           if stage == "PreRequest" then do
              let o ← optsR.get
              let opname ← SdkUtility.opnameOf ctx
              if opname == "list" then do
@@ -533,7 +534,8 @@ def costFeature : SIO Feature := do
     let perUnit ← optNum o "perUnit" 0.0
     let hname ← optStr o "header" ""
     let hv ← if hname == "" then pure Value.noval else headerCI (← gp res "headers") hname
-    let hn := numOf hv (-1.0)
+    -- A wire header is a string; ts prices it through Number().
+    let hn := if isNov hv then -1.0 else (let n := jsNumber hv; if n.isNaN then -1.0 else n)
     if hname != "" && hn >= 0.0 then
       pure (hn * perUnit, "header")
     else do
