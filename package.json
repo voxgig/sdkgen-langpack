@@ -1,6 +1,6 @@
 {
   "name": "@voxgig/sdkgen-langpack",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Additional language targets for the Voxgig SDK Generator: Dart, Haskell and Lean.",
   "type": "commonjs",
   "license": "MIT",
@@ -62,16 +62,16 @@
     "this suite runs on."
   ],
   "peerDependencies": {
-    "@voxgig/apidef": ">=8.2.2",
-    "@voxgig/sdkgen": ">=4.10.0",
+    "@voxgig/apidef": ">=8.14.0",
+    "@voxgig/sdkgen": ">=4.23.0",
     "@voxgig/struct": ">=0.2"
   },
   "devDependencies": {
     "@types/node": ">=24",
-    "@voxgig/apidef": ">=8.2.2",
-    "@voxgig/sdkgen": ">=4.10.0",
+    "@voxgig/apidef": ">=8.14.0",
+    "@voxgig/sdkgen": ">=4.23.0",
     "@voxgig/struct": ">=0.2",
-    "aontu": ">=0.52",
+    "aontu": ">=0.71.0",
     "memfs": "4.68.1",
     "sucrase": "^3.35.1",
     "typescript": "7.0.2"
