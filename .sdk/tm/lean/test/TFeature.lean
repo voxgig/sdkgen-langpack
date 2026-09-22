@@ -114,6 +114,77 @@ def findListEntity : SIO (Option String) := do
     | _ => pure ()
   return none
 
+-- ---------------------------------------------------------------------------
+-- The live pipeline, pinned on a FIXED API rather than this project's model
+-- so the checks run in every generated SDK, over a recording transport.
+-- ---------------------------------------------------------------------------
+
+def pipeConfig : String := r#"{
+  "main": {"name": "Pipe"},
+  "options": {"base": "http://api.test", "headers": {"content-type": "application/json"}},
+  "entity": {
+    "widget": {"name": "widget", "op": {
+      "list": {"name": "list", "points": [{"kind": "http", "method": "GET",
+        "parts": ["widget"], "transform": {"req": "`reqdata`", "res": "`body`"},
+        "args": {}, "select": {}}]},
+      "load": {"name": "load", "points": [{"kind": "http", "method": "GET",
+        "parts": ["widget", "{id}"], "params": ["id"],
+        "transform": {"req": "`reqdata`", "res": "`body.widget`"},
+        "args": {"params": [{"name": "id"}]}, "select": {}}]},
+      "create": {"name": "create", "points": [{"kind": "http", "method": "POST",
+        "parts": ["widget"], "transform": {"req": "`reqdata`", "res": "`body`"},
+        "args": {}, "select": {}}]}
+    }},
+    "thing": {"name": "thing", "op": {
+      "load": {"name": "load", "points": [{"kind": "graphql", "method": "POST", "parts": [],
+        "graphql": {"doc": "query Thing($id: ID!) { thing(id: $id) { id } }",
+                    "vars": [{"name": "id", "from": "id"}]},
+        "transform": {"req": "`reqdata`", "res": "`body.data.thing`"},
+        "args": {}, "select": {}}]}
+    }}
+  }
+}"#
+
+/-- A recording transport: counts calls and keeps the last url and fetchdef. -/
+structure Wire where
+  calls : IO.Ref Nat
+  url : IO.Ref String
+  fetchdef : IO.Ref Value
+
+def mkWire : SIO Wire := do
+  pure { calls := ← IO.mkRef 0, url := ← IO.mkRef "", fetchdef := ← IO.mkRef Value.noval }
+
+def recording (w : Wire) (reply : SIO (Value × Option Value)) : SdkFeature.Fetcher :=
+  fun _ u f => do
+    w.calls.modify (· + 1)
+    w.url.set u
+    w.fetchdef.set f
+    reply
+
+def answer (status : Float) (text : String) (body : Value) (headers : Array (String × Value))
+    : SIO (Value × Option Value) := do
+  let resp ← newMap #[("status", .num status), ("statusText", .str text),
+                      ("body", body), ("headers", ← newMap headers)]
+  pure (resp, none)
+
+def refused : SIO (Value × Option Value) := do
+  pure (.noval, some (← SdkUtility.mkErr "boom" "connection refused"))
+
+def hasSub (hay needle : String) : Bool := 1 < (hay.splitOn needle).length
+
+/-- The message of an operation that throws, "" when it returns. -/
+def thrown (act : SIO Value) : SIO String := do
+  try
+    let _ ← act
+    pure ""
+  catch e => pure (toString e)
+
+def liveOpts (feats : Array (String × Value)) : SIO Value := do
+  let fmap ← emptyMap
+  for (n, o) in feats do
+    SdkUtility.sp fmap n o
+  newMap #[("feature", fmap)]
+
 def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
@@ -167,6 +238,133 @@ def main : IO UInt32 := do
         let _ ← SdkRuntime.opList c2 ent mt mt
         check ((← sent2.get) == 1 && (← seen2.get).isNone)
           "pipeline: auth null suppresses the credential on the wire")
+
+    -- transport: curl's `-i` output, past a 100 Continue block
+    (do
+      let r := SdkRuntime.parseCurlOutput
+        "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\nContent-Type: application/json\r\nX-Cost: 3\r\nX-Cost: 4\r\n\r\n{\"id\":\"a\"}"
+      check (r.status == 201 && r.statusText == "Created")
+        "transport: the final status line is read past a 100 Continue"
+      check (r.headers == #[("content-type", "application/json"), ("x-cost", "3, 4")])
+        "transport: response headers are captured, lower-cased and merged"
+      check (r.body == "{\"id\":\"a\"}") "transport: the body follows the last header block")
+
+    -- pipeline: the match becomes the query string, the point's method is sent
+    (do
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith (← emptyMap) pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyList) #[]))
+      let m ← newMap #[("q", .str "x y")]
+      let _ ← SdkRuntime.opList c "widget" m (← emptyMap)
+      check ((← w.url.get) == "http://api.test/widget?q=x%20y")
+        "pipeline: a list match reaches the wire as the query string"
+      check ((← gpS (← w.fetchdef.get) "method") == "GET")
+        "pipeline: the point's method reaches the wire")
+
+    -- pipeline: a feature's query param (paging, at PreRequest) survives makeSpec
+    (do
+      let w ← mkWire
+      let opts ← liveOpts #[("paging", ← onOpts #[("size", .num 2.0)])]
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyList) #[]))
+      let _ ← SdkRuntime.opList c "widget" (← emptyMap) (← emptyMap)
+      let u ← w.url.get
+      check (hasSub u "limit=2") s!"pipeline: paging's query param reaches the wire ({u})")
+
+    -- pipeline: path params and the response transform
+    (do
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith (← emptyMap) pipeConfig
+        (recording w (do
+          let ent ← newMap #[("id", .str "i1"), ("title", .str "T")]
+          answer 200.0 "OK" (← newMap #[("widget", ent)]) #[]))
+      let m ← newMap #[("id", .str "i1")]
+      let got ← SdkRuntime.opLoad c "widget" m (← emptyMap)
+      check ((← w.url.get) == "http://api.test/widget/i1")
+        "pipeline: the path param is substituted, not queried"
+      check ((← gpS got "title") == "T")
+        "pipeline: the point's response transform unwraps the envelope")
+
+    -- pipeline: a data op carries the request body
+    (do
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith (← emptyMap) pipeConfig
+        (recording w (do answer 201.0 "Created" (← newMap #[("id", .str "n1")]) #[]))
+      let d ← newMap #[("title", .str "new")]
+      let _ ← SdkRuntime.opCreate c "widget" d (← emptyMap)
+      let f ← w.fetchdef.get
+      check ((← gpS f "method") == "POST" && (← gpS (← gp f "body") "title") == "new")
+        "pipeline: a data op sends the request body")
+
+    -- pipeline: graphql posts {query, variables} to the single endpoint
+    (do
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith (← emptyMap) pipeConfig
+        (recording w (do
+          let thing ← newMap #[("id", .str "g1")]
+          answer 200.0 "OK" (← newMap #[("data", ← newMap #[("thing", thing)])]) #[]))
+      let m ← newMap #[("id", .str "g1")]
+      let got ← SdkRuntime.opLoad c "thing" m (← emptyMap)
+      let body ← gp (← w.fetchdef.get) "body"
+      check ((← w.url.get) == "http://api.test")
+        "pipeline: a graphql op posts to the endpoint with no query string"
+      check ((← gpS body "query").startsWith "query Thing" &&
+             (← gpS (← gp body "variables") "id") == "g1")
+        "pipeline: a graphql op sends {query, variables}"
+      check ((← gpS got "id") == "g1")
+        "pipeline: a graphql response is unwrapped by the point's transform")
+
+    -- pipeline: a 4xx is an error; ctrl.throw false returns it on ctrl.err
+    (do
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith (← emptyMap) pipeConfig
+        (recording w (do answer 404.0 "Not Found" (← emptyMap) #[]))
+      let m ← newMap #[("id", .str "nope")]
+      let msg ← thrown (SdkRuntime.opLoad c "widget" m (← emptyMap))
+      check (hasSub msg "request: 404: Not Found")
+        s!"pipeline: a 4xx response is an error, not a result ({msg})"
+      let ctrl ← newMap #[("throw", .bool false)]
+      let got ← SdkRuntime.opLoad c "widget" m ctrl
+      let err ← gp ctrl "err"
+      check (SdkRuntime.isNv got && (← gpS err "code") == "request_status" &&
+             (← numAt err "status") == 404.0)
+        "pipeline: ctrl.throw false returns, with the error on ctrl.err")
+
+    -- pipeline: a transport failure still reaches PreUnexpected (cost commits)
+    (do
+      let w ← mkWire
+      let failNext ← IO.mkRef true
+      let opts ← liveOpts #[("cost", ← onOpts #[("unit", .num 1.0)])]
+      let c ← SdkRuntime.mkClientWith opts pipeConfig (recording w (do
+        if (← failNext.get) then refused else answer 200.0 "OK" (← emptyList) #[]))
+      let msg ← thrown (SdkRuntime.opList c "widget" (← emptyMap) (← emptyMap))
+      check (hasSub msg "connection refused")
+        "pipeline: a transport failure is the operation's error"
+      let total ← gp (← bucketOf c "cost") "total"
+      check ((← numAt total "attempts") == 1.0 && (← numAt total "calls") == 1.0 &&
+             (← numAt total "amount") == 1.0)
+        "pipeline: the failed attempt is committed (PreUnexpected reached cost)"
+      failNext.set false
+      let _ ← SdkRuntime.opList c "widget" (← emptyMap) (← emptyMap)
+      let b ← bucketOf c "cost"
+      check ((← numAt (← gp b "last") "attempts") == 1.0 &&
+             (← numAt (← gp b "total") "calls") == 2.0)
+        "pipeline: no pending cost leaks into the next operation")
+
+    -- pipeline: response headers and the per-call ctrl reach the hooks
+    (do
+      let w ← mkWire
+      let opts ← liveOpts #[("cost", ← onOpts #[("header", .str "X-Cost"), ("perUnit", .num 2.0)])]
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyList) #[("X-Cost", .str "3")]))
+      let ctrl ← newMap #[("actor", .str "alice")]
+      let _ ← SdkRuntime.opList c "widget" (← emptyMap) ctrl
+      let b ← bucketOf c "cost"
+      check ((← numAt (← gp b "total") "reported") == 6.0 &&
+             (← gpS (← gp b "last") "source") == "header")
+        "pipeline: a server-reported cost header prices the call"
+      check ((← numAt (← gp (← gp b "actors") "alice") "calls") == 1.0)
+        "pipeline: the per-call ctrl reaches the hooks (cost attributes the actor)")
 
     match (← findSubject) with
     | none => IO.println "skip - no entity with list op and seed data"

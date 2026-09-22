@@ -71,6 +71,19 @@ designing an entity layer for the language, which is a decision in its own
 right rather than a port of an existing one. The suite pins the current shape
 so the difference stays deliberate.
 
+The live transport is not different. `SdkRuntime.runOp` runs the same
+pipeline as every other target, stage by stage through `SdkUtility`:
+makeContext, makePoint, makeSpec (method, path, params, query, headers, the
+body or the GraphQL envelope, then the credential), makeUrl, makeFetchDef,
+the transport, makeResponse and the response transform, with the feature
+hooks dispatched between them and `PreUnexpected` on the error exit. What
+reaches the wire is what the shared corpus verifies. The transport is
+`curl -i`: every prepared header is sent, and the response status, headers
+and body come back for the result and for the features that read them (the
+cost feature's pricing header, for one). `SdkRuntime.mkClientWith` builds a
+live client over a caller-supplied transport, which is how
+`.sdk/tm/lean/test/TFeature.lean` pins the wire without a server.
+
 ## dart and lean carry the secrets feature
 
 Both declare `provides: { sekreto: true }` and ship a vendored

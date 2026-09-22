@@ -362,7 +362,9 @@ def transformResponse (ctx : Value) : SIO Value := do
           let input ← newMap #[("ok", ok), ("status", status), ("statusText", stt),
                                ("headers", hdr), ("body", body),
                                ("resdata", resdata), ("resmatch", resmatch)]
-          transform input resform
+          let out ← transform input resform
+          sp resultV "resdata" out
+          pure out
       | _ => pure .noval
   | _ => pure .noval
 
@@ -512,7 +514,9 @@ def resultBasic (ctx : Value) : SIO Unit := do
       let full := if pm != "" then pm ++ ": " ++ msg else msg
       let e ← mkErr "request_status" full
       sp resultV "err" e
-    else pure ()
+    else do
+      let rerr ← gp responseV "err"
+      if (← isErrV rerr) then sp resultV "err" rerr
   | _, _ => pure ()
 
 /-- Response headers land on the result with lower-cased keys. -/
@@ -579,7 +583,12 @@ def makeSpec (ctx : Value) : SIO (Value × Option Value) := do
     -- them would send /graphql?id=i1.
     sp spec "query" (← emptyMap)
     sp headers "content-type" (.str graphqlContentType)
-  pure (spec, none)
+  else do
+    let body ← prepareBody ctx
+    if !(isNov body) then sp spec "body" body
+  let explain ← gp (← gp ctx "ctrl") "explain"
+  if isMapV explain then sp explain "spec" spec
+  prepareAuth ctx
 
 /-- base/prefix/path/suffix joined, `{param}` substituted, query appended. -/
 def makeUrl (ctx : Value) : SIO (Value × Option Value) := do
@@ -598,7 +607,7 @@ def makeUrl (ctx : Value) : SIO (Value × Option Value) := do
     for k in (← keysof params) do
       let v ← gp params k
       if !(isNov v) then do
-        let enc ← escurl (.str (vs v))
+        let enc ← escurl (.str (← jsString v))
         sp resmatch k v
         url := url.replace ("{" ++ k ++ "}") (vs enc)
     let query ← gp specV "query"
@@ -607,7 +616,7 @@ def makeUrl (ctx : Value) : SIO (Value × Option Value) := do
       let v ← gp query k
       if !(isNov v) then do
         let ek ← escurl (.str k)
-        let ev ← escurl (.str (vs v))
+        let ev ← escurl (.str (← jsString v))
         sp resmatch k v
         url := url ++ qsep ++ vs ek ++ "=" ++ vs ev
         qsep := "&"
