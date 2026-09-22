@@ -124,6 +124,14 @@ partial def parseCurlOutput (raw : String) : CurlResponse :=
       , body := rest }
   else { status := 0, statusText := "", headers := #[], body := raw }
 
+/-- One `-H` argument per header. `-H "name: "` is curl's syntax for REMOVING
+    a header it would otherwise send, not for sending an empty one; the empty
+    value takes the `-H "name;"` form instead. Without that an empty header the
+    pipeline prepared never reached the wire, where in ts it does. -/
+def curlHeaderArgs (headers : Array (String × String)) : Array String :=
+  headers.foldl (fun acc kv =>
+    acc ++ #["-H", if kv.2 == "" then kv.1 ++ ";" else kv.1 ++ ": " ++ kv.2]) #[]
+
 /-- `headers` is every header the pipeline prepared (options.headers, the
     authorization header, whatever a feature added), each its own `-H`. -/
 def curlFetch (method url : String) (headers : Array (String × String))
@@ -136,7 +144,7 @@ def curlFetch (method url : String) (headers : Array (String × String))
                 "-w", "\n%{http_code}", "--max-time", numToString secs,
                 "-X", method]
   let hasCT := headers.any (fun kv => kv.1.toLower == "content-type")
-  let hdr := headers.foldl (fun acc kv => acc ++ #["-H", kv.1 ++ ": " ++ kv.2]) #[]
+  let hdr := curlHeaderArgs headers
   let hdr := if body.isSome && !hasCT then hdr ++ #["-H", "Content-Type: application/json"] else hdr
   let dat := match body with | some b => #["--data-raw", b] | none => #[]
   let px := if proxy == "" then #[] else #["--proxy", proxy]

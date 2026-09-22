@@ -287,6 +287,14 @@ def main : IO UInt32 := do
       check (sent.statusText == "Nope")
         s!"transport: a reason phrase the server sent is kept ({sent.statusText})")
 
+    -- transport: an empty header value reaches the wire. REGRESSION PIN:
+    -- `-H "name: "` is curl's REMOVE-this-header syntax, so a header the
+    -- pipeline prepared empty was suppressed rather than sent.
+    (do
+      let args := SdkRuntime.curlHeaderArgs #[("x-full", "v"), ("x-empty", "")]
+      check (args == #["-H", "x-full: v", "-H", "x-empty;"])
+        s!"transport: an empty header value is sent, not removed ({args})")
+
     -- pipeline: the match becomes the query string, the point's method is sent
     (do
       let w ← mkWire
