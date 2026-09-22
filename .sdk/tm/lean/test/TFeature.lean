@@ -135,6 +135,15 @@ def pipeConfig : String := r#"{
         "parts": ["widget"], "transform": {"req": "`reqdata`", "res": "`body`"},
         "args": {}, "select": {}}]}
     }},
+    "gadget": {"name": "gadget", "op": {
+      "load": {"name": "load", "points": [
+        {"kind": "http", "method": "GET", "parts": ["gadget", "{id}"], "params": ["id"],
+         "transform": {"req": "`reqdata`", "res": "`body`"},
+         "args": {"params": [{"name": "id"}]}, "select": {}},
+        {"kind": "http", "method": "POST", "parts": ["gadget", "{id}", "archive"],
+         "params": ["id"], "transform": {"req": "`reqdata`", "res": "`body`"},
+         "args": {"params": [{"name": "id"}]}, "select": {"$action": "archive"}}]}
+    }},
     "thing": {"name": "thing", "op": {
       "load": {"name": "load", "points": [{"kind": "graphql", "method": "POST", "parts": [],
         "graphql": {"doc": "query Thing($id: ID!) { thing(id: $id) { id } }",
@@ -275,6 +284,39 @@ def main : IO UInt32 := do
         "pipeline: a list match reaches the wire as the query string"
       check ((← gpS (← w.fetchdef.get) "method") == "GET")
         "pipeline: the point's method reaches the wire")
+
+    -- pipeline: an unknown $action is refused, not answered by another route.
+    -- REGRESSION PIN: makePoint fell through to the entity's own route
+    -- whenever nothing matched, so a mistyped action issued the plain GET
+    -- instead of the request the caller asked for - and the caller was told
+    -- nothing. ts and go return point_action_invalid.
+    (do
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith (← emptyMap) pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+      let m ← newMap #[("id", .str "g1"), ("$action", .str "nope")]
+      let msg ← thrown (SdkRuntime.opLoad c "gadget" m (← emptyMap))
+      check (hasSub msg "action \"nope\" is not valid")
+        s!"pipeline: an unknown $action is refused ({msg})"
+      check ((← w.calls.get) == 0) "pipeline: an unknown $action reaches no transport"
+      let m2 ← newMap #[("id", .str "g1"), ("$action", .str "archive")]
+      let _ ← SdkRuntime.opLoad c "gadget" m2 (← emptyMap)
+      check (hasSub (← w.url.get) "/gadget/g1/archive")
+        s!"pipeline: a declared $action picks its own point ({← w.url.get})")
+
+    -- pipeline: options.allow.op gates the operation before any endpoint is
+    -- resolved, as ts and go do
+    (do
+      let w ← mkWire
+      let opts ← newMap #[("allow", ← newMap #[("op", .str "load")])]
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyList) #[]))
+      let msg ← thrown (SdkRuntime.opList c "widget" (← emptyMap) (← emptyMap))
+      check (hasSub msg "not allowed by SDK option allow.op")
+        s!"pipeline: allow.op refuses an operation it does not name ({msg})"
+      check ((← w.calls.get) == 0) "pipeline: a refused operation reaches no transport"
+      let _ ← SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "i1")]) (← emptyMap)
+      check ((← w.calls.get) == 1) "pipeline: allow.op permits the op it names")
 
     -- pipeline: a feature's query param (paging, at PreRequest) survives makeSpec
     (do

@@ -109,8 +109,13 @@ def opnameOf (ctx : Value) : SIO String := do
 def defaultOptions : SIO Value := do
   let hdr ← newMap #[("content-type", .str "application/json")]
   let ent ← emptyMap
+  -- `allow.op` carries the ts optspec's own default, because makePoint
+  -- enforces it; the other optspec slots are not defaulted here, so nothing
+  -- below is a value a caller could mistake for an enforced one.
+  let allow ← newMap #[("op", .str "create,update,load,list,remove,command,direct,graphql")]
   newMap #[("base", .str "http://localhost:8000"), ("prefix", .str ""),
-           ("suffix", .str ""), ("headers", hdr), ("entity", ent)]
+           ("suffix", .str ""), ("headers", hdr), ("entity", ent),
+           ("allow", allow)]
 
 /-- Defaults <- config.options <- options, then every entity gets an alias map. -/
 def makeOptions (config options : Value) : SIO Value := do
@@ -662,11 +667,27 @@ def pointShape (pt : Value) : SIO (Nat × Bool) := do
   | _ => pure (0, false)
 
 /-- Select the endpoint for this operation: the single point, else the first
-    whose `select.exist` keys are all present and whose `$action` agrees. -/
+    whose `select.exist` keys are all present and whose `$action` agrees. An
+    op `options.allow.op` does not name is refused before any endpoint is
+    resolved, and an `$action` no point declares is refused rather than
+    answered with a different endpoint. -/
 def makePoint (ctx : Value) : SIO Value := do
   let op ← gp ctx "op"
-  let matchV ← gp ctx "reqmatch"
-  let dataV ← gp ctx "reqdata"
+  let opname ← gpS op "name"
+  -- Substring containment over the comma list, as the ts and go references
+  -- do. An empty or absent value allows everything: lean's makeOptions has no
+  -- optspec, so a hand-built context legitimately carries no `allow`.
+  let allowop ← gpS (← gp (← gp ctx "options") "allow") "op"
+  if allowop != "" && !(hasSub allowop opname) then
+    return (← mkErr "point_op_allow"
+      s!"Operation \"{opname}\" not allowed by SDK option allow.op value: \"{allowop}\"")
+  let input0 ← gpS op "input"
+  let input := if input0 == "" then "match" else input0
+  -- The call's own arguments, then the entity's current state. `$action` is
+  -- only ever an argument, so it is read from the first alone.
+  let reqsel ← gp ctx ("req" ++ input)
+  let statesel ← gp ctx input
+  let action ← gp reqsel "$action"
   let pts ← match (← gp op "points") with
     | .list i => listItems i
     | _ => pure #[]
@@ -684,15 +705,20 @@ def makePoint (ctx : Value) : SIO Value := do
         | .list i =>
           for ek in (← listItems i) do
             let k := vs ek
-            if isNov (← gp matchV k) && isNov (← gp dataV k) then ok := false
+            if isNov (← gp reqsel k) && isNov (← gp statesel k) then ok := false
         | _ => pure ()
-        if ok && ((← gp sel "$action") == (← gp matchV "$action")) then
+        if ok && ((← gp sel "$action") == action) then
           chosen := pt
-    -- select.exist can list more than the params needed to pick a point (for
-    -- /boards/{id} it is Trello's 17 optional query-includes), so a plain
-    -- {id} call matches NOTHING and this loop chose no point at all. Fall
-    -- back to the entity's own route rather than sending nowhere.
     if isNov chosen then
+      if !(isNov action) then
+        return (← mkErr "point_action_invalid"
+          s!"Operation \"{opname}\" action \"{← jsString action}\" is not valid.")
+      -- select.exist can list more than the params needed to pick a point (for
+      -- /boards/{id} it is Trello's 17 optional query-includes), so a plain
+      -- {id} call matches NOTHING and the loop above chose no point at all.
+      -- Fall back to the entity's own route rather than sending nowhere. Only
+      -- an actionless call gets that fallback: an action nothing declares is
+      -- the caller's error, and the entity's own route is a different request.
       let mut best := pts[0]!
       for cand in pts do
         let (candLen, candTerm) ← pointShape cand
