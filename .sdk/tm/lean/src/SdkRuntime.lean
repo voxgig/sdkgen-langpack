@@ -63,6 +63,35 @@ def addHeader (acc : Array (String × String)) (kv : String × String) : Array (
   | some i => acc.modify i (fun (k, v) => (k, v ++ ", " ++ kv.2))
   | none => acc.push kv
 
+/-- The reason phrase for a status code. HTTP/2 dropped it from the status
+    line (`HTTP/2 404 `), so curl's `-i` output carries none and every error
+    message derived from it ended in a bare colon. The common codes are named;
+    anything else answers with the code, which still reads. -/
+def reasonPhrase : Nat → String
+  | 200 => "OK"
+  | 201 => "Created"
+  | 202 => "Accepted"
+  | 204 => "No Content"
+  | 301 => "Moved Permanently"
+  | 302 => "Found"
+  | 304 => "Not Modified"
+  | 400 => "Bad Request"
+  | 401 => "Unauthorized"
+  | 403 => "Forbidden"
+  | 404 => "Not Found"
+  | 405 => "Method Not Allowed"
+  | 409 => "Conflict"
+  | 410 => "Gone"
+  | 415 => "Unsupported Media Type"
+  | 422 => "Unprocessable Content"
+  | 429 => "Too Many Requests"
+  | 500 => "Internal Server Error"
+  | 501 => "Not Implemented"
+  | 502 => "Bad Gateway"
+  | 503 => "Service Unavailable"
+  | 504 => "Gateway Timeout"
+  | code => toString code
+
 /-- A proxy's CONNECT reply. Tunnelling an https request through an HTTP
     proxy makes curl print the tunnel's own `200 Connection Established`
     block ahead of the origin server's response, so taking the first block
@@ -85,12 +114,12 @@ partial def parseCurlOutput (raw : String) : CurlResponse :=
     let lines := block.splitOn "\r\n"
     let words := (lines.headD "").splitOn " "
     let code := (words[1]?.getD "").toNat?.getD 0
-    let reason := " ".intercalate (words.drop 2)
+    let reason := (" ".intercalate (words.drop 2)).trimAscii.toString
     if (100 <= code && code < 200) || connectReply code reason rest then
       parseCurlOutput rest
     else
       { status := code
-      , statusText := reason
+      , statusText := if reason == "" then reasonPhrase code else reason
       , headers := ((lines.drop 1).filterMap parseHeaderLine).foldl addHeader #[]
       , body := rest }
   else { status := 0, statusText := "", headers := #[], body := raw }

@@ -273,6 +273,20 @@ def main : IO UInt32 := do
       check (r.body == "{\"error\":\"gone\"}")
         s!"transport: the origin body is read past a CONNECT reply ({r.body})")
 
+    -- transport: the reason phrase an HTTP/2 status line does not carry.
+    -- REGRESSION PIN: statusText came back empty over HTTP/2, so resultBasic
+    -- built "request: 404: " and every error message ended in a bare colon.
+    (do
+      let known := SdkRuntime.parseCurlOutput "HTTP/2 503 \r\n\r\n"
+      let unknown := SdkRuntime.parseCurlOutput "HTTP/2 599 \r\n\r\n"
+      let sent := SdkRuntime.parseCurlOutput "HTTP/1.1 404 Nope\r\n\r\n"
+      check (known.statusText == "Service Unavailable")
+        s!"transport: a named code gets its reason phrase ({known.statusText})"
+      check (unknown.statusText == "599")
+        s!"transport: an unnamed code answers with the code ({unknown.statusText})"
+      check (sent.statusText == "Nope")
+        s!"transport: a reason phrase the server sent is kept ({sent.statusText})")
+
     -- pipeline: the match becomes the query string, the point's method is sent
     (do
       let w ← mkWire
