@@ -409,6 +409,27 @@ def main : IO UInt32 := do
              (← numAt err "status") == 404.0)
         "pipeline: ctrl.throw false returns, with the error on ctrl.err")
 
+    -- pipeline: done finishes the explain record, as ts's DoneUtility does.
+    -- REGRESSION PIN: lean left the raw record in place, so the sensitive
+    -- keys options.clean.keys names stayed in it and the failure was reported
+    -- twice - once on the record, once inside the result it carries.
+    (do
+      let w ← mkWire
+      let opts ← newMap #[("clean", ← newMap #[("keys", .str "fetchdef")])]
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 404.0 "Not Found" (← emptyMap) #[]))
+      let ctrl ← newMap #[("explain", ← emptyMap), ("throw", .bool false)]
+      let _ ← SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "nope")]) ctrl
+      let ex ← gp ctrl "explain"
+      check (SdkUtility.isMapV (← gp ex "result"))
+        "pipeline: done keeps the explained result"
+      check (SdkRuntime.isNv (← gp (← gp ex "result") "err"))
+        "pipeline: done drops the error from the explained result"
+      check (SdkRuntime.isNv (← gp ex "fetchdef"))
+        "pipeline: done cleans the explain record of the configured keys"
+      check ((← gpS (← gp ex "err") "code") == "request_status")
+        "pipeline: the failure is reported on the explain record itself")
+
     -- pipeline: a transport failure still reaches PreUnexpected (cost commits)
     (do
       let w ← mkWire

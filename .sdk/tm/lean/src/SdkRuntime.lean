@@ -443,6 +443,7 @@ def runOp (client : Value) (entityName opName : String)
   if SdkUtility.isMapV explain then SdkUtility.sp explain "result" result
 
   SdkFeature.dispatch client "PreDone" ctx
+  SdkUtility.doneExplain ctx
   if SdkUtility.truthy (← gp result "ok") then gp result "resdata"
   else failOp client ctx .noval
 

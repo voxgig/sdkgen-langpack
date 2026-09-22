@@ -67,6 +67,19 @@ def isErrV (v : Value) : SIO Bool := do
   | .map _ => pure (truthy (← gp v "__sdkerr__"))
   | _ => pure false
 
+/-- Remove configured sensitive keys (options.clean.keys) from a value. -/
+def clean (ctx : Value) (v : Value) : SIO Value := do
+  let options ← gp ctx "options"
+  let keysStr ← gpS (← gp options "clean") "keys"
+  let drop := if keysStr == "" then #[] else (keysStr.splitOn ",").toArray
+  let out ← clone v
+  match out with
+  | .map _ =>
+    for k in drop do
+      if k != "" then dp out k
+  | _ => pure ()
+  pure out
+
 -- ---------------------------------------------------------------------------
 -- Operation naming
 -- ---------------------------------------------------------------------------
@@ -174,8 +187,23 @@ def makeError (ctx : Value) (errv : Value) : SIO Value := do
   let msg := if m1 != "" then m1 else if m2 != "" then m2 else "unknown error"
   mkErr "sdk_error" (nm ++ "SDK: " ++ opname ++ ": " ++ msg)
 
+/-- The explain record the caller asked for, finished off: sensitive keys
+    removed, and the result's error dropped from it. The error is reported on
+    its own, so leaving a copy inside the explained result means a caller
+    reading the record cannot tell a failure it already handled from a fresh
+    one. Mirrors ts's DoneUtility. -/
+def doneExplain (ctx : Value) : SIO Unit := do
+  let ctrl ← gp ctx "ctrl"
+  let explain ← gp ctrl "explain"
+  if isMapV explain then do
+    let cleaned ← clean ctx explain
+    sp ctrl "explain" cleaned
+    let res ← gp cleaned "result"
+    if isMapV res then dp res "err"
+
 /-- Terminal step: the result payload, or the pipeline error. -/
 def done (ctx : Value) : SIO (Value × Option Value) := do
+  doneExplain ctx
   let res ← gp ctx "result"
   if truthy (← gp res "ok") then pure ((← gp res "resdata"), none)
   else do
@@ -739,19 +767,6 @@ def makeFetchDef (ctx : Value) : SIO Value := do
   let out ← newMap #[("method", .str method), ("headers", headers)]
   let body ← gp specV "body"
   if !(isNov body) then sp out "body" body
-  pure out
-
-/-- Remove configured sensitive keys (options.clean.keys) from a value. -/
-def clean (ctx : Value) (v : Value) : SIO Value := do
-  let options ← gp ctx "options"
-  let keysStr ← gpS (← gp options "clean") "keys"
-  let drop := if keysStr == "" then #[] else (keysStr.splitOn ",").toArray
-  let out ← clone v
-  match out with
-  | .map _ =>
-    for k in drop do
-      if k != "" then dp out k
-  | _ => pure ()
   pure out
 
 /-- The transport step. In test mode the client answers from its own store, so
