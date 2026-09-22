@@ -664,12 +664,10 @@ def costFeature : SIO Feature := do
              -- too: that is the point of ordering cost inside the cache.
              commit ctx
            else if stage == "PreUnexpected" then do
-             -- A failed operation never reaches PreDone, so without this its
-             -- attempts are priced and then discarded: repeated connection
-             -- failures would slip past an onBudget "deny" ceiling, and the
-             -- shared pending value would survive to be attributed to the
-             -- next successful call. A call that made NO attempt was refused
-             -- before the network and must not be counted.
+             -- An operation that fails BEFORE the transport never reaches
+             -- PreDone, so this is the only stage that can close it out. A
+             -- call that made NO attempt was refused before the network and
+             -- must not be counted.
              let p ← pendR.get
              if numOf (← gp p "attempts") 0.0 > 0.0 then commit ctx else resetPending }
 

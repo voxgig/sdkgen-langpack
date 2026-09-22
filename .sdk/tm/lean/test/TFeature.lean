@@ -194,6 +194,21 @@ def liveOpts (feats : Array (String × Value)) : SIO Value := do
     SdkUtility.sp fmap n o
   newMap #[("feature", fmap)]
 
+/-- Record every stage the pipeline dispatches, by appending a probe feature to
+    a live client's chain: `dispatch` runs the hook of each feature on
+    `client.features` whose options say active, so a feature the catalog does
+    not carry still sees the stages. The client's options must name it
+    (`liveOpts #[("probe", ...)]`), because that is where `isActive` looks. -/
+def probeStages (client : Value) : SIO (IO.Ref (Array String)) := do
+  let seen ← IO.mkRef (#[] : Array String)
+  let id ← SdkFeature.registerFeature
+    { name := "probe", hook := fun stage _ => do seen.modify (·.push stage) }
+  let items ← (match (← gp client "features") with
+    | .list i => listItems i
+    | _ => pure #[])
+  SdkUtility.sp client "features" (← newList (items.push (.num id.toFloat)))
+  pure seen
+
 def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
@@ -430,7 +445,30 @@ def main : IO UInt32 := do
       check ((← gpS (← gp ex "err") "code") == "request_status")
         "pipeline: the failure is reported on the explain record itself")
 
-    -- pipeline: a transport failure still reaches PreUnexpected (cost commits)
+    -- pipeline: which stages a failure dispatches, observed DIRECTLY.
+    --
+    -- The cost feature's bookkeeping cannot answer this and the check below
+    -- used to claim it did: on a transport failure runOp carries the error
+    -- through to PreDone, so the attempt is committed there whether or not
+    -- PreUnexpected is dispatched at all. A failure BEFORE the transport is
+    -- the case that skips PreDone, and it is the one PreUnexpected exists for.
+    (do
+      let w ← mkWire
+      let opts ← liveOpts #[("probe", ← onOpts #[])]
+      let c ← SdkRuntime.mkClientWith opts pipeConfig (recording w refused)
+      let seen ← probeStages c
+      let _ ← thrown (SdkRuntime.opList c "widget" (← emptyMap) (← emptyMap))
+      let late ← seen.get
+      check (late.contains "PreDone" && late.contains "PreUnexpected")
+        s!"pipeline: a transport failure dispatches PreDone then PreUnexpected ({late})"
+      seen.set #[]
+      let m ← newMap #[("id", .str "g1"), ("$action", .str "nope")]
+      let _ ← thrown (SdkRuntime.opLoad c "gadget" m (← emptyMap))
+      let early ← seen.get
+      check (early.contains "PreUnexpected" && !(early.contains "PreDone"))
+        s!"pipeline: a failure before the transport dispatches PreUnexpected alone ({early})")
+
+    -- pipeline: a failed attempt is priced, and no pending cost carries over
     (do
       let w ← mkWire
       let failNext ← IO.mkRef true
@@ -443,7 +481,7 @@ def main : IO UInt32 := do
       let total ← gp (← bucketOf c "cost") "total"
       check ((← numAt total "attempts") == 1.0 && (← numAt total "calls") == 1.0 &&
              (← numAt total "amount") == 1.0)
-        "pipeline: the failed attempt is committed (PreUnexpected reached cost)"
+        "pipeline: the failed attempt is committed (at PreDone, which it reaches)"
       failNext.set false
       let _ ← SdkRuntime.opList c "widget" (← emptyMap) (← emptyMap)
       let b ← bucketOf c "cost"
