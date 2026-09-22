@@ -63,9 +63,20 @@ def addHeader (acc : Array (String × String)) (kv : String × String) : Array (
   | some i => acc.modify i (fun (k, v) => (k, v ++ ", " ++ kv.2))
   | none => acc.push kv
 
+/-- A proxy's CONNECT reply. Tunnelling an https request through an HTTP
+    proxy makes curl print the tunnel's own `200 Connection Established`
+    block ahead of the origin server's response, so taking the first block
+    yields no headers and a body of raw HTTP text — and `-w %{http_code}`
+    hides it by patching the status back to the origin's. Only a block a
+    real status line FOLLOWS is skipped, so an origin response that happens
+    to carry this reason phrase is still read. -/
+def connectReply (code : Nat) (reason rest : String) : Bool :=
+  200 <= code && code < 300 && rest.startsWith "HTTP/" &&
+  reason.trimAscii.toString.toLower.startsWith "connection established"
+
 /-- Curl's `-i` output: the final header block gives statusText and headers,
-    the rest is the body. Interim 1xx blocks (Expect: 100-continue) precede
-    the real one and are skipped. -/
+    the rest is the body. Interim 1xx blocks (Expect: 100-continue) and a
+    proxy's CONNECT reply precede the real one and are skipped. -/
 partial def parseCurlOutput (raw : String) : CurlResponse :=
   if raw.startsWith "HTTP/" then
     let parts := raw.splitOn "\r\n\r\n"
@@ -74,10 +85,12 @@ partial def parseCurlOutput (raw : String) : CurlResponse :=
     let lines := block.splitOn "\r\n"
     let words := (lines.headD "").splitOn " "
     let code := (words[1]?.getD "").toNat?.getD 0
-    if 100 <= code && code < 200 then parseCurlOutput rest
+    let reason := " ".intercalate (words.drop 2)
+    if (100 <= code && code < 200) || connectReply code reason rest then
+      parseCurlOutput rest
     else
       { status := code
-      , statusText := " ".intercalate (words.drop 2)
+      , statusText := reason
       , headers := ((lines.drop 1).filterMap parseHeaderLine).foldl addHeader #[]
       , body := rest }
   else { status := 0, statusText := "", headers := #[], body := raw }
@@ -87,7 +100,11 @@ partial def parseCurlOutput (raw : String) : CurlResponse :=
 def curlFetch (method url : String) (headers : Array (String × String))
     (body : Option String) (timeoutSec : Float) (proxy : String) : IO CurlResponse := do
   let secs := if timeoutSec > 0.0 then timeoutSec else 20.0
-  let base := #["-s", "-S", "-i", "-w", "\n%{http_code}", "--max-time", numToString secs,
+  -- `--suppress-connect-headers` keeps a proxy's CONNECT reply out of the
+  -- `-i` stream in the first place; parseCurlOutput skips one anyway, for the
+  -- curl builds that do not honour it.
+  let base := #["-s", "-S", "-i", "--suppress-connect-headers",
+                "-w", "\n%{http_code}", "--max-time", numToString secs,
                 "-X", method]
   let hasCT := headers.any (fun kv => kv.1.toLower == "content-type")
   let hdr := headers.foldl (fun acc kv => acc ++ #["-H", kv.1 ++ ": " ++ kv.2]) #[]

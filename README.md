@@ -76,11 +76,14 @@ pipeline as every other target, stage by stage through `SdkUtility`:
 makeContext, makePoint, makeSpec (method, path, params, query, headers, the
 body or the GraphQL envelope, then the credential), makeUrl, makeFetchDef,
 the transport, makeResponse and the response transform, with the feature
-hooks dispatched between them and `PreUnexpected` on the error exit. What
-reaches the wire is what the shared corpus verifies. The transport is
-`curl -i`: every prepared header is sent, and the response status, headers
-and body come back for the result and for the features that read them (the
-cost feature's pricing header, for one). `SdkRuntime.mkClientWith` builds a
+hooks dispatched between them and `PreUnexpected` on the error exit. The
+transport is `curl -i`: every prepared header is sent, and the response
+status, headers and body come back for the result and for the features that
+read them (the cost feature's pricing header, for one). Reading that stream
+means skipping what precedes the response — an interim `100 Continue`, and a
+proxy's own `200 Connection Established` block, which curl prints for every
+https request tunnelled through an HTTP proxy, `https_proxy` in the
+environment included. `SdkRuntime.mkClientWith` builds a
 live client over a caller-supplied transport, which is how
 `.sdk/tm/lean/test/TFeature.lean` pins the wire without a server.
 

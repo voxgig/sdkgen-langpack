@@ -249,6 +249,21 @@ def main : IO UInt32 := do
         "transport: response headers are captured, lower-cased and merged"
       check (r.body == "{\"id\":\"a\"}") "transport: the body follows the last header block")
 
+    -- transport: curl's `-i` output, past a proxy's CONNECT reply.
+    -- REGRESSION PIN: only 1xx blocks were skipped, so every https request
+    -- through an HTTP proxy - including one configured by https_proxy alone -
+    -- read the tunnel's reply as the response: no headers, and the origin's
+    -- own status line as the body. `-w %{http_code}` patched the status back,
+    -- so the result looked right and carried nothing.
+    (do
+      let r := SdkRuntime.parseCurlOutput
+        "HTTP/1.1 200 Connection Established\r\n\r\nHTTP/2 404 \r\ncontent-type: application/json\r\n\r\n{\"error\":\"gone\"}"
+      check (r.status == 404) s!"transport: the origin status is read past a CONNECT reply ({r.status})"
+      check (r.headers == #[("content-type", "application/json")])
+        "transport: the origin headers are read past a CONNECT reply"
+      check (r.body == "{\"error\":\"gone\"}")
+        s!"transport: the origin body is read past a CONNECT reply ({r.body})")
+
     -- pipeline: the match becomes the query string, the point's method is sent
     (do
       let w ← mkWire
