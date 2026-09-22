@@ -135,6 +135,15 @@ def pipeConfig : String := r#"{
         "parts": ["widget"], "transform": {"req": "`reqdata`", "res": "`body`"},
         "args": {}, "select": {}}]}
     }},
+    "gadget": {"name": "gadget", "op": {
+      "load": {"name": "load", "points": [
+        {"kind": "http", "method": "GET", "parts": ["gadget", "{id}"], "params": ["id"],
+         "transform": {"req": "`reqdata`", "res": "`body`"},
+         "args": {"params": [{"name": "id"}]}, "select": {}},
+        {"kind": "http", "method": "POST", "parts": ["gadget", "{id}", "archive"],
+         "params": ["id"], "transform": {"req": "`reqdata`", "res": "`body`"},
+         "args": {"params": [{"name": "id"}]}, "select": {"$action": "archive"}}]}
+    }},
     "thing": {"name": "thing", "op": {
       "load": {"name": "load", "points": [{"kind": "graphql", "method": "POST", "parts": [],
         "graphql": {"doc": "query Thing($id: ID!) { thing(id: $id) { id } }",
@@ -184,6 +193,30 @@ def liveOpts (feats : Array (String × Value)) : SIO Value := do
   for (n, o) in feats do
     SdkUtility.sp fmap n o
   newMap #[("feature", fmap)]
+
+/-- Append a feature to a live client's chain: `dispatch` runs the hook of each
+    feature on `client.features` whose options say active, so a feature the
+    catalog does not carry still sees the stages. The client's options must name
+    it (`liveOpts #[("probe", ...)]`), because that is where `isActive` looks. -/
+def addProbe (client : Value) (hook : String → Value → SIO Unit) : SIO Unit := do
+  let id ← SdkFeature.registerFeature { name := "probe", hook := hook }
+  let items ← (match (← gp client "features") with
+    | .list i => listItems i
+    | _ => pure #[])
+  SdkUtility.sp client "features" (← newList (items.push (.num id.toFloat)))
+
+/-- Record every stage the pipeline dispatches. -/
+def probeStages (client : Value) : SIO (IO.Ref (Array String)) := do
+  let seen ← IO.mkRef (#[] : Array String)
+  addProbe client (fun stage _ => do seen.modify (·.push stage))
+  pure seen
+
+/-- Fill `ctx.out.<key>` at the named stage: the short-circuit each ts stage
+    utility honours when the hook before it did the stage's work. -/
+def shortCircuit (client : Value) (stage key : String) (make : Value → SIO Value)
+    : SIO Unit :=
+  addProbe client (fun s ctx => do
+    if s == stage then SdkUtility.sp (← SdkUtility.gpMap ctx "out") key (← make ctx))
 
 def main : IO UInt32 := do
   let sctx ← mkCtx
@@ -249,6 +282,43 @@ def main : IO UInt32 := do
         "transport: response headers are captured, lower-cased and merged"
       check (r.body == "{\"id\":\"a\"}") "transport: the body follows the last header block")
 
+    -- transport: curl's `-i` output, past a proxy's CONNECT reply.
+    -- REGRESSION PIN: only 1xx blocks were skipped, so every https request
+    -- through an HTTP proxy - including one configured by https_proxy alone -
+    -- read the tunnel's reply as the response: no headers, and the origin's
+    -- own status line as the body. `-w %{http_code}` patched the status back,
+    -- so the result looked right and carried nothing.
+    (do
+      let r := SdkRuntime.parseCurlOutput
+        "HTTP/1.1 200 Connection Established\r\n\r\nHTTP/2 404 \r\ncontent-type: application/json\r\n\r\n{\"error\":\"gone\"}"
+      check (r.status == 404) s!"transport: the origin status is read past a CONNECT reply ({r.status})"
+      check (r.headers == #[("content-type", "application/json")])
+        "transport: the origin headers are read past a CONNECT reply"
+      check (r.body == "{\"error\":\"gone\"}")
+        s!"transport: the origin body is read past a CONNECT reply ({r.body})")
+
+    -- transport: the reason phrase an HTTP/2 status line does not carry.
+    -- REGRESSION PIN: statusText came back empty over HTTP/2, so resultBasic
+    -- built "request: 404: " and every error message ended in a bare colon.
+    (do
+      let known := SdkRuntime.parseCurlOutput "HTTP/2 503 \r\n\r\n"
+      let unknown := SdkRuntime.parseCurlOutput "HTTP/2 599 \r\n\r\n"
+      let sent := SdkRuntime.parseCurlOutput "HTTP/1.1 404 Nope\r\n\r\n"
+      check (known.statusText == "Service Unavailable")
+        s!"transport: a named code gets its reason phrase ({known.statusText})"
+      check (unknown.statusText == "599")
+        s!"transport: an unnamed code answers with the code ({unknown.statusText})"
+      check (sent.statusText == "Nope")
+        s!"transport: a reason phrase the server sent is kept ({sent.statusText})")
+
+    -- transport: an empty header value reaches the wire. REGRESSION PIN:
+    -- `-H "name: "` is curl's REMOVE-this-header syntax, so a header the
+    -- pipeline prepared empty was suppressed rather than sent.
+    (do
+      let args := SdkRuntime.curlHeaderArgs #[("x-full", "v"), ("x-empty", "")]
+      check (args == #["-H", "x-full: v", "-H", "x-empty;"])
+        s!"transport: an empty header value is sent, not removed ({args})")
+
     -- pipeline: the match becomes the query string, the point's method is sent
     (do
       let w ← mkWire
@@ -260,6 +330,39 @@ def main : IO UInt32 := do
         "pipeline: a list match reaches the wire as the query string"
       check ((← gpS (← w.fetchdef.get) "method") == "GET")
         "pipeline: the point's method reaches the wire")
+
+    -- pipeline: an unknown $action is refused, not answered by another route.
+    -- REGRESSION PIN: makePoint fell through to the entity's own route
+    -- whenever nothing matched, so a mistyped action issued the plain GET
+    -- instead of the request the caller asked for - and the caller was told
+    -- nothing. ts and go return point_action_invalid.
+    (do
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith (← emptyMap) pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+      let m ← newMap #[("id", .str "g1"), ("$action", .str "nope")]
+      let msg ← thrown (SdkRuntime.opLoad c "gadget" m (← emptyMap))
+      check (hasSub msg "action \"nope\" is not valid")
+        s!"pipeline: an unknown $action is refused ({msg})"
+      check ((← w.calls.get) == 0) "pipeline: an unknown $action reaches no transport"
+      let m2 ← newMap #[("id", .str "g1"), ("$action", .str "archive")]
+      let _ ← SdkRuntime.opLoad c "gadget" m2 (← emptyMap)
+      check (hasSub (← w.url.get) "/gadget/g1/archive")
+        s!"pipeline: a declared $action picks its own point ({← w.url.get})")
+
+    -- pipeline: options.allow.op gates the operation before any endpoint is
+    -- resolved, as ts and go do
+    (do
+      let w ← mkWire
+      let opts ← newMap #[("allow", ← newMap #[("op", .str "load")])]
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyList) #[]))
+      let msg ← thrown (SdkRuntime.opList c "widget" (← emptyMap) (← emptyMap))
+      check (hasSub msg "not allowed by SDK option allow.op")
+        s!"pipeline: allow.op refuses an operation it does not name ({msg})"
+      check ((← w.calls.get) == 0) "pipeline: a refused operation reaches no transport"
+      let _ ← SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "i1")]) (← emptyMap)
+      check ((← w.calls.get) == 1) "pipeline: allow.op permits the op it names")
 
     -- pipeline: a feature's query param (paging, at PreRequest) survives makeSpec
     (do
@@ -330,7 +433,109 @@ def main : IO UInt32 := do
              (← numAt err "status") == 404.0)
         "pipeline: ctrl.throw false returns, with the error on ctrl.err")
 
-    -- pipeline: a transport failure still reaches PreUnexpected (cost commits)
+    -- pipeline: done finishes the explain record, as ts's DoneUtility does.
+    -- REGRESSION PIN: lean left the raw record in place, so the sensitive
+    -- keys options.clean.keys names stayed in it and the failure was reported
+    -- twice - once on the record, once inside the result it carries.
+    (do
+      let w ← mkWire
+      let opts ← newMap #[("clean", ← newMap #[("keys", .str "fetchdef")])]
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 404.0 "Not Found" (← emptyMap) #[]))
+      let ctrl ← newMap #[("explain", ← emptyMap), ("throw", .bool false)]
+      let _ ← SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "nope")]) ctrl
+      let ex ← gp ctrl "explain"
+      check (SdkUtility.isMapV (← gp ex "result"))
+        "pipeline: done keeps the explained result"
+      check (SdkRuntime.isNv (← gp (← gp ex "result") "err"))
+        "pipeline: done drops the error from the explained result"
+      check (SdkRuntime.isNv (← gp ex "fetchdef"))
+        "pipeline: done cleans the explain record of the configured keys"
+      check ((← gpS (← gp ex "err") "code") == "request_status")
+        "pipeline: the failure is reported on the explain record itself")
+
+    -- pipeline: a hook that has done a stage's work short-circuits it, as
+    -- ts's makeSpec, makeRequest, makeResponse and makeResult each do on
+    -- ctx.out. runOp honoured only out.point, so a feature that replaced a
+    -- stage had its work overwritten by the stage it replaced.
+    (do
+      let opts ← liveOpts #[("probe", ← onOpts #[])]
+      -- out.spec: the url comes from the spec the hook supplied
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+      shortCircuit c "PreSpec" "spec" (fun _ => do
+        newMap #[("base", .str "http://hooked.test"), ("prefix", .str ""),
+                 ("suffix", .str ""), ("path", .str "elsewhere"),
+                 ("method", .str "GET"), ("params", ← emptyMap), ("query", ← emptyMap),
+                 ("headers", ← emptyMap), ("alias", ← emptyMap), ("step", .str "start")])
+      let _ ← SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "i1")]) (← emptyMap)
+      check ((← w.url.get) == "http://hooked.test/elsewhere")
+        s!"pipeline: out.spec replaces the prepared request ({← w.url.get})"
+
+      -- out.request: the response is the hook's, and the transport is not called
+      let w2 ← mkWire
+      let c2 ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w2 (do answer 200.0 "OK" (← newMap #[("id", .str "wire")]) #[]))
+      shortCircuit c2 "PreRequest" "request" (fun _ => do
+        newMap #[("status", .num 200.0), ("statusText", .str "OK"),
+                 ("body", ← newMap #[("id", .str "hooked")]), ("headers", ← emptyMap)])
+      let got2 ← SdkRuntime.opLoad c2 "gadget" (← newMap #[("id", .str "g1")]) (← emptyMap)
+      check ((← w2.calls.get) == 0) "pipeline: out.request skips the transport"
+      check ((← gpS got2 "id") == "hooked")
+        s!"pipeline: out.request provides the response ({← gpS got2 "id"})"
+
+      -- out.response: the reply is not folded into the result, so the result
+      -- keeps the status makeResult gave it rather than the transport's 404
+      let w3 ← mkWire
+      let c3 ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w3 (do answer 404.0 "Not Found" (← emptyMap) #[]))
+      shortCircuit c3 "PreResponse" "response" (fun ctx => do
+        SdkUtility.sp (← gp ctx "result") "ok" (.bool true)
+        gp ctx "response")
+      let ctrl3 ← newMap #[("explain", ← emptyMap)]
+      let _ ← SdkRuntime.opLoad c3 "widget" (← newMap #[("id", .str "i1")]) ctrl3
+      let res3 ← gp (← gp ctrl3 "explain") "result"
+      check ((← numAt res3 "status") == -1.0)
+        s!"pipeline: out.response skips folding the reply into the result ({← numAt res3 "status"})"
+
+      -- out.result: the response transform does not run again over it
+      let w4 ← mkWire
+      let c4 ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w4 (do
+          answer 200.0 "OK" (← newMap #[("widget", ← newMap #[("id", .str "wire")])]) #[]))
+      shortCircuit c4 "PreResult" "result" (fun ctx => do
+        let res ← gp ctx "result"
+        SdkUtility.sp res "resdata" (← newMap #[("id", .str "byresult")])
+        pure res)
+      let got4 ← SdkRuntime.opLoad c4 "widget" (← newMap #[("id", .str "i1")]) (← emptyMap)
+      check ((← gpS got4 "id") == "byresult")
+        s!"pipeline: out.result keeps the hook's result ({← gpS got4 "id"})")
+
+    -- pipeline: which stages a failure dispatches, observed DIRECTLY.
+    --
+    -- The cost feature's bookkeeping cannot answer this and the check below
+    -- used to claim it did: on a transport failure runOp carries the error
+    -- through to PreDone, so the attempt is committed there whether or not
+    -- PreUnexpected is dispatched at all. A failure BEFORE the transport is
+    -- the case that skips PreDone, and it is the one PreUnexpected exists for.
+    (do
+      let w ← mkWire
+      let opts ← liveOpts #[("probe", ← onOpts #[])]
+      let c ← SdkRuntime.mkClientWith opts pipeConfig (recording w refused)
+      let seen ← probeStages c
+      let _ ← thrown (SdkRuntime.opList c "widget" (← emptyMap) (← emptyMap))
+      let late ← seen.get
+      check (late.contains "PreDone" && late.contains "PreUnexpected")
+        s!"pipeline: a transport failure dispatches PreDone then PreUnexpected ({late})"
+      seen.set #[]
+      let m ← newMap #[("id", .str "g1"), ("$action", .str "nope")]
+      let _ ← thrown (SdkRuntime.opLoad c "gadget" m (← emptyMap))
+      let early ← seen.get
+      check (early.contains "PreUnexpected" && !(early.contains "PreDone"))
+        s!"pipeline: a failure before the transport dispatches PreUnexpected alone ({early})")
+
+    -- pipeline: a failed attempt is priced, and no pending cost carries over
     (do
       let w ← mkWire
       let failNext ← IO.mkRef true
@@ -343,7 +548,7 @@ def main : IO UInt32 := do
       let total ← gp (← bucketOf c "cost") "total"
       check ((← numAt total "attempts") == 1.0 && (← numAt total "calls") == 1.0 &&
              (← numAt total "amount") == 1.0)
-        "pipeline: the failed attempt is committed (PreUnexpected reached cost)"
+        "pipeline: the failed attempt is committed (at PreDone, which it reaches)"
       failNext.set false
       let _ ← SdkRuntime.opList c "widget" (← emptyMap) (← emptyMap)
       let b ← bucketOf c "cost"

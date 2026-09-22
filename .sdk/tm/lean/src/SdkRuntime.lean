@@ -3,8 +3,9 @@
    Following the Haskell target's model, entities are NOT generated per-entity;
    the whole SDK is driven by the API model (a struct `Value` parsed from the
    embedded config). A client holds `options` + `config`; an operation runs
-   the same stages as the ts reference, each through `SdkUtility`, so the
-   request that reaches the wire is the one the shared corpus verifies:
+   the same stages as the ts reference, each through `SdkUtility`. The corpus
+   pins those utilities one at a time and says nothing about this composition,
+   which test/TFeature.lean pins over a recording transport:
 
      makeContext, PrePoint, makePoint, PreSpec, makeSpec, PreRequest,
      makeUrl + makeFetchDef + the transport, PreResponse, makeResponse,
@@ -63,9 +64,49 @@ def addHeader (acc : Array (String × String)) (kv : String × String) : Array (
   | some i => acc.modify i (fun (k, v) => (k, v ++ ", " ++ kv.2))
   | none => acc.push kv
 
+/-- The reason phrase for a status code. HTTP/2 dropped it from the status
+    line (`HTTP/2 404 `), so curl's `-i` output carries none and every error
+    message derived from it ended in a bare colon. The common codes are named;
+    anything else answers with the code, which still reads. -/
+def reasonPhrase : Nat → String
+  | 200 => "OK"
+  | 201 => "Created"
+  | 202 => "Accepted"
+  | 204 => "No Content"
+  | 301 => "Moved Permanently"
+  | 302 => "Found"
+  | 304 => "Not Modified"
+  | 400 => "Bad Request"
+  | 401 => "Unauthorized"
+  | 403 => "Forbidden"
+  | 404 => "Not Found"
+  | 405 => "Method Not Allowed"
+  | 409 => "Conflict"
+  | 410 => "Gone"
+  | 415 => "Unsupported Media Type"
+  | 422 => "Unprocessable Content"
+  | 429 => "Too Many Requests"
+  | 500 => "Internal Server Error"
+  | 501 => "Not Implemented"
+  | 502 => "Bad Gateway"
+  | 503 => "Service Unavailable"
+  | 504 => "Gateway Timeout"
+  | code => toString code
+
+/-- A proxy's CONNECT reply. Tunnelling an https request through an HTTP
+    proxy makes curl print the tunnel's own `200 Connection Established`
+    block ahead of the origin server's response, so taking the first block
+    yields no headers and a body of raw HTTP text — and `-w %{http_code}`
+    hides it by patching the status back to the origin's. Only a block a
+    real status line FOLLOWS is skipped, so an origin response that happens
+    to carry this reason phrase is still read. -/
+def connectReply (code : Nat) (reason rest : String) : Bool :=
+  200 <= code && code < 300 && rest.startsWith "HTTP/" &&
+  reason.trimAscii.toString.toLower.startsWith "connection established"
+
 /-- Curl's `-i` output: the final header block gives statusText and headers,
-    the rest is the body. Interim 1xx blocks (Expect: 100-continue) precede
-    the real one and are skipped. -/
+    the rest is the body. Interim 1xx blocks (Expect: 100-continue) and a
+    proxy's CONNECT reply precede the real one and are skipped. -/
 partial def parseCurlOutput (raw : String) : CurlResponse :=
   if raw.startsWith "HTTP/" then
     let parts := raw.splitOn "\r\n\r\n"
@@ -74,23 +115,37 @@ partial def parseCurlOutput (raw : String) : CurlResponse :=
     let lines := block.splitOn "\r\n"
     let words := (lines.headD "").splitOn " "
     let code := (words[1]?.getD "").toNat?.getD 0
-    if 100 <= code && code < 200 then parseCurlOutput rest
+    let reason := (" ".intercalate (words.drop 2)).trimAscii.toString
+    if (100 <= code && code < 200) || connectReply code reason rest then
+      parseCurlOutput rest
     else
       { status := code
-      , statusText := " ".intercalate (words.drop 2)
+      , statusText := if reason == "" then reasonPhrase code else reason
       , headers := ((lines.drop 1).filterMap parseHeaderLine).foldl addHeader #[]
       , body := rest }
   else { status := 0, statusText := "", headers := #[], body := raw }
+
+/-- One `-H` argument per header. `-H "name: "` is curl's syntax for REMOVING
+    a header it would otherwise send, not for sending an empty one; the empty
+    value takes the `-H "name;"` form instead. Without that an empty header the
+    pipeline prepared never reached the wire, where in ts it does. -/
+def curlHeaderArgs (headers : Array (String × String)) : Array String :=
+  headers.foldl (fun acc kv =>
+    acc ++ #["-H", if kv.2 == "" then kv.1 ++ ";" else kv.1 ++ ": " ++ kv.2]) #[]
 
 /-- `headers` is every header the pipeline prepared (options.headers, the
     authorization header, whatever a feature added), each its own `-H`. -/
 def curlFetch (method url : String) (headers : Array (String × String))
     (body : Option String) (timeoutSec : Float) (proxy : String) : IO CurlResponse := do
   let secs := if timeoutSec > 0.0 then timeoutSec else 20.0
-  let base := #["-s", "-S", "-i", "-w", "\n%{http_code}", "--max-time", numToString secs,
+  -- `--suppress-connect-headers` keeps a proxy's CONNECT reply out of the
+  -- `-i` stream in the first place; parseCurlOutput skips one anyway, for the
+  -- curl builds that do not honour it.
+  let base := #["-s", "-S", "-i", "--suppress-connect-headers",
+                "-w", "\n%{http_code}", "--max-time", numToString secs,
                 "-X", method]
   let hasCT := headers.any (fun kv => kv.1.toLower == "content-type")
-  let hdr := headers.foldl (fun acc kv => acc ++ #["-H", kv.1 ++ ": " ++ kv.2]) #[]
+  let hdr := curlHeaderArgs headers
   let hdr := if body.isSome && !hasCT then hdr ++ #["-H", "Content-Type: application/json"] else hdr
   let dat := match body with | some b => #["--data-raw", b] | none => #[]
   let px := if proxy == "" then #[] else #["--proxy", proxy]
@@ -360,35 +415,47 @@ def runOp (client : Value) (entityName opName : String)
       s!"Operation \"{opName}\" has no endpoint definitions."))
   SdkUtility.sp ctx "point" point
 
+  -- Each stage below is skipped when the hook before it already did the
+  -- stage's work, as the four ts stage utilities each are. `out.request`
+  -- carries the RESPONSE, which is what ts's makeRequest returns: providing
+  -- it stands in for the whole transport step, url and fetchdef included.
   SdkFeature.dispatch client "PreSpec" ctx
-  let (_, serr) ← SdkUtility.makeSpec ctx
-  if let some e := serr then return (← failOp client ctx e)
+  let hookspec ← gp out "spec"
+  if isNv hookspec then do
+    let (_, serr) ← SdkUtility.makeSpec ctx
+    if let some e := serr then return (← failOp client ctx e)
+  else SdkUtility.sp ctx "spec" hookspec
   let spec ← gp ctx "spec"
 
   SdkFeature.dispatch client "PreRequest" ctx
-  let _ ← SdkUtility.makeRequest ctx
-  let (urlV, uerr) ← SdkUtility.makeUrl ctx
-  if let some e := uerr then return (← failOp client ctx e)
-  let url := asStr urlV
-  SdkUtility.sp spec "url" (.str url)
-  let fetchdef ← SdkUtility.makeFetchDef ctx
-  SdkUtility.sp fetchdef "url" (.str url)
-  if SdkUtility.isMapV explain then SdkUtility.sp explain "fetchdef" fetchdef
-  SdkUtility.sp spec "step" (.str "prerequest")
-  let response ← fetchResponse (← SdkFeature.getFetcher client) ctx url fetchdef
-  SdkUtility.sp spec "step" (.str "postrequest")
+  let mut response ← gp out "request"
+  if isNv response then do
+    let _ ← SdkUtility.makeRequest ctx
+    let (urlV, uerr) ← SdkUtility.makeUrl ctx
+    if let some e := uerr then return (← failOp client ctx e)
+    let url := asStr urlV
+    SdkUtility.sp spec "url" (.str url)
+    let fetchdef ← SdkUtility.makeFetchDef ctx
+    SdkUtility.sp fetchdef "url" (.str url)
+    if SdkUtility.isMapV explain then SdkUtility.sp explain "fetchdef" fetchdef
+    SdkUtility.sp spec "step" (.str "prerequest")
+    response ← fetchResponse (← SdkFeature.getFetcher client) ctx url fetchdef
+    SdkUtility.sp spec "step" (.str "postrequest")
   SdkUtility.sp ctx "response" response
 
   SdkFeature.dispatch client "PreResponse" ctx
-  let _ ← SdkUtility.makeResponse ctx
+  if isNv (← gp out "response") then
+    discard <| SdkUtility.makeResponse ctx
 
   SdkFeature.dispatch client "PreResult" ctx
-  SdkUtility.sp spec "step" (.str "result")
-  let _ ← SdkUtility.transformResponse ctx
+  if isNv (← gp out "result") then do
+    SdkUtility.sp spec "step" (.str "result")
+    discard <| SdkUtility.transformResponse ctx
   let result ← gp ctx "result"
   if SdkUtility.isMapV explain then SdkUtility.sp explain "result" result
 
   SdkFeature.dispatch client "PreDone" ctx
+  SdkUtility.doneExplain ctx
   if SdkUtility.truthy (← gp result "ok") then gp result "resdata"
   else failOp client ctx .noval
 
