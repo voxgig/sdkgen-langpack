@@ -155,7 +155,7 @@ vendor`, not a hand copy.
 ```bash
 npm install
 npm run build     # type-checks every target's components
-npm test          # the comment gate, then the suite
+npm test          # the comment and dependency gates, then the suite
 ```
 
 The suite runs on `@voxgig/sdkgen/testkit`: it installs this package into a
