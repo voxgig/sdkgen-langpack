@@ -3,8 +3,9 @@
    Following the Haskell target's model, entities are NOT generated per-entity;
    the whole SDK is driven by the API model (a struct `Value` parsed from the
    embedded config). A client holds `options` + `config`; an operation runs
-   the same stages as the ts reference, each through `SdkUtility`, so the
-   request that reaches the wire is the one the shared corpus verifies:
+   the same stages as the ts reference, each through `SdkUtility`. The corpus
+   pins those utilities one at a time and says nothing about this composition,
+   which test/TFeature.lean pins over a recording transport:
 
      makeContext, PrePoint, makePoint, PreSpec, makeSpec, PreRequest,
      makeUrl + makeFetchDef + the transport, PreResponse, makeResponse,

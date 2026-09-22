@@ -79,16 +79,31 @@ the transport, makeResponse and the response transform, with the feature
 hooks dispatched between them and `PreUnexpected` on the error exit. A hook
 that has already done a stage's work says so on `ctx.out` — `point`, `spec`,
 `request`, `response` or `result` — and that stage is then skipped, as the
-matching reference utility skips it. The
-transport is `curl -i`: every prepared header is sent, and the response
+matching reference utility skips it.
+
+Constructing a client resolves the options through `makeOptions`, so what
+the API model declares in `config.options` is in force from the first
+operation: its `headers`, `prefix` and `suffix`, and `base` where the model
+names none. `allow.op` is defaulted there too, and `makePoint` enforces it.
+
+The transport is `curl -i`: every prepared header is sent, and the response
 status, headers and body come back for the result and for the features that
 read them (the cost feature's pricing header, for one). Reading that stream
 means skipping what precedes the response — an interim `100 Continue`, and a
 proxy's own `200 Connection Established` block, which curl prints for every
 https request tunnelled through an HTTP proxy, `https_proxy` in the
-environment included. `SdkRuntime.mkClientWith` builds a
-live client over a caller-supplied transport, which is how
-`.sdk/tm/lean/test/TFeature.lean` pins the wire without a server.
+environment included. `SdkRuntime.mkClientWith` builds a live client over a
+caller-supplied transport, which is how `.sdk/tm/lean/test/TFeature.lean`
+pins the wire without a server.
+
+**What the shared corpus covers, and what it does not.** The corpus pins the
+utility FUNCTIONS one at a time — `makeSpec`, `makeUrl`, `prepareMethod` and
+the rest, each against its own fixture. It says nothing about how `runOp`
+composes them, so a stage left out or called in the wrong order passes it.
+That composition is pinned by the lean feature suite instead, over a
+recording transport: the url, the method, the headers and the body that
+reach the wire, the stages a failure dispatches, and each stage's
+`ctx.out` short-circuit.
 
 ## dart and lean carry the secrets feature
 
