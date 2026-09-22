@@ -126,9 +126,10 @@ groups' files trimmed from the tree, the secrets suite registered, and a
 **The feature MODEL is sdkgen's, not this package's.**
 `model/feature/secrets.aon` in `@voxgig/sdkgen` carries the `path` lists and
 the `def: dart:` and `def: lean:` maps; packs consume core feature models
-rather than copying them. Those entries ship from 4.10.0 on, which is what
-`engines.sdkgen` here pins. Against an older sdkgen the feature emits no
-plugin definitions at all, and each target's secrets test says so by name.
+rather than copying them. Those entries ship from 4.10.0 on;
+`engines.sdkgen` here requires `>=4.23.0`, comfortably past that. Against an
+sdkgen older than 4.10.0 the feature emits no plugin definitions at all, and
+each target's secrets test says so by name.
 
 **Lean builds through make.** A plugin GROUP (vault, aws, ...) binds libcurl
 through two sdkgen-owned C stubs under `src/feature/secrets/ffi/`. Lake TOML
@@ -138,22 +139,34 @@ is built and run with `make build`, `make test`, `make exe EXE=secrets`, not
 bare `lake exe`, which fails at link. Secrets on with no group, off, or
 absent: no libcurl, and the target's zero-dependency promise holds.
 
-**Vendoring is a manual copy.** The dart and lean trees were carried over
-verbatim from sdkgen, headers included. This repository has no vendor tool or
-manifest of its own yet, so resyncing from upstream is by hand until it grows
-one. Nothing here guards those files the way sdkgen's `make vendor-check`
-guards its own.
+**Vendoring is tag-pinned and guarded.** `vendor/routes.json` is this pack's
+own route table — which upstream file, from which repository at the shared
+tag, lands where, and how it is adapted on the way in. `make vendor` executes
+it, stamping each file's `VENDORED:` provenance header and recording a sha256
+in `test/vendored.json`; `make vendor-check` verifies without writing, and
+`test/vendored.test.js` runs that same check under `npm test`, so an edited or
+stale vendored file fails the suite. sdkgen's own route table records dart,
+haskell and lean as excluded precisely because they need a route root here —
+this is it. Resyncing is a tag bump in `routes.json` followed by `make
+vendor`, not a hand copy.
 
 ## Developing
 
 ```bash
 npm install
-npm test          # type-checks every target's components, then runs the suite
+npm run build     # type-checks every target's components
+npm test          # the comment gate, then the suite
 ```
 
 The suite runs on `@voxgig/sdkgen/testkit`: it installs this package into a
 staged consumer through the real `package add`, compiles the components the way
 a consumer's build does, and generates.
+
+All of that is Node and nothing else — no `dart`, no `lake`, no `ghc` is needed
+or looked for, so the suite is green on a machine that could not build a single
+generated SDK. Read a green build as what it is: components that type-check and
+targets that generate. Whether you can compile the output is a question about
+your own machine, and `command -v` is the way to ask it.
 
 Validate the package itself with:
 

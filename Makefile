@@ -1,5 +1,5 @@
 
-.PHONY: comments comments-test hooks
+.PHONY: comments comments-test hooks vendor vendor-check
 comments:
 	node tools/comment-gate.cjs
 
@@ -8,3 +8,9 @@ comments-test:
 
 hooks:
 	git config core.hooksPath .githooks
+
+vendor:
+	node build/vendor.js
+
+vendor-check:
+	node build/vendor.js --check
