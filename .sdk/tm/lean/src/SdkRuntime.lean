@@ -414,31 +414,42 @@ def runOp (client : Value) (entityName opName : String)
       s!"Operation \"{opName}\" has no endpoint definitions."))
   SdkUtility.sp ctx "point" point
 
+  -- Each stage below is skipped when the hook before it already did the
+  -- stage's work, as the four ts stage utilities each are. `out.request`
+  -- carries the RESPONSE, which is what ts's makeRequest returns: providing
+  -- it stands in for the whole transport step, url and fetchdef included.
   SdkFeature.dispatch client "PreSpec" ctx
-  let (_, serr) ← SdkUtility.makeSpec ctx
-  if let some e := serr then return (← failOp client ctx e)
+  let hookspec ← gp out "spec"
+  if isNv hookspec then do
+    let (_, serr) ← SdkUtility.makeSpec ctx
+    if let some e := serr then return (← failOp client ctx e)
+  else SdkUtility.sp ctx "spec" hookspec
   let spec ← gp ctx "spec"
 
   SdkFeature.dispatch client "PreRequest" ctx
-  let _ ← SdkUtility.makeRequest ctx
-  let (urlV, uerr) ← SdkUtility.makeUrl ctx
-  if let some e := uerr then return (← failOp client ctx e)
-  let url := asStr urlV
-  SdkUtility.sp spec "url" (.str url)
-  let fetchdef ← SdkUtility.makeFetchDef ctx
-  SdkUtility.sp fetchdef "url" (.str url)
-  if SdkUtility.isMapV explain then SdkUtility.sp explain "fetchdef" fetchdef
-  SdkUtility.sp spec "step" (.str "prerequest")
-  let response ← fetchResponse (← SdkFeature.getFetcher client) ctx url fetchdef
-  SdkUtility.sp spec "step" (.str "postrequest")
+  let mut response ← gp out "request"
+  if isNv response then do
+    let _ ← SdkUtility.makeRequest ctx
+    let (urlV, uerr) ← SdkUtility.makeUrl ctx
+    if let some e := uerr then return (← failOp client ctx e)
+    let url := asStr urlV
+    SdkUtility.sp spec "url" (.str url)
+    let fetchdef ← SdkUtility.makeFetchDef ctx
+    SdkUtility.sp fetchdef "url" (.str url)
+    if SdkUtility.isMapV explain then SdkUtility.sp explain "fetchdef" fetchdef
+    SdkUtility.sp spec "step" (.str "prerequest")
+    response ← fetchResponse (← SdkFeature.getFetcher client) ctx url fetchdef
+    SdkUtility.sp spec "step" (.str "postrequest")
   SdkUtility.sp ctx "response" response
 
   SdkFeature.dispatch client "PreResponse" ctx
-  let _ ← SdkUtility.makeResponse ctx
+  if isNv (← gp out "response") then
+    discard <| SdkUtility.makeResponse ctx
 
   SdkFeature.dispatch client "PreResult" ctx
-  SdkUtility.sp spec "step" (.str "result")
-  let _ ← SdkUtility.transformResponse ctx
+  if isNv (← gp out "result") then do
+    SdkUtility.sp spec "step" (.str "result")
+    discard <| SdkUtility.transformResponse ctx
   let result ← gp ctx "result"
   if SdkUtility.isMapV explain then SdkUtility.sp explain "result" result
 

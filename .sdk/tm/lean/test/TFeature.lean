@@ -194,20 +194,29 @@ def liveOpts (feats : Array (String × Value)) : SIO Value := do
     SdkUtility.sp fmap n o
   newMap #[("feature", fmap)]
 
-/-- Record every stage the pipeline dispatches, by appending a probe feature to
-    a live client's chain: `dispatch` runs the hook of each feature on
-    `client.features` whose options say active, so a feature the catalog does
-    not carry still sees the stages. The client's options must name it
-    (`liveOpts #[("probe", ...)]`), because that is where `isActive` looks. -/
-def probeStages (client : Value) : SIO (IO.Ref (Array String)) := do
-  let seen ← IO.mkRef (#[] : Array String)
-  let id ← SdkFeature.registerFeature
-    { name := "probe", hook := fun stage _ => do seen.modify (·.push stage) }
+/-- Append a feature to a live client's chain: `dispatch` runs the hook of each
+    feature on `client.features` whose options say active, so a feature the
+    catalog does not carry still sees the stages. The client's options must name
+    it (`liveOpts #[("probe", ...)]`), because that is where `isActive` looks. -/
+def addProbe (client : Value) (hook : String → Value → SIO Unit) : SIO Unit := do
+  let id ← SdkFeature.registerFeature { name := "probe", hook := hook }
   let items ← (match (← gp client "features") with
     | .list i => listItems i
     | _ => pure #[])
   SdkUtility.sp client "features" (← newList (items.push (.num id.toFloat)))
+
+/-- Record every stage the pipeline dispatches. -/
+def probeStages (client : Value) : SIO (IO.Ref (Array String)) := do
+  let seen ← IO.mkRef (#[] : Array String)
+  addProbe client (fun stage _ => do seen.modify (·.push stage))
   pure seen
+
+/-- Fill `ctx.out.<key>` at the named stage: the short-circuit each ts stage
+    utility honours when the hook before it did the stage's work. -/
+def shortCircuit (client : Value) (stage key : String) (make : Value → SIO Value)
+    : SIO Unit :=
+  addProbe client (fun s ctx => do
+    if s == stage then SdkUtility.sp (← SdkUtility.gpMap ctx "out") key (← make ctx))
 
 def main : IO UInt32 := do
   let sctx ← mkCtx
@@ -444,6 +453,64 @@ def main : IO UInt32 := do
         "pipeline: done cleans the explain record of the configured keys"
       check ((← gpS (← gp ex "err") "code") == "request_status")
         "pipeline: the failure is reported on the explain record itself")
+
+    -- pipeline: a hook that has done a stage's work short-circuits it, as
+    -- ts's makeSpec, makeRequest, makeResponse and makeResult each do on
+    -- ctx.out. runOp honoured only out.point, so a feature that replaced a
+    -- stage had its work overwritten by the stage it replaced.
+    (do
+      let opts ← liveOpts #[("probe", ← onOpts #[])]
+      -- out.spec: the url comes from the spec the hook supplied
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+      shortCircuit c "PreSpec" "spec" (fun _ => do
+        newMap #[("base", .str "http://hooked.test"), ("prefix", .str ""),
+                 ("suffix", .str ""), ("path", .str "elsewhere"),
+                 ("method", .str "GET"), ("params", ← emptyMap), ("query", ← emptyMap),
+                 ("headers", ← emptyMap), ("alias", ← emptyMap), ("step", .str "start")])
+      let _ ← SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "i1")]) (← emptyMap)
+      check ((← w.url.get) == "http://hooked.test/elsewhere")
+        s!"pipeline: out.spec replaces the prepared request ({← w.url.get})"
+
+      -- out.request: the response is the hook's, and the transport is not called
+      let w2 ← mkWire
+      let c2 ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w2 (do answer 200.0 "OK" (← newMap #[("id", .str "wire")]) #[]))
+      shortCircuit c2 "PreRequest" "request" (fun _ => do
+        newMap #[("status", .num 200.0), ("statusText", .str "OK"),
+                 ("body", ← newMap #[("id", .str "hooked")]), ("headers", ← emptyMap)])
+      let got2 ← SdkRuntime.opLoad c2 "gadget" (← newMap #[("id", .str "g1")]) (← emptyMap)
+      check ((← w2.calls.get) == 0) "pipeline: out.request skips the transport"
+      check ((← gpS got2 "id") == "hooked")
+        s!"pipeline: out.request provides the response ({← gpS got2 "id"})"
+
+      -- out.response: the reply is not folded into the result, so the result
+      -- keeps the status makeResult gave it rather than the transport's 404
+      let w3 ← mkWire
+      let c3 ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w3 (do answer 404.0 "Not Found" (← emptyMap) #[]))
+      shortCircuit c3 "PreResponse" "response" (fun ctx => do
+        SdkUtility.sp (← gp ctx "result") "ok" (.bool true)
+        gp ctx "response")
+      let ctrl3 ← newMap #[("explain", ← emptyMap)]
+      let _ ← SdkRuntime.opLoad c3 "widget" (← newMap #[("id", .str "i1")]) ctrl3
+      let res3 ← gp (← gp ctrl3 "explain") "result"
+      check ((← numAt res3 "status") == -1.0)
+        s!"pipeline: out.response skips folding the reply into the result ({← numAt res3 "status"})"
+
+      -- out.result: the response transform does not run again over it
+      let w4 ← mkWire
+      let c4 ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w4 (do
+          answer 200.0 "OK" (← newMap #[("widget", ← newMap #[("id", .str "wire")])]) #[]))
+      shortCircuit c4 "PreResult" "result" (fun ctx => do
+        let res ← gp ctx "result"
+        SdkUtility.sp res "resdata" (← newMap #[("id", .str "byresult")])
+        pure res)
+      let got4 ← SdkRuntime.opLoad c4 "widget" (← newMap #[("id", .str "i1")]) (← emptyMap)
+      check ((← gpS got4 "id") == "byresult")
+        s!"pipeline: out.result keeps the hook's result ({← gpS got4 "id"})")
 
     -- pipeline: which stages a failure dispatches, observed DIRECTLY.
     --

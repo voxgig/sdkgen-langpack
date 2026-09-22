@@ -76,7 +76,10 @@ pipeline as every other target, stage by stage through `SdkUtility`:
 makeContext, makePoint, makeSpec (method, path, params, query, headers, the
 body or the GraphQL envelope, then the credential), makeUrl, makeFetchDef,
 the transport, makeResponse and the response transform, with the feature
-hooks dispatched between them and `PreUnexpected` on the error exit. The
+hooks dispatched between them and `PreUnexpected` on the error exit. A hook
+that has already done a stage's work says so on `ctx.out` — `point`, `spec`,
+`request`, `response` or `result` — and that stage is then skipped, as the
+matching reference utility skips it. The
 transport is `curl -i`: every prepared header is sent, and the response
 status, headers and body come back for the result and for the features that
 read them (the cost feature's pricing header, for one). Reading that stream
