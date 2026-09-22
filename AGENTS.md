@@ -56,8 +56,8 @@ the gate's own suite. A committed dependency must name a published npm package
 or a GitHub reference; `file:`, `link:`, `portal:`, `workspace:`, `catalog:`, a
 bare filesystem path, a packed archive, a git reference to a host other than
 github.com, an off-registry `overrides`/`resolutions`, a lockfile resolving from
-a path or a foreign registry, a Go `replace` or `go.work` reaching outside the
-repository, a Cargo `path` dependency leaving it, a committed symlink escaping
+a path or a foreign registry, a Go `replace` reaching outside the repository, a
+committed `go.work` at all, a Cargo `path` dependency leaving it, a committed symlink escaping
 it or pointing into `node_modules`, a committed archive, and a `.npmrc` naming
 another registry are all findings. It judges only what git TRACKS, so the local
 symlinks above stay legal right up to the moment they are staged. It runs under
