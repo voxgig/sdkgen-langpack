@@ -124,7 +124,7 @@ groups' files trimmed from the tree, the secrets suite registered, and a
 `active: false`, generates exactly as before.
 
 **The feature MODEL is sdkgen's, not this package's.**
-`model/feature/secrets.aon` in `@voxgig/sdkgen` carries the `path` lists and
+`model/feature/secrets.aontu` in `@voxgig/sdkgen` carries the `path` lists and
 the `def: dart:` and `def: lean:` maps; packs consume core feature models
 rather than copying them. Those entries ship from 4.10.0 on;
 `engines.sdkgen` here requires `>=4.23.0`, comfortably past that. Against an
