@@ -107,16 +107,16 @@ main: kit: flow: BasicPlanetFlow: {
 
 function consumerModel(sdk, extra) {
   const src = [
-    '@"@voxgig/apidef/model/apidef.aon"',
-    '@"@voxgig/sdkgen/model/sdkgen.aon"',
-    '@"target/target-index.aon"',
-    '@"feature/feature-index.aon"',
+    '@"@voxgig/apidef/model/apidef.aontu"',
+    '@"@voxgig/sdkgen/model/sdkgen.aontu"',
+    '@"target/target-index.aontu"',
+    '@"feature/feature-index.aontu"',
     "name: 'demo'",
     API,
     extra || '',
   ].join('\n')
 
-  const path = Path.join(sdk, 'model', 'generate-test.aon')
+  const path = Path.join(sdk, 'model', 'generate-test.aontu')
   Fs.writeFileSync(path, src)
 
   const errs = []
@@ -152,7 +152,7 @@ describe('sdkgen-langpack', () => {
     const files = consumer.files()
 
     for (const t of TARGETS) {
-      ok(files.includes('model/target/' + t + '.aon'), t + ': no target model')
+      ok(files.includes('model/target/' + t + '.aontu'), t + ': no target model')
       ok(files.some((f) => f.startsWith('src/cmp/' + t + '/')), t + ': no components')
       ok(files.some((f) => f.startsWith('tm/' + t + '/')), t + ': no templates')
     }
@@ -318,7 +318,7 @@ describe('sdkgen-langpack: dart secrets', () => {
     consumer = stageConsumer({ recordLog: false })
     await consumer.addPackage(PKG)
     // The feature model is sdkgen's, not this pack's: `def: dart` lives in
-    // the SHARED `model/feature/secrets.aon` beside every other language's,
+    // the SHARED `model/feature/secrets.aontu` beside every other language's,
     // which is why this pack's manifest requires an sdkgen that carries it.
     await consumer.add('feature', consumer.bundledRef('feature', 'secrets'))
     compile(consumer)
@@ -477,7 +477,7 @@ describe('sdkgen-langpack: dart secrets', () => {
   // on, secrets on with no group, secrets declared and off.
   //
   // As for dart, the plugin `def: lean:` maps live in sdkgen's core
-  // secrets.aon, so the first assertion names that dependency.
+  // secrets.aontu, so the first assertion names that dependency.
   test('lean: active secrets emits plugin defs and trims inactive groups', async () => {
     const P = 'lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/'
 

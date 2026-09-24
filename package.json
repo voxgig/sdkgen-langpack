@@ -1,6 +1,6 @@
 {
   "name": "@voxgig/sdkgen-langpack",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Additional language targets for the Voxgig SDK Generator: Dart, Haskell and Lean.",
   "type": "commonjs",
   "license": "MIT",
@@ -55,7 +55,7 @@
     "@voxgig/struct to utility_{dart,haskell,lean}.ts and TestEntity_dart.ts.",
     "",
     "THE SDKGEN FLOOR IS THE OLDEST PUBLISHED VERSION THIS SUITE IS RUN",
-    "AGAINST, which is 4.23.0. Not the oldest that might work: a floor nobody",
+    "AGAINST, which is 4.25.0. Not the oldest that might work: a floor nobody",
     "tests is the shape of haskell's old >=3.5.0, which accepted versions",
     "where a target's components would install and then die at generation on",
     "a missing export.",
@@ -72,16 +72,16 @@
     "feature model that dart and lean both read."
   ],
   "peerDependencies": {
-    "@voxgig/apidef": ">=8.14.0",
-    "@voxgig/sdkgen": ">=4.23.0",
+    "@voxgig/apidef": ">=8.17.0",
+    "@voxgig/sdkgen": ">=4.25.0",
     "@voxgig/struct": ">=0.2"
   },
   "devDependencies": {
     "@types/node": ">=24",
-    "@voxgig/apidef": ">=8.14.0",
-    "@voxgig/sdkgen": ">=4.23.0",
+    "@voxgig/apidef": ">=8.17.0",
+    "@voxgig/sdkgen": ">=4.25.0",
     "@voxgig/struct": ">=0.2",
-    "aontu": ">=0.71.0 <0.73.0",
+    "aontu": ">=0.75.0",
     "memfs": "4.68.1",
     "sucrase": "^3.35.1",
     "typescript": "7.0.2"
