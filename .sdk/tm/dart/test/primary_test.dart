@@ -545,6 +545,57 @@ void tests() {
           cu.clean(ctx, 'unknown provider kind: vaultish'));
     });
 
+    test('entity-blocks-are-not-read', (t) async {
+      await _setup();
+      Map<String, dynamic> seeded(Map<String, dynamic> block) => {
+            ...block,
+            'entity': {
+              'zztoken': {
+                'ZZTOKEN01': {'id': 'ZZTOKEN01', 'note': 'PLAINRECORD-t5r3e1w9'}
+              }
+            },
+          };
+      final features = <String, dynamic>{
+        'zzfeat': {'active': false, 'apitoken': 'FEATTOKEN-z9y8x7w6'},
+        'test': seeded({'active': false}),
+      };
+      for (final feature in [
+        features,
+        [
+          for (final e in features.entries) {'name': e.key, ...e.value}
+        ],
+      ]) {
+        final ctx = _utility.makeContext({
+          'options': {
+            'feature': feature,
+            'test': seeded({}),
+            'entity': {
+              'zztoken': {
+                'alias': {'zzkey': 'PLAINALIAS-m2n4b6v8'}
+              }
+            },
+          },
+          'config': <String, dynamic>{},
+        });
+        ctx.client = _client;
+        ctx.utility = _client.utility();
+        ctx.options = _utility.makeOptions(ctx);
+        final List values = ctx.options['__derived__']['clean']['values'];
+        ok(values.contains('FEATTOKEN-z9y8x7w6'));
+        for (final plain in [
+          'ZZTOKEN01',
+          'PLAINRECORD-t5r3e1w9',
+          'PLAINALIAS-m2n4b6v8'
+        ]) {
+          ok(!values.contains(plain), 'an entity block registered ' + plain);
+        }
+        equal('record PLAINRECORD-t5r3e1w9',
+            cu.clean(ctx, 'record PLAINRECORD-t5r3e1w9'));
+        equal('alias PLAINALIAS-m2n4b6v8',
+            cu.clean(ctx, 'alias PLAINALIAS-m2n4b6v8'));
+      }
+    });
+
     // The whole-suite backstop, behind `_sec`'s per-section guards: those
     // pin each section to the case count the engine actually drove for it,
     // so a shrunken or emptied section fails in its own case, named. This

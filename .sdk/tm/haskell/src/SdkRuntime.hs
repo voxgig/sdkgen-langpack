@@ -501,12 +501,21 @@ withoutKeys ks v = case v of
 
 -- The keys directly under `feature` name features, not fields: `secrets` is
 -- a feature, and its settings are not secrets for sitting under its name.
+-- Entity blocks hold per-entity settings and seeded records, never a credential.
 addSensitiveOptions :: Value -> [String] -> Value -> IO ()
 addSensitiveOptions cfg skip opts = do
-  cleanAddSensitiveCfg cfg =<< withoutKeys ("feature" : skip) opts
-  feature <- case opts of VMap _ -> getp opts "feature"; _ -> pure VNoval
+  let opt k = case opts of VMap _ -> getp opts k; _ -> pure VNoval
+      settings v = cleanAddSensitiveCfg cfg =<< withoutKeys ["entity"] v
+  rest <- withoutKeys ("feature" : "entity" : skip) opts
+  test <- opt "test"
+  case (rest, test) of
+    (VMap _, VMap _) -> setp rest "test" =<< withoutKeys ["entity"] test
+    _ -> pure ()
+  cleanAddSensitiveCfg cfg rest
+  feature <- opt "feature"
   case feature of
-    VMap ref -> readIORef ref >>= mapM_ (cleanAddSensitiveCfg cfg . snd)
+    VMap ref -> readIORef ref >>= mapM_ (settings . snd)
+    VList ref -> readIORef ref >>= mapM_ settings
     _ -> cleanAddSensitiveCfg cfg feature
 
 cleanWithCfg :: Value -> Value -> IO Value

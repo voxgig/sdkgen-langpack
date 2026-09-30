@@ -218,6 +218,36 @@ def shortCircuit (client : Value) (stage key : String) (make : Value → SIO Val
   addProbe client (fun s ctx => do
     if s == stage then SdkUtility.sp (← SdkUtility.gpMap ctx "out") key (← make ctx))
 
+/-- clean: an entity block, of per-entity settings or seeded records, is not
+    read, whichever form `feature` takes. A definition of its own: inline, it
+    takes `main`'s `do` block past the compiler's heartbeat limit. -/
+def cleanEntityBlocks : SIO Unit := do
+  let seeded (kvs : Array (String × Value)) : SIO Value := do
+    let row ← newMap #[("id", .str "ZZTOKEN01"), ("note", .str "PLAINRECORD-t5r3e1w9")]
+    let ids ← newMap #[("ZZTOKEN01", row)]
+    let block ← newMap #[("zztoken", ids)]
+    newMap (kvs.push ("entity", block))
+  let token ← newMap #[("active", .bool false), ("apitoken", .str "FEATTOKEN-z9y8x7w6")]
+  let mapForm ← newMap #[("zzfeat", token), ("test", (← seeded #[("active", .bool false)]))]
+  let named ← newMap #[("name", .str "zzfeat"), ("active", .bool false),
+                       ("apitoken", .str "FEATTOKEN-z9y8x7w6")]
+  let listForm ← newList #[named, (← seeded #[("name", .str "test"), ("active", .bool false)])]
+  let mut ok := true
+  for feature in #[mapForm, listForm] do
+    let alias ← newMap #[("zzkey", .str "PLAINALIAS-m2n4b6v8")]
+    let ent ← newMap #[("zztoken", (← newMap #[("alias", alias)]))]
+    let opts ← SdkUtility.makeOptions (← emptyMap)
+      (← newMap #[("feature", feature), ("test", (← seeded #[])), ("entity", ent)])
+    let ctx ← newMap #[("options", opts)]
+    let values ← SdkUtility.cfgStrings (← SdkUtility.cleanConfig ctx) "values"
+    let record ← SdkUtility.clean ctx (.str "record PLAINRECORD-t5r3e1w9")
+    let aliased ← SdkUtility.clean ctx (.str "alias PLAINALIAS-m2n4b6v8")
+    ok := ok && values.contains "FEATTOKEN-z9y8x7w6"
+      && !(#["ZZTOKEN01", "PLAINRECORD-t5r3e1w9", "PLAINALIAS-m2n4b6v8"].any values.contains)
+      && SdkUtility.vs record == "record PLAINRECORD-t5r3e1w9"
+      && SdkUtility.vs aliased == "alias PLAINALIAS-m2n4b6v8"
+  check ok "clean: an entity block is not read, whichever form feature takes"
+
 def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
@@ -586,6 +616,8 @@ def main : IO UInt32 := do
       let values ← SdkUtility.cfgStrings (← SdkUtility.cleanConfig (← newMap #[("options", opts)])) "values"
       check (values.contains "REAL-TOKEN-1" && !values.contains "vaultish")
         "clean: a feature's name does not make its settings sensitive")
+
+    cleanEntityBlocks
 
     -- proxy: the userinfo of the proxy URL is registered, and the password
     -- runs from the first colon, colons included.

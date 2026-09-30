@@ -311,11 +311,19 @@ def withoutKeys (v : Value) (ks : Array String) : SIO Value := do
   | _ => pure v
 
 /-- The keys directly under `feature` name features, not fields: `secrets`
-    is a feature, and its settings are not secrets for sitting under it. -/
+    is a feature, and its settings are not secrets for sitting under it.
+    Entity blocks hold per-entity settings and seeded records, never a
+    credential. -/
 def cleanAddSensitiveOptions (cfg options : Value) (skip : Array String) : SIO Unit := do
-  cleanAddSensitiveCfg cfg (← withoutKeys options (skip.push "feature"))
+  let rest ← withoutKeys options (skip ++ #["feature", "entity"])
+  let test ← gp options "test"
+  if isMapV rest && isMapV test then sp rest "test" (← withoutKeys test #["entity"])
+  cleanAddSensitiveCfg cfg rest
   match (← gp options "feature") with
-  | .map id => for (_, fopts) in (← mapEntries id) do cleanAddSensitiveCfg cfg fopts
+  | .map id => for (_, fopts) in (← mapEntries id) do
+      cleanAddSensitiveCfg cfg (← withoutKeys fopts #["entity"])
+  | .list id => for fopts in (← listItems id) do
+      cleanAddSensitiveCfg cfg (← withoutKeys fopts #["entity"])
   | feature => cleanAddSensitiveCfg cfg feature
 
 def cleanWithCfg (cfg : Value) (v : Value) : SIO Value := do

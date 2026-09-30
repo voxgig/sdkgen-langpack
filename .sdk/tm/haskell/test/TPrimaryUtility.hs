@@ -311,6 +311,35 @@ tests c alltests = do
     vals <- case values of VList _ -> map vstring <$> vlistItems values; _ -> pure []
     pure ("REAL-TOKEN-1" `elem` vals && "vaultish" `notElem` vals)
 
+  runTest c "primary.entity_blocks_are_not_read" $ do
+    let seeded kvs = do
+          rec <- jo [("id", VStr "ZZTOKEN01"), ("note", VStr "PLAINRECORD-t5r3e1w9")]
+          ids <- jo [("ZZTOKEN01", rec)]
+          block <- jo kvs; setp block "entity" =<< jo [("zztoken", ids)]; pure block
+        feature = do
+          token <- jo [("active", VBool False), ("apitoken", VStr "FEATTOKEN-z9y8x7w6")]
+          test <- seeded [("active", VBool False)]
+          pure [("zzfeat", token), ("test", test)]
+        named (n, f) = do setp f "name" (VStr n); pure f
+    fmap and $ mapM (\mkFeature -> do
+      cl <- C.testSdk0; ctx <- mkCtx cl "load"
+      alias <- jo [("zzkey", VStr "PLAINALIAS-m2n4b6v8")]
+      ent <- jo [("zztoken", VNull)]; setp ent "zztoken" =<< jo [("alias", alias)]
+      test <- seeded []
+      fv <- mkFeature
+      raw <- jo [("feature", fv), ("entity", ent), ("test", test)]; writeIORef (cOptions ctx) raw
+      o <- makeOptionsUtil ctx
+      writeIORef (cOptions ctx) o
+      values <- getpathS o "__derived__.clean.values"
+      vals <- case values of VList _ -> map vstring <$> vlistItems values; _ -> pure []
+      record <- cleanUtil ctx (VStr "record PLAINRECORD-t5r3e1w9")
+      aliased <- cleanUtil ctx (VStr "alias PLAINALIAS-m2n4b6v8")
+      pure ("FEATTOKEN-z9y8x7w6" `elem` vals
+            && all (`notElem` vals) ["ZZTOKEN01", "PLAINRECORD-t5r3e1w9", "PLAINALIAS-m2n4b6v8"]
+            && vstring record == "record PLAINRECORD-t5r3e1w9"
+            && vstring aliased == "alias PLAINALIAS-m2n4b6v8"))
+      [feature >>= jo, feature >>= mapM named >>= ja]
+
   runTest c "primary.make_request_guard_no_spec" $ do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"
     writeIORef (cSpec ctx) VNoval

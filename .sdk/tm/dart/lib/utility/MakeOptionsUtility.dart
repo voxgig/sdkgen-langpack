@@ -258,12 +258,22 @@ dynamic makeOptions(dynamic ctx) {
 
 // The keys directly under `feature` name features, not fields: `secrets` is
 // a feature, and its settings are not secrets for sitting under its name.
+// Entity blocks hold per-entity settings and seeded records, never a credential.
 void _addSensitiveOptions(dynamic ctx, dynamic options, List<String> skip) {
-  cleanAddSensitive(ctx, _without(options, [...skip, 'feature']));
+  final rest = _without(options, [...skip, 'feature', 'entity']);
+  final test = vs.getprop(options, 'test');
+  if (rest is Map && test is Map) {
+    rest['test'] = _without(test, ['entity']);
+  }
+  cleanAddSensitive(ctx, rest);
   final feature = vs.getprop(options, 'feature');
   if (feature is Map) {
     for (final fopts in feature.values) {
-      cleanAddSensitive(ctx, fopts);
+      cleanAddSensitive(ctx, _without(fopts, ['entity']));
+    }
+  } else if (feature is List) {
+    for (final fopts in feature) {
+      cleanAddSensitive(ctx, _without(fopts, ['entity']));
     }
   } else {
     cleanAddSensitive(ctx, feature);
