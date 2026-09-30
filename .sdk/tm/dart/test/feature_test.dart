@@ -580,7 +580,7 @@ void tests() {
           final entries = h.client.track['debug']['entries'];
           equal(1, entries.length); // ring buffer capped at max
           equal(2, seen.length);
-          equal('<redacted>', seen[0]['headers']['authorization']);
+          equal('[redacted]', seen[0]['headers']['authorization']);
         });
 
         test('captures failures', (t) async {
@@ -1172,7 +1172,7 @@ void tests() {
           'headers': {'x-secret': 'hide', 'x-ok': 'show'}
         });
         final e = h.client.track['debug']['entries'][0];
-        equal('<redacted>', e['headers']['x-secret']);
+        equal('[redacted]', e['headers']['x-secret']);
         equal('show', e['headers']['x-ok']);
       });
     }

@@ -205,12 +205,30 @@ tests c alltests = do
     o <- makeOptionsUtil ctx
     pure (ismap o)
 
-  runTest c "primary.make_options_derives_clean_keyre" $ do
+  runTest c "primary.make_options_derives_clean_config" $ do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"
-    raw <- emptyMap; writeIORef (cOptions ctx) raw
+    raw <- jo [("apikey", VStr "SECRET-abcdef")]; writeIORef (cOptions ctx) raw
     o <- makeOptionsUtil ctx
-    kr <- getpathS o "__derived__.clean.keyre"
-    pure (case kr of VStr s -> not (null s); _ -> False)
+    keys <- getpathS o "__derived__.clean.keys"
+    nkeys <- case keys of VList _ -> length <$> vlistItems keys; _ -> pure 0
+    values <- getpathS o "__derived__.clean.values"
+    vals <- case values of VList _ -> vlistItems values; _ -> pure []
+    mask <- getpathS o "__derived__.clean.mask"
+    pure (nkeys > 0 && any (\v -> vstring v == "SECRET-abcdef") vals && vstring mask == "[redacted]")
+
+  runTest c "primary.clean_masks_registered_and_named" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    raw <- jo [("apikey", VStr "SECRET-abcdef")]; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    writeIORef (cOptions ctx) o
+    h <- jo [("authorization", VStr "Bearer SECRET-abcdef"), ("x-custom-token", VStr "tok-123456"), ("accept", VStr "json")]
+    v <- jo [("headers", h), ("note", VStr "key SECRET-abcdef sent")]
+    r <- cleanUtil ctx v
+    rh <- getp r "headers"
+    auth <- getp rh "authorization"; tok <- getp rh "x-custom-token"; acc <- getp rh "accept"; note <- getp r "note"
+    orig <- getp h "authorization"
+    pure (vstring auth == "[redacted]" && vstring tok == "[redacted]" && vstring acc == "json"
+          && vstring note == "key [redacted] sent" && vstring orig == "Bearer SECRET-abcdef")
 
   runTest c "primary.make_request_guard_no_spec" $ do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"

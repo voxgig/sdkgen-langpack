@@ -10,22 +10,25 @@
 
 module SdkRuntime where
 
-import Control.Exception (throwIO)
+import Control.Exception (throwIO, try)
 import Control.Monad (forM_, when)
-import Data.Bits ((.&.))
-import Data.Char (isAlphaNum, toUpper)
+import Data.Bits ((.&.), (.|.), shiftL, shiftR)
+import Data.Char (chr, isAlphaNum, isHexDigit, digitToInt, ord, toUpper)
 import Data.IORef
+import Data.List (isInfixOf, nub, sortBy)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (isNothing)
+import Data.Ord (Down (..), comparing)
 import System.IO.Unsafe (unsafePerformIO)
 import Text.Printf (printf)
+import Text.Read (readMaybe)
 
 import VoxgigStruct
-  ( Value (..), InjArg (..), emptyList, emptyMap, mkList, mkMap
+  ( Value (..), InjArg (..), StructError (..), emptyList, emptyMap, mkList, mkMap
   , getprop, getpropAlt, setprop, delprop, getpath, getelem, keysof, listItems
   , items, clone, merge, validate, transform, select, size, isempty
   , isnode, ismap, islist, isfunc, isNoval, isNullish, vint
-  , escurl, escre, stringify, walk, join )
+  , escurl, escre, stringify, walk, join, jsonEncode )
 import SdkTypes
 import SdkHelpers
 
@@ -218,8 +221,255 @@ makeContextImpl cs basectx = do
 -- utilities
 -- ------------------------------------------------------------------
 
+-- ----- clean: what leaves the pipeline is masked -----
+--
+-- Everything that leaves the pipeline passes through cleanUtil; inside it
+-- data stays raw, so a hook can still read the header it must add to. See
+-- the generator's docs/explanation/secret-redaction.md.
+
+cleanMaxDepth :: Int
+cleanMaxDepth = 32
+
+cleanCircular :: String
+cleanCircular = "[circular]"
+
+-- The `clean` block of the option spec (main.kit.optspec.clean in the sdkgen
+-- base model), held here because this pack's targets read no generated
+-- Schema module. Numbers are strings, like every optspec value.
+cleanOptSpec :: IO Value
+cleanOptSpec = jo
+  [ ("active", VBool True)
+  , ("keys", VStr "key,secret,token,password,passwd,authorization,cookie,credential,signature")
+  , ("values", VStr "")
+  , ("mask", VStr "[redacted]")
+  , ("hint", VStr "0")
+  , ("min", VStr "4") ]
+
+normkey :: String -> String
+normkey = filter (\c -> c /= '-' && c /= '_') . lower
+
+splitkeys :: Value -> [String]
+splitkeys v = filter (/= "") (map (normkey . strip) (splitOnChar ',' (vstring v)))
+
+splitvalues :: Value -> IO [String]
+splitvalues v = case v of
+  VList _ -> do its <- listItems v; pure [s | VStr s <- its]
+  VStr s -> pure (filter (/= "") (map strip (splitOnChar ',' s)))
+  _ -> pure []
+
+countOpt :: Value -> Int -> Int
+countOpt v dflt = case v of
+  VNum n | n >= 0 -> floor n
+  VStr s -> case readMaybe s :: Maybe Double of
+    Just n | n >= 0 -> floor n
+    _ -> dflt
+  _ -> dflt
+
+-- The derived clean block is a map, so features can register into its
+-- `values` list after makeOptions; `keys` holds the normalised names.
+makeCleanConfig :: Value -> IO Value
+makeCleanConfig cleanopts = do
+  opts <- case cleanopts of VMap _ -> pure cleanopts; _ -> emptyMap
+  activeV <- getp opts "active"
+  keysV <- getp opts "keys"
+  maskV <- getp opts "mask"
+  hintV <- getp opts "hint"
+  minV <- getp opts "min"
+  keys <- ja (map VStr (splitkeys keysV))
+  values <- emptyList
+  jo [ ("active", VBool (case activeV of VBool False -> False; _ -> True))
+     , ("keys", keys), ("values", values)
+     , ("mask", VStr (case maskV of VStr m -> m; _ -> "[redacted]"))
+     , ("hint", vint (countOpt hintV 0))
+     , ("min", vint (max 1 (countOpt minV 4))) ]
+
+-- A context without options (makeError accepts a bare one) still masks by
+-- the schema defaults.
+cleanConfigOf :: Context -> IO Value
+cleanConfigOf ctx = do
+  options <- readIORef (cOptions ctx)
+  derived <- case options of VMap _ -> getpathS options "__derived__.clean"; _ -> pure VNoval
+  case derived of
+    VMap _ -> pure derived
+    _ -> makeCleanConfig =<< cleanOptSpec
+
+data CleanRule = CleanRule
+  { crActive :: Bool
+  , crMask   :: String
+  , crHint   :: Int
+  , crKeys   :: [String]
+  , crValues :: [String]
+  }
+
+cfgStrings :: Value -> String -> IO [String]
+cfgStrings cfg k = do
+  v <- getp cfg k
+  case v of VList _ -> do its <- listItems v; pure [s | VStr s <- its]; _ -> pure []
+
+cfgInt :: Value -> String -> Int -> IO Int
+cfgInt cfg k d = do v <- getp cfg k; pure (case v of VNum n -> floor n; _ -> d)
+
+cleanRule :: Value -> IO CleanRule
+cleanRule cfg = do
+  activeV <- getp cfg "active"
+  mask <- getStrD cfg "mask" "[redacted]"
+  hint <- cfgInt cfg "hint" 0
+  keys <- cfgStrings cfg "keys"
+  values <- cfgStrings cfg "values"
+  pure CleanRule { crActive = case activeV of VBool False -> False; _ -> True
+                 , crMask = mask, crHint = hint, crKeys = keys, crValues = values }
+
+utf8Bytes :: String -> [Int]
+utf8Bytes = concatMap enc
+  where
+    enc c
+      | n < 0x80 = [n]
+      | n < 0x800 = [0xC0 .|. (n `shiftR` 6), 0x80 .|. (n .&. 0x3F)]
+      | n < 0x10000 = [0xE0 .|. (n `shiftR` 12), 0x80 .|. ((n `shiftR` 6) .&. 0x3F), 0x80 .|. (n .&. 0x3F)]
+      | otherwise = [0xF0 .|. (n `shiftR` 18), 0x80 .|. ((n `shiftR` 12) .&. 0x3F), 0x80 .|. ((n `shiftR` 6) .&. 0x3F), 0x80 .|. (n .&. 0x3F)]
+      where n = ord c
+
+base64Encode :: String -> String
+base64Encode s = go (utf8Bytes s)
+  where
+    tbl = ['A' .. 'Z'] ++ ['a' .. 'z'] ++ ['0' .. '9'] ++ "+/"
+    at i = tbl !! (i .&. 63)
+    go (a : b : c : rest) =
+      let n = (a `shiftL` 16) .|. (b `shiftL` 8) .|. c
+      in [at (n `shiftR` 18), at (n `shiftR` 12), at (n `shiftR` 6), at n] ++ go rest
+    go [a, b] =
+      let n = (a `shiftL` 16) .|. (b `shiftL` 8)
+      in [at (n `shiftR` 18), at (n `shiftR` 12), at (n `shiftR` 6), '=']
+    go [a] =
+      let n = a `shiftL` 16
+      in [at (n `shiftR` 18), at (n `shiftR` 12), '=', '=']
+    go [] = []
+
+percentDecode :: String -> String
+percentDecode ('%' : a : b : rest)
+  | isHexDigit a && isHexDigit b = chr (digitToInt a * 16 + digitToInt b) : percentDecode rest
+percentDecode (c : rest) = c : percentDecode rest
+percentDecode [] = []
+
+-- The encoded forms a value travels in.
+cleanForms :: String -> IO [String]
+cleanForms value = do
+  pe <- escurlS value
+  js <- jsonEncode False Nothing (VStr value)
+  let jsIn = if length js >= 2 then init (tail js) else js
+  pure (nub (filter (/= "") [value, base64Encode value, pe, jsIn]))
+
+cleanAddCfg :: Value -> Value -> IO ()
+cleanAddCfg cfg value = do
+  minLen <- cfgInt cfg "min" 4
+  case value of
+    VStr s | length s >= minLen -> do
+      forms <- cleanForms s
+      valuesV <- getp cfg "values"
+      case valuesV of
+        VList r -> do
+          cur <- readIORef r
+          let have = [x | VStr x <- cur]
+              new = [f | f <- forms, length f >= minLen, f `notElem` have]
+          when (not (null new)) $
+            writeIORef r (map VStr (sortBy (comparing (Down . length)) (have ++ new)))
+        _ -> pure ()
+    _ -> pure ()
+
+cleanAddUtil :: Context -> Value -> IO ()
+cleanAddUtil ctx value = do cfg <- cleanConfigOf ctx; cleanAddCfg cfg value
+
+maskValue :: CleanRule -> String -> String
+maskValue r value =
+  if crHint r > 0 && length value > 2 * crHint r
+    then crMask r ++ drop (length value - crHint r) value
+    else crMask r
+
+cleanStr :: CleanRule -> String -> String
+cleanStr r = \text -> foldl swap text (crValues r)
+  where swap out v = if v `isInfixOf` out then strReplaceAll out v (maskValue r v) else out
+
+sensitiveKey :: [String] -> Value -> Bool
+sensitiveKey keys key = case key of
+  VStr k -> let nk = normkey k in any (`isInfixOf` nk) keys
+  _ -> False
+
+cleanKeyUtil :: Context -> Value -> IO Bool
+cleanKeyUtil ctx key = do cfg <- cleanConfigOf ctx; keys <- cfgStrings cfg "keys"; pure (sensitiveKey keys key)
+
+-- A node already on the path down: struct nodes are reference-stable, so
+-- the IORef is the identity.
+data Seen = SeenL (IORef [Value]) | SeenM (IORef [(String, Value)])
+
+instance Eq Seen where
+  SeenL a == SeenL b = a == b
+  SeenM a == SeenM b = a == b
+  _ == _ = False
+
+-- A masked plain-data copy: functions dropped, cycles cut, and nothing
+-- shared with the live value, whose spec must stay raw.
+snapshot :: CleanRule -> Value -> Int -> [Seen] -> Value -> IO Value
+snapshot r key depth seen v = case v of
+  VNoval -> pure v
+  VNull -> pure v
+  VStr s -> pure (VStr (if sensitive then maskValue r s else cleanStr r s))
+  VFunc _ -> pure VNoval
+  VList ref -> node (SeenL ref) $ do
+    its <- readIORef ref
+    xs <- mapM (\(i, x) -> snapshot r (vint i) (depth + 1) (SeenL ref : seen) x) (zip [0 :: Int ..] its)
+    mkList xs
+  VMap ref -> node (SeenM ref) $ do
+    es <- readIORef ref
+    es' <- mapM (\(k, x) -> do y <- snapshot r (VStr k) (depth + 1) (SeenM ref : seen) x; pure (k, y))
+                [(k, x) | (k, x) <- es, not (isfunc x)]
+    mkMap es'
+  _ -> pure (if sensitive then VStr (crMask r) else v)
+  where
+    sensitive = sensitiveKey (crKeys r) key
+    node s body
+      | depth >= cleanMaxDepth || s `elem` seen = pure (VStr cleanCircular)
+      | sensitive = pure (VStr (crMask r))
+      | otherwise = body
+
+cleanWithCfg :: Value -> Value -> IO Value
+cleanWithCfg cfg v = do
+  r <- cleanRule cfg
+  if crActive r then snapshot r VNoval 0 [] v else pure v
+
 cleanUtil :: Context -> Value -> IO Value
-cleanUtil _ v = pure v
+cleanUtil ctx v = do cfg <- cleanConfigOf ctx; cleanWithCfg cfg v
+
+-- The caller holds its own reference to the explain map, so the cleaned
+-- copy is written into that node rather than swapped in beside it.
+overwriteMap :: Value -> Value -> IO ()
+overwriteMap (VMap dst) (VMap src) = readIORef src >>= writeIORef dst
+overwriteMap _ _ = pure ()
+
+cleanExplain :: Context -> IO ()
+cleanExplain ctx = do
+  ctrl <- readIORef (cCtrl ctx)
+  explain <- getp ctrl "explain"
+  case explain of
+    VMap _ -> do cleaned <- cleanUtil ctx explain; overwriteMap explain cleaned
+    _ -> pure ()
+
+-- The serialised context leaves the pipeline (a logger, an error dump), so
+-- it is cleaned; the live fields stay raw for the pipeline's own use.
+contextToValue :: Context -> IO Value
+contextToValue ctx = do
+  op <- readIORef (cOp ctx)
+  opm <- jo [("entity", VStr (opEntity op)), ("name", VStr (opName op)), ("input", VStr (opInput op))]
+  spec <- readIORef (cSpec ctx)
+  result <- readIORef (cResult ctx)
+  response <- readIORef (cResponse ctx)
+  meta <- readIORef (cMeta ctx)
+  ment <- readIORef (cEntity ctx)
+  record <- jo [ ("id", VStr (cId ctx)), ("op", opm), ("spec", spec)
+               , ("entity", maybe VNoval (VStr . eName) ment)
+               , ("result", result), ("response", response), ("meta", meta) ]
+  cleanUtil ctx record
+
+-- ----- make_error / done -----
 
 makeErrorUtil :: Context -> Maybe Value -> IO Value
 makeErrorUtil ctx merr = do
@@ -235,17 +485,22 @@ makeErrorUtil ctx merr = do
       re <- getp result "err"; isE <- isErr re
       if isE then pure re else mkErr "unknown" "unknown error"
   em <- errMsg err
-  let msg = "ProjectNameSDK: " ++ opname ++ ": " ++ em
+  msgV <- cleanUtil ctx (VStr ("ProjectNameSDK: " ++ opname ++ ": " ++ em))
+  let msg = vstring msgV
   setp result "err" VNoval
   ctrl <- readIORef (cCtrl ctx)
+  -- The stage errors reach here without passing done, so the explain record
+  -- is cleaned on this path too.
+  cleanExplain ctx
   explain <- getp ctrl "explain"
   case explain of
     VMap _ -> do e2 <- jo [("message", VStr msg)]; setp explain "err" e2
     _ -> pure ()
   ecode <- errCode err
-  rv <- resultToValue result
+  -- Cleaned COPIES: masking them can never mask the pipeline's own request.
+  rv <- cleanUtil ctx =<< resultToValue result
   specV <- readIORef (cSpec ctx)
-  sv <- case specV of VMap _ -> specToValue specV; _ -> pure VNoval
+  sv <- case specV of VMap _ -> cleanUtil ctx =<< specToValue specV; _ -> pure VNoval
   sdkErr <- jo [ ("__sdkerr__", VBool True), ("code", VStr ecode), ("message", VStr msg)
                , ("result", rv), ("spec", sv) ]
   setp ctrl "err" sdkErr
@@ -261,6 +516,7 @@ makeErrorUtil ctx merr = do
 
 doneUtil :: Context -> IO Value
 doneUtil ctx = do
+  cleanExplain ctx
   ctrl <- readIORef (cCtrl ctx)
   explain <- getp ctrl "explain"
   case explain of
@@ -1090,7 +1346,7 @@ optSpecValue = do
   sysm <- emptyMap
   testEnt <- jo [("`$OPEN`", VBool True)]
   test <- jo [("active", VBool False), ("entity", testEnt)]
-  clean <- jo [("keys", VStr "key,token,id")]
+  clean <- cleanOptSpec
   jo [ ("apikey", VStr ""), ("base", VStr "http://localhost:8000"), ("prefix", VStr ""), ("suffix", VStr "")
      , ("auth", auth), ("headers", hdrs), ("server", srv), ("allow", allow), ("entity", ent), ("feature", feat)
      , ("utility", utilm), ("system", sysm), ("test", test), ("clean", clean) ]
@@ -1109,6 +1365,19 @@ makeOptionsUtil ctx = do
     _ -> pure ()
   optsC <- clone options
   opts0 <- case optsC of VMap _ -> pure optsC; _ -> emptyMap
+  -- The secret registry exists BEFORE validation, fed from the raw input, so
+  -- the constructor's own rejection of a mistyped credential is clean too.
+  rawclean <- getp opts0 "clean"
+  rawcleanM <- case rawclean of VMap _ -> clone rawclean; _ -> emptyMap
+  specclean <- cleanOptSpec
+  emc <- emptyMap
+  cleanmerged <- merge =<< ja [emc, specclean, rawcleanM]
+  cleancfg <- makeCleanConfig cleanmerged
+  apikeyV <- getp opts0 "apikey"
+  secretV <- getp opts0 "secret"
+  cvalsV <- case rawclean of VMap _ -> getp rawclean "values"; _ -> pure VNoval
+  cvals <- splitvalues cvalsV
+  forM_ (apikeyV : secretV : map VStr cvals) (cleanAddCfg cleancfg)
   -- Feature add-order. options.feature may be given as an ordered LIST of
   -- {name, active, ...opts} entries (list position = add order) or a
   -- {name => {opts}} map. Normalize a list to a map (so merge/validate/init
@@ -1142,7 +1411,11 @@ makeOptionsUtil ctx = do
   em <- emptyMap
   mlist <- ja [em, cfgopts, opts0]
   merged <- merge mlist
-  validated <- validate INone merged optspec
+  attempt <- try (validate INone merged optspec) :: IO (Either StructError Value)
+  validated <- case attempt of
+    Right v -> pure v
+    -- The rejection quotes the offending value.
+    Left (StructError m) -> do r <- cleanRule cleancfg; throwIO (StructError (cleanStr r m))
   opts <- case validated of VMap _ -> pure validated; _ -> emptyMap
   -- Resolve a templated base URL (e.g. https://{tenant_id}.hanko.io).
   -- Every placeholder must resolve to a non-empty value: from options.server
@@ -1197,13 +1470,7 @@ makeOptionsUtil ctx = do
     case sys of
       VMap _ -> setp sys "fetch" sysFetch
       _ -> do s <- jo [("fetch", sysFetch)]; setp opts "system" s
-  ckv <- getpathS opts "clean.keys"
-  let cleanKeys = case ckv of VStr s -> s; _ -> "key,token,id"
-  parts <- fmap concat $ mapM (\p -> let t = strip p in if t == "" then pure [] else do e <- escreS t; pure [e]) (splitOnChar ',' cleanKeys)
-  let keyre = intercalate' "|" parts
-  cleanEmpty <- emptyMap
-  derived <- jo [("clean", cleanEmpty)]
-  when (keyre /= "") $ do cm <- jo [("keyre", VStr keyre)]; setp derived "clean" cm
+  derived <- jo [("clean", cleancfg)]
   -- Resolve the feature add-order: an explicit list order (above) wins;
   -- otherwise order the map test-first, then the remaining names sorted
   -- (keysof returns sorted keys), so the result is deterministic.
@@ -1216,12 +1483,17 @@ makeOptionsUtil ctx = do
   orderList <- ja (map VStr featureOrder)
   setp derived "featureorder" orderList
   setp opts "__derived__" derived
+  -- Every string under a sensitive name anywhere in the options - a custom
+  -- auth header, a feature credential - is a secret the SDK now handles.
+  scan <- clone opts
+  _ <- delprop scan (VStr "__derived__")
+  keys <- cfgStrings cleancfg "keys"
+  _ <- walk (Just (\key val _ _ -> do
+         case val of
+           VStr _ | sensitiveKey keys key -> cleanAddCfg cleancfg val
+           _ -> pure ()
+         pure val)) Nothing VNoval scan
   pure opts
-
-intercalate' :: String -> [String] -> String
-intercalate' _ [] = ""
-intercalate' _ [x] = x
-intercalate' sep (x : xs) = x ++ sep ++ intercalate' sep xs
 
 -- ------------------------------------------------------------------
 -- struct api exposure (utility.struct)

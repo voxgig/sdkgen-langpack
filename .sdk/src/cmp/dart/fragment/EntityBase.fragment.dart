@@ -240,6 +240,8 @@ class ProjectNameEntityBase {
     }
   }
 
+  Map<String, dynamic> toJson() => toJSON();
+
   Map<String, dynamic> toJSON() {
     final struct = utility.struct;
     final out = <String, dynamic>{};

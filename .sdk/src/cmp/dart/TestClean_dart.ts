@@ -1,0 +1,424 @@
+
+import { nom } from '@voxgig/apidef'
+
+import {
+  cmp,
+  each,
+  File,
+  Content,
+  entityCollection,
+  isAuthSuppressed,
+  isHttpBasicAuth,
+  resolveAuthIn,
+  resolveAuthName,
+} from '@voxgig/sdkgen'
+
+
+// The canary sweep (port of the ts TestClean component): canaries in every
+// credential slot, every diagnostic feature capturing into a sink, a real
+// operation through every outcome, and every emitted string searched for the
+// canaries and their encoded forms. Dart has no reflection, so the candidate
+// operations are listed at generation time.
+const TestClean = cmp(function TestClean(props: any) {
+  const { model } = props.ctx$
+
+  const auth = {
+    suppressed: isAuthSuppressed(model),
+    where: resolveAuthIn(model),
+    name: 'header' === resolveAuthIn(model)
+      ? resolveAuthName(model).toLowerCase() : resolveAuthName(model),
+    basic: isHttpBasicAuth(model),
+  }
+
+  const rank: Record<string, number> = { list: 0, load: 1 }
+  const candidates: string[] = []
+  each(entityCollection(model))
+    .filter((e: any) => false !== e.active)
+    .forEach((ent: any) => {
+      const ops = Object.keys(ent.op || {})
+        .filter((op) => ['list', 'load', 'create', 'update', 'remove'].includes(op))
+        .sort((a, b) => (rank[a] ?? 2) - (rank[b] ?? 2))
+      for (const op of ops) {
+        candidates.push(
+          `  _Candidate('${ent.name}.${op}', (sdk, ctrl) => sdk.${nom(ent, 'Name')}().${op}({}, ctrl)),`)
+      }
+    })
+
+  File({ name: 'clean_test.dart' }, () => Content(render(nom(model.const, 'Name'), auth, candidates)))
+})
+
+
+function render(
+  Name: string,
+  auth: { suppressed: boolean, where: string, name: string, basic: boolean },
+  candidates: string[],
+): string {
+  return `// ${Name} SDK secret-redaction sweep. GENERATED — do not edit.
+//
+// Every credential slot holds a canary, every diagnostic feature this SDK
+// carries captures into a sink, a real operation runs through every outcome,
+// and every string that leaves the SDK is searched for the canaries and their
+// encoded forms. The second test switches clean off and requires the canary
+// to show, so a sweep that cannot see a leak fails rather than passing.
+
+import 'dart:convert';
+
+import 'harness.dart';
+import 'feature/harness.dart' show hasFeature;
+
+import '../lib/${Name}SDK.dart';
+import '../lib/${Name}Error.dart';
+import '../lib/feature/base/BaseFeature.dart';
+
+// Generated: the credential's wire placement is fixed when the SDK is built.
+// The dart runtime always carries the credential in the Authorization
+// header (its prepareAuth is header-only), so that is the slot asserted.
+const AUTH = <String, dynamic>${JSON.stringify(auth)};
+
+const CANARY = <String, String>{
+  'apikey': 'CANARY-APIKEY-k9x2m7q4p1',
+  'secret': 'CANARY-SECRET-w3e8r5t2y6',
+  'header': 'CANARY-HEADER-z1x4c7v0b3',
+  'value': 'CANARY-VALUE-n5m8b2v9c4',
+};
+
+const MASK = '[redacted]';
+
+// Every form a canary can travel in.
+final List<String> FORMS = _forms();
+
+List<String> _forms() {
+  final out = <String>[];
+  for (final v in CANARY.values) {
+    out.add(v);
+    out.add(base64Encode(utf8.encode(v)));
+    out.add(Uri.encodeComponent(v));
+  }
+  out.add(base64Encode(utf8.encode(CANARY['apikey']! + ':' + CANARY['secret']!)));
+  return out;
+}
+
+class Sink {
+  final String name;
+  final String text;
+  Sink(this.name, this.text);
+}
+
+// Header maps keep the caller's spelling; the assertion should not care.
+dynamic header(dynamic map, String name) {
+  if (map is! Map) {
+    return null;
+  }
+  for (final k in map.keys) {
+    if (k.toString().toLowerCase() == name.toLowerCase()) {
+      return map[k];
+    }
+  }
+  return null;
+}
+
+List<String> leaks(String text) => FORMS.where((f) => text.contains(f)).toList();
+
+String? jsonText(dynamic val) {
+  try {
+    return jsonEncode(val);
+  } catch (_e) {}
+  try {
+    return jsonEncode((val as dynamic).toJSON());
+  } catch (_e) {}
+  return null;
+}
+
+List<Sink> forms(String name, dynamic val) {
+  final out = <Sink>[];
+  final json = jsonText(val);
+  if (null != json) {
+    out.add(Sink(name + ':json', json));
+  }
+  try {
+    out.add(Sink(name + ':string', val.toString()));
+  } catch (_e) {}
+  if (val is ${Name}Error) {
+    out.add(Sink(name + ':message', val.message));
+  }
+  return out;
+}
+
+// Captures the serialised context from inside the pipeline: what a hook
+// author would hand to a logger.
+class CaptureFeature extends BaseFeature {
+  final List<Sink> _sinks;
+
+  CaptureFeature(this._sinks) {
+    name = 'capture';
+    version = '0.0.1';
+    active = true;
+  }
+
+  @override
+  dynamic init(dynamic ctx, dynamic opts) => null;
+
+  void _capture(String hook, dynamic ctx) {
+    _sinks.addAll(forms('ctx@' + hook, ctx.toJSON()));
+    _sinks.add(Sink('ctx@' + hook + ':string', ctx.toString()));
+  }
+
+  @override
+  dynamic PreRequest(dynamic ctx) {
+    _capture('PreRequest', ctx);
+    return null;
+  }
+
+  @override
+  dynamic PreResponse(dynamic ctx) {
+    _capture('PreResponse', ctx);
+    return null;
+  }
+
+  @override
+  dynamic PreUnexpected(dynamic ctx) {
+    _capture('PreUnexpected', ctx);
+    return null;
+  }
+}
+
+typedef Respond = dynamic Function(String url, dynamic fetchdef);
+
+class Scenario {
+  final String name;
+  final Respond respond;
+  Scenario(this.name, this.respond);
+}
+
+Map<String, dynamic> response(int status, dynamic data,
+    [Map<String, String>? headers]) {
+  final h = <String, dynamic>{'content-type': 'application/json'};
+  headers?.forEach((k, v) => h[k] = v);
+  return {
+    'status': status,
+    'statusText': status < 400 ? 'OK' : 'ERR',
+    'headers': h,
+    'body': 'body',
+    'json': () => data,
+  };
+}
+
+final SCENARIOS = <Scenario>[
+  Scenario('ok', (url, fd) => response(200, {'id': 'i1', 'name': 'n1'},
+      {'x-session-token': 'RESP-TOKEN-a1b2c3d4e5'})),
+  Scenario('notfound', (url, fd) => response(404, {'error': 'no such record'})),
+  Scenario('server', (url, fd) => response(500, {'error': 'boom'})),
+  Scenario('transport',
+      (url, fd) => throw Exception('socket hang up (URL was: "' + url + '")')),
+  Scenario('notjson', (url, fd) => {
+        'status': 200,
+        'statusText': 'OK',
+        'headers': <String, dynamic>{},
+        'body': '<html>',
+        'json': () => throw FormatException('Unexpected token < in JSON'),
+      }),
+];
+
+${Name}SDK makeSdk(Scenario scenario, List<Sink> sinks,
+    [Map<String, dynamic>? cleanopts]) {
+  dynamic Function(dynamic) capture(String name) => (dynamic rec) {
+        sinks.addAll(forms(name, rec));
+        return null;
+      };
+
+  final feature = <String, dynamic>{};
+  if (hasFeature('log')) {
+    feature['log'] = {'active': true, 'logger': capture('log')};
+  }
+  if (hasFeature('debug')) {
+    feature['debug'] = {'active': true, 'onEntry': capture('debug')};
+  }
+  if (hasFeature('audit')) {
+    feature['audit'] = {'active': true, 'sink': capture('audit')};
+  }
+  if (hasFeature('telemetry')) {
+    feature['telemetry'] = {'active': true, 'exporter': capture('telemetry')};
+  }
+  if (hasFeature('cost')) {
+    feature['cost'] = {'active': true, 'sink': capture('cost')};
+  }
+  if (hasFeature('metrics')) {
+    feature['metrics'] = {'active': true};
+  }
+  if (hasFeature('clienttrack')) {
+    feature['clienttrack'] = {'active': true};
+  }
+
+  final clean = <String, dynamic>{'values': CANARY['value']};
+  cleanopts?.forEach((k, v) => clean[k] = v);
+
+  return ${Name}SDK(<String, dynamic>{
+    'apikey': CANARY['apikey'],
+    'secret': CANARY['secret'],
+    'headers': {'X-Custom-Token': CANARY['header']},
+    'clean': clean,
+    'feature': feature,
+    'extend': [CaptureFeature(sinks)],
+    'utility': {
+      'fetcher': (dynamic ctx, dynamic url, dynamic fetchdef) async =>
+          scenario.respond(url.toString(), fetchdef),
+    },
+  });
+}
+
+class _Candidate {
+  final String name;
+  final Future<dynamic> Function(dynamic sdk, dynamic ctrl) run;
+  const _Candidate(this.name, this.run);
+}
+
+// Every entity operation this SDK offers, list and load first.
+final CANDIDATES = <_Candidate>[
+${candidates.join('\n')}
+];
+
+// The first operation that completes against a plain 200 with no arguments
+// (a required path parameter would fail before the request is built).
+Future<_Candidate?> usableOp() async {
+  for (final c in CANDIDATES) {
+    final plain = ${Name}SDK(<String, dynamic>{
+      'apikey': CANARY['apikey'],
+      'utility': {
+        'fetcher': (dynamic ctx, dynamic url, dynamic fd) async =>
+            response(200, {'id': 'i1'}),
+      },
+    });
+    try {
+      await c.run(plain, <String, dynamic>{});
+      return c;
+    } catch (_e) {
+      continue;
+    }
+  }
+  return null;
+}
+
+Future<dynamic> drive(dynamic sdk, _Candidate target, Map<String, dynamic> ctrl,
+    List<Sink> sinks) async {
+  dynamic out;
+  dynamic err;
+  try {
+    out = await target.run(sdk, ctrl);
+  } catch (e) {
+    err = e;
+  }
+  if (null != err) {
+    sinks.addAll(forms('error', err));
+  }
+  if (null != out) {
+    sinks.addAll(forms('result', out));
+  }
+  if (null != ctrl['explain']) {
+    sinks.addAll(forms('explain', ctrl['explain']));
+  }
+  return err;
+}
+
+class _Variant {
+  final String name;
+  final Map<String, dynamic> Function() ctrl;
+  const _Variant(this.name, this.ctrl);
+}
+
+final VARIANTS = <_Variant>[
+  _Variant('throw', () => <String, dynamic>{}),
+  _Variant('explain', () => <String, dynamic>{'explain': <String, dynamic>{}}),
+  _Variant('nothrow',
+      () => <String, dynamic>{'throw': false, 'explain': <String, dynamic>{}}),
+];
+
+void tests() {
+  describe('clean', () {
+    test('no credential leaves the SDK in any form', (t) async {
+      final target = await usableOp();
+      ok(null != target, 'no operation completes without arguments; nothing to sweep');
+
+      final sinks = <Sink>[];
+      final errors = <String, dynamic>{};
+      final explains = <String, dynamic>{};
+
+      for (final scenario in SCENARIOS) {
+        for (final variant in VARIANTS) {
+          final sdk = makeSdk(scenario, sinks);
+          final ctrl = variant.ctrl();
+          final err = await drive(sdk, target!, ctrl, sinks);
+          final key = scenario.name + '/' + variant.name;
+          if (null != err) {
+            errors[key] = err;
+          }
+          if (null != ctrl['explain']) {
+            explains[key] = ctrl['explain'];
+          }
+          sinks.addAll(forms('sdk', sdk));
+        }
+      }
+
+      final leaked = <String>[];
+      for (final s in sinks) {
+        final found = leaks(s.text);
+        if (found.isNotEmpty) {
+          leaked.add(s.name + ' [' + found.join(', ') + ']');
+        }
+      }
+
+      print('clean: swept ' +
+          sinks.length.toString() +
+          ' surface(s), ' +
+          leaked.length.toString() +
+          ' leak(s)');
+
+      equal(0, leaked.length, 'credential leaked through: ' + leaked.join('; '));
+
+      // The positive half: the slot the credential travelled in is masked,
+      // and an unregistered token in a response header is masked by name.
+      final notfound = errors['notfound/throw'];
+      ok(null != notfound, 'the 404 scenario must throw');
+      equal(404, notfound.status);
+      if (true != AUTH['suppressed']) {
+        final spec = notfound.spec ?? {};
+        final authval = header(spec['headers'], 'authorization');
+        ok(authval.toString().endsWith(MASK), 'authorization: ' + authval.toString());
+      }
+      equal(MASK, header(notfound.spec['headers'], 'x-custom-token'));
+
+      final explained = explains['ok/explain'] ?? {};
+      ok(null != explained['result'], 'the explain record should carry the result');
+      equal(MASK, header(explained['result']['headers'], 'x-session-token'));
+    });
+
+    test('the sweep can see a leak: clean switched off shows the credential',
+        (t) async {
+      final target = await usableOp();
+      ok(null != target);
+
+      final sinks = <Sink>[];
+      final sdk = makeSdk(SCENARIOS[1], sinks, {'active': false});
+      final err = await drive(sdk, target!, <String, dynamic>{}, sinks);
+      ok(null != err);
+
+      final leaked = sinks.where((s) => leaks(s.text).isNotEmpty).toList();
+      ok(leaked.isNotEmpty, 'with clean off, nothing showed the canary: the sweep is blind');
+
+      if (true != AUTH['suppressed']) {
+        final text = jsonText(err.spec) ?? '';
+        ok(
+            text.contains(CANARY['apikey']!) ||
+                text.contains(base64Encode(
+                    utf8.encode(CANARY['apikey']! + ':' + CANARY['secret']!))),
+            'the raw spec should carry the credential when clean is off');
+      }
+    });
+  });
+}
+`
+}
+
+
+export {
+  TestClean
+}

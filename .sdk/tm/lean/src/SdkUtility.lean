@@ -67,18 +67,219 @@ def isErrV (v : Value) : SIO Bool := do
   | .map _ => pure (truthy (← gp v "__sdkerr__"))
   | _ => pure false
 
-/-- Remove configured sensitive keys (options.clean.keys) from a value. -/
-def clean (ctx : Value) (v : Value) : SIO Value := do
-  let options ← gp ctx "options"
-  let keysStr ← gpS (← gp options "clean") "keys"
-  let drop := if keysStr == "" then #[] else (keysStr.splitOn ",").toArray
-  let out ← clone v
-  match out with
-  | .map _ =>
-    for k in drop do
-      if k != "" then dp out k
-  | _ => pure ()
+-- ---------------------------------------------------------------------------
+-- clean: what leaves the pipeline is masked
+--
+-- Everything that leaves the pipeline passes through `clean`; inside it data
+-- stays raw, so a hook can still read the header it must add to. See the
+-- generator's docs/explanation/secret-redaction.md.
+-- ---------------------------------------------------------------------------
+
+def CLEAN_MAXDEPTH : Nat := 32
+
+/-- The `clean` block of the option spec (main.kit.optspec.clean in the sdkgen
+    base model), held here because this pack's targets read no generated
+    Schema module. Numbers are strings, like every optspec value. -/
+def cleanOptSpec : SIO Value :=
+  newMap #[("active", .bool true),
+           ("keys", .str "key,secret,token,password,passwd,authorization,cookie,credential,signature"),
+           ("values", .str ""), ("mask", .str "[redacted]"), ("hint", .str "0"), ("min", .str "4")]
+
+def normkey (k : String) : String :=
+  String.ofList (k.toLower.toList.filter (fun c => c != '-' && c != '_'))
+
+def trimS (s : String) : String := s.trimAscii.toString
+
+def splitkeys (v : Value) : Array String :=
+  (((vs v).splitOn ",").toArray.map (fun k => normkey (trimS k))).filter (· != "")
+
+def splitvalues (v : Value) : SIO (Array String) := do
+  match v with
+  | .list id => pure ((← listItems id).filterMap (fun x => match x with | .str s => some s | _ => none))
+  | .str s => pure (((s.splitOn ",").toArray.map trimS).filter (· != ""))
+  | _ => pure #[]
+
+def countOpt (v : Value) (dflt : Nat) : Nat :=
+  match v with
+  | .num n => if n >= 0.0 then (fToInt n).toNat else dflt
+  | .str s => (trimS s).toNat?.getD dflt
+  | _ => dflt
+
+/-- The derived clean block is a map, so features can register into its
+    `values` list after makeOptions; `keys` holds the normalised names. -/
+def makeCleanConfig (cleanopts : Value) : SIO Value := do
+  let opts ← asMap cleanopts
+  let active := match (← gp opts "active") with | .bool false => false | _ => true
+  let keys ← newList ((splitkeys (← gp opts "keys")).map Value.str)
+  let values ← emptyList
+  let mask := match (← gp opts "mask") with | .str m => m | _ => "[redacted]"
+  let hint := countOpt (← gp opts "hint") 0
+  let mn := max 1 (countOpt (← gp opts "min") 4)
+  newMap #[("active", .bool active), ("keys", keys), ("values", values),
+           ("mask", .str mask), ("hint", .num hint.toFloat), ("min", .num mn.toFloat)]
+
+/-- Options without a derived block (a bare context) still mask by the
+    schema defaults. -/
+def cleanConfigOfOptions (options : Value) : SIO Value := do
+  let derived ← gp (← gp options "__derived__") "clean"
+  match derived with
+  | .map _ => pure derived
+  | _ => do makeCleanConfig (← cleanOptSpec)
+
+def cleanConfig (ctx : Value) : SIO Value := do cleanConfigOfOptions (← gp ctx "options")
+
+def cfgStrings (cfg : Value) (k : String) : SIO (Array String) := do
+  pure ((← listItemsOf (← gp cfg k)).filterMap (fun x => match x with | .str s => some s | _ => none))
+
+def cfgNat (cfg : Value) (k : String) (d : Nat) : SIO Nat := do
+  match (← gp cfg k) with
+  | .num n => pure (fToInt n).toNat
+  | _ => pure d
+
+def base64Encode (s : String) : String := Id.run do
+  let tbl := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toList.toArray
+  let bytes := s.toUTF8
+  let at (n : Nat) : Char := tbl[n % 64]!
+  let mut out := ""
+  for t in [0 : bytes.size / 3] do
+    let i := t * 3
+    let n := (bytes[i]!.toNat <<< 16) ||| (bytes[i + 1]!.toNat <<< 8) ||| bytes[i + 2]!.toNat
+    out := (((out.push (at (n >>> 18))).push (at (n >>> 12))).push (at (n >>> 6))).push (at n)
+  let i := (bytes.size / 3) * 3
+  let rem := bytes.size - i
+  if rem == 2 then
+    let n := (bytes[i]!.toNat <<< 16) ||| (bytes[i + 1]!.toNat <<< 8)
+    out := (((out.push (at (n >>> 18))).push (at (n >>> 12))).push (at (n >>> 6))).push '='
+  else if rem == 1 then
+    let n := bytes[i]!.toNat <<< 16
+    out := (((out.push (at (n >>> 18))).push (at (n >>> 12))).push '=').push '='
+  return out
+
+def hexDigitVal (c : Char) : Option Nat :=
+  if c.isDigit then some (c.toNat - '0'.toNat)
+  else if 'a' ≤ c && c ≤ 'f' then some (c.toNat - 'a'.toNat + 10)
+  else if 'A' ≤ c && c ≤ 'F' then some (c.toNat - 'A'.toNat + 10)
+  else none
+
+partial def percentDecodeList : List Char → List Char
+  | '%' :: a :: b :: rest =>
+    match hexDigitVal a, hexDigitVal b with
+    | some x, some y => Char.ofNat (x * 16 + y) :: percentDecodeList rest
+    | _, _ => '%' :: percentDecodeList (a :: b :: rest)
+  | c :: rest => c :: percentDecodeList rest
+  | [] => []
+
+def percentDecode (s : String) : String := String.ofList (percentDecodeList s.toList)
+
+/-- The encoded forms a value travels in. -/
+def cleanForms (value : String) : SIO (Array String) := do
+  let pe ← match (← escurl (.str value)) with | .str s => pure s | _ => pure value
+  let js := jsonEscapeStr value
+  let jsIn := if js.length >= 2 then (js.drop 1).dropRight 1 else js
+  let mut out : Array String := #[]
+  for f in #[value, base64Encode value, pe, jsIn] do
+    if f != "" && !out.contains f then out := out.push f
   pure out
+
+def cleanAddCfg (cfg : Value) (value : Value) : SIO Unit := do
+  let mn ← cfgNat cfg "min" 4
+  match value with
+  | .str s =>
+    if s.length < mn then return ()
+    match (← gp cfg "values") with
+    | .list id =>
+      let have := (← listItems id).filterMap (fun x => match x with | .str t => some t | _ => none)
+      let mut merged := have
+      let mut changed := false
+      for f in (← cleanForms s) do
+        if f.length >= mn && !merged.contains f then
+          merged := merged.push f
+          changed := true
+      if changed then
+        setListItems id ((merged.qsort (fun a b => a.length > b.length)).map Value.str)
+    | _ => pure ()
+  | _ => pure ()
+
+def cleanAddOptions (options : Value) (value : Value) : SIO Unit := do
+  cleanAddCfg (← cleanConfigOfOptions options) value
+
+def cleanAdd (ctx : Value) (value : Value) : SIO Unit := do cleanAddCfg (← cleanConfig ctx) value
+
+structure CleanRule where
+  active : Bool
+  mask : String
+  hint : Nat
+  keys : Array String
+  values : Array String
+
+def cleanRule (cfg : Value) : SIO CleanRule := do
+  let active := match (← gp cfg "active") with | .bool false => false | _ => true
+  let mask := match (← gp cfg "mask") with | .str m => m | _ => "[redacted]"
+  pure { active := active, mask := mask, hint := ← cfgNat cfg "hint" 0,
+         keys := ← cfgStrings cfg "keys", values := ← cfgStrings cfg "values" }
+
+def maskValue (r : CleanRule) (v : String) : String :=
+  if r.hint > 0 && v.length > 2 * r.hint then r.mask ++ v.drop (v.length - r.hint) else r.mask
+
+def cleanStr (r : CleanRule) (text : String) : String := Id.run do
+  let mut out := text
+  for v in r.values do
+    out := out.replace v (maskValue r v)
+  return out
+
+def sensitiveKey (keys : Array String) (key : Option String) : Bool :=
+  match key with
+  | some k => let nk := normkey k; keys.any (fun s => (nk.splitOn s).length > 1)
+  | none => false
+
+def cleanKey (ctx : Value) (key : String) : SIO Bool := do
+  pure (sensitiveKey (← cfgStrings (← cleanConfig ctx) "keys") (some key))
+
+/-- A masked plain-data copy: functions dropped, cycles cut, and nothing
+    shared with the live value, whose spec must stay raw. -/
+partial def snapshot (r : CleanRule) (key : Option String) (depth : Nat) (seen : Array Nat)
+    (v : Value) : SIO Value := do
+  let sensitive := sensitiveKey r.keys key
+  match v with
+  | .noval | .null => pure v
+  | .str s => pure (.str (if sensitive then maskValue r s else cleanStr r s))
+  | .func _ => pure .noval
+  | .list id =>
+    if depth >= CLEAN_MAXDEPTH || seen.contains id then pure (.str "[circular]")
+    else if sensitive then pure (.str r.mask)
+    else do
+      let mut out : Array Value := #[]
+      for x in (← listItems id) do
+        out := out.push (← snapshot r none (depth + 1) (seen.push id) x)
+      newList out
+  | .map id =>
+    if depth >= CLEAN_MAXDEPTH || seen.contains id then pure (.str "[circular]")
+    else if sensitive then pure (.str r.mask)
+    else do
+      let mut out : Array (String × Value) := #[]
+      for (k, x) in (← mapEntries id) do
+        match x with
+        | .func _ => pure ()
+        | _ => out := out.push (k, ← snapshot r (some k) (depth + 1) (seen.push id) x)
+      newMap out
+  | _ => pure (if sensitive then .str r.mask else v)
+
+def cleanWithCfg (cfg : Value) (v : Value) : SIO Value := do
+  let r ← cleanRule cfg
+  if r.active then snapshot r none 0 #[] v else pure v
+
+/-- Mask what is about to leave: a string has every registered value form
+    replaced; a structure comes back as a masked copy. `active: false`
+    returns the value untouched. -/
+def clean (ctx : Value) (v : Value) : SIO Value := do cleanWithCfg (← cleanConfig ctx) v
+
+/-- The serialised context leaves the pipeline (a hook's dump, a log line),
+    so it is cleaned; the live fields stay raw for the pipeline's own use. -/
+def contextJson (ctx : Value) : SIO Value := do
+  let record ← newMap #[("op", ← gp ctx "op"), ("spec", ← gp ctx "spec"),
+                        ("result", ← gp ctx "result"), ("response", ← gp ctx "response"),
+                        ("point", ← gp ctx "point")]
+  clean ctx record
 
 -- ---------------------------------------------------------------------------
 -- Operation naming
@@ -128,13 +329,23 @@ def defaultOptions : SIO Value := do
   let allow ← newMap #[("op", .str "create,update,load,list,remove,command,direct,graphql")]
   newMap #[("base", .str "http://localhost:8000"), ("prefix", .str ""),
            ("suffix", .str ""), ("headers", hdr), ("entity", ent),
-           ("allow", allow)]
+           ("allow", allow), ("clean", ← cleanOptSpec)]
 
 /-- Defaults <- config.options <- options, then every entity gets an alias map. -/
 def makeOptions (config options : Value) : SIO Value := do
   let base ← defaultOptions
   let copts ← asMap (← gp config "options")
   let uopts ← asMap options
+  -- The secret registry is fed from the RAW input, before anything else
+  -- reads the options.
+  let rawclean ← gp uopts "clean"
+  let rawcleanM ← match rawclean with | .map _ => clone rawclean | _ => emptyMap
+  let cleanmerged ← merge (← newList #[← emptyMap, ← cleanOptSpec, rawcleanM])
+  let cleancfg ← makeCleanConfig cleanmerged
+  cleanAddCfg cleancfg (← gp uopts "apikey")
+  cleanAddCfg cleancfg (← gp uopts "secret")
+  for v in (← splitvalues (← gp rawclean "values")) do
+    cleanAddCfg cleancfg (.str v)
   let parts ← newList #[base, copts, uopts]
   let out ← merge parts
   let ent ← gpMap out "entity"
@@ -148,6 +359,17 @@ def makeOptions (config options : Value) : SIO Value := do
         let a ← emptyMap
         sp e "alias" a
     | _ => pure ()
+  sp out "__derived__" (← newMap #[("clean", cleancfg)])
+  -- Every string under a sensitive name anywhere in the options - a custom
+  -- auth header, a feature credential - is a secret the SDK now handles.
+  let scan ← clone out
+  dp scan "__derived__"
+  let keys ← cfgStrings cleancfg "keys"
+  let _ ← walk scan (before := some (fun key val _ _ => do
+    match val, key with
+    | .str _, .str k => if sensitiveKey keys (some k) then cleanAddCfg cleancfg val
+    | _, _ => pure ()
+    pure val))
   pure out
 
 def makeContext (ctxmap : Value) : SIO Value := do
@@ -185,7 +407,9 @@ def makeError (ctx : Value) (errv : Value) : SIO Value := do
     | .map _ => gpS rerr "message"
     | _ => pure ""
   let msg := if m1 != "" then m1 else if m2 != "" then m2 else "unknown error"
-  mkErr "sdk_error" (nm ++ "SDK: " ++ opname ++ ": " ++ msg)
+  -- About to be thrown: the message is cleaned as it is built.
+  let full ← clean ctx (.str (nm ++ "SDK: " ++ opname ++ ": " ++ msg))
+  mkErr "sdk_error" (vs full)
 
 /-- The explain record the caller asked for, finished off: sensitive keys
     removed, and the result's error dropped from it. The error is reported on

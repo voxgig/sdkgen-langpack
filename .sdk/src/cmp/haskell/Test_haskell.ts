@@ -7,6 +7,7 @@ import { cmp, each, Folder, File, Content, entityCollection } from '@voxgig/sdkg
 
 import { hsVarName } from './utility_haskell'
 import { ReadmeExamplesTest } from './ReadmeExamplesTest_haskell'
+import { TestClean } from './TestClean_haskell'
 
 
 // test/SdkGenTests.hs — model-driven per-entity tests: an instance test, a
@@ -23,6 +24,7 @@ const Test = cmp(function Test(props: any) {
   Folder({ name: 'test' }, () => {
 
     ReadmeExamplesTest({ target })
+    TestClean({ target })
 
     File({ name: 'SdkGenTests.' + target.ext }, () => {
 

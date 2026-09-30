@@ -18,6 +18,7 @@ import qualified TNetsim
 import qualified TCustomUtility
 import qualified TPrimaryUtility
 import qualified TPrimaryCorpus
+import qualified TClean
 import qualified SdkGenTests
 
 main :: IO ()
@@ -33,6 +34,7 @@ main = do
   TCustomUtility.tests c
   TPrimaryUtility.tests c alltests
   TPrimaryCorpus.tests c alltests
+  TClean.tests c
   SdkGenTests.genTests c
 
   fs <- readIORef (failures c)

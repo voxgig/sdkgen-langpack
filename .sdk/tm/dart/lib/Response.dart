@@ -22,6 +22,8 @@ class Response {
   Future<dynamic> json() async =>
       null == jsonFn ? null : await Future.value(jsonFn());
 
+  Map<String, dynamic> toJson() => toJSON();
+
   Map<String, dynamic> toJSON() => {
         'status': status,
         'statusText': statusText,

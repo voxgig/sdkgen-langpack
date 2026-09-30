@@ -449,8 +449,8 @@ def main : IO UInt32 := do
         "pipeline: done keeps the explained result"
       check (SdkRuntime.isNv (← gp (← gp ex "result") "err"))
         "pipeline: done drops the error from the explained result"
-      check (SdkRuntime.isNv (← gp ex "fetchdef"))
-        "pipeline: done cleans the explain record of the configured keys"
+      check ((← gpS ex "fetchdef") == "[redacted]")
+        "pipeline: done masks the explain record's configured keys"
       check ((← gpS (← gp ex "err") "code") == "request_status")
         "pipeline: the failure is reported on the explain record itself")
 

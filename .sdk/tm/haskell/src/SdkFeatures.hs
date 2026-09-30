@@ -105,12 +105,30 @@ baseFeature = do
   pure Feature { fName = "base", fVersion = "0.0.1", fActive = active, fOptions = fopts
                , fInit = \_ _ -> pure (), fHook = \_ _ -> pure () }
 
+-- A log line leaves the pipeline, so it carries the cleaned record: the spec
+-- after auth holds the credential, and a logger prints what it is handed.
+-- The record goes to the `logger` option (a struct function); with none
+-- set the feature records nothing.
 logFeature :: IO Feature
 logFeature = do
   (active, fopts) <- featureBase
-  let initFn _ opts = do a <- optActive opts; writeIORef active a
+  options <- newIORef =<< emptyMap
+  let logHooks = [ "PostConstruct", "PostConstructEntity", "SetData", "GetData", "GetMatch"
+                 , "PrePoint", "PreSpec", "PreRequest", "PreResponse", "PreResult" ]
+      hookFn name ctx = do
+        a <- readIORef active
+        opts <- readIORef options
+        logger <- getp opts "logger"
+        when (a && isCallable logger && name `elem` logHooks) $ do
+          op <- readIORef (cOp ctx)
+          spec <- readIORef (cSpec ctx)
+          cv <- contextToValue ctx
+          record <- jo [("hook", VStr name), ("op", VStr (opName op)), ("spec", spec), ("ctx", cv)]
+          cleaned <- cleanUtil ctx record
+          () <$ callVfn logger cleaned
+      initFn _ opts = do om <- toOptsMap opts; writeIORef options om; a <- optActive opts; writeIORef active a
   pure Feature { fName = "log", fVersion = "0.0.1", fActive = active, fOptions = fopts
-               , fInit = initFn, fHook = \_ _ -> pure () }
+               , fInit = initFn, fHook = hookFn }
 
 -- ------------------------------------------------------------------
 -- retry
@@ -438,9 +456,10 @@ telemetryFeature = do
             start <- getp spanV "start"; let s = case start of { VNum n -> n; _ -> 0 }
             setp spanV "durationMs" (VNum (max 0 (end - s)))
             setp spanV "ok" (VBool ok)
+            out <- cleanUtil ctx spanV
             t <- telemetry ctx; bumpNum t "active" (-1)
-            spans <- getp t "spans"; appendList spans spanV
-            expv <- getp opts "exporter"; case expv of VFunc _ -> () <$ callVfn expv spanV; _ -> pure ()
+            spans <- getp t "spans"; appendList spans out
+            expv <- getp opts "exporter"; case expv of VFunc _ -> () <$ callVfn expv out; _ -> pure ()
           _ -> pure ()
       hookFn name ctx = do
         a <- readIORef active
@@ -491,13 +510,15 @@ debugFeature = do
   (active, fopts) <- featureBase
   options <- newIORef =<< emptyMap
   let debug ctx = do cl <- cc ctx; trackBucket cl "debug" (do es <- emptyList; jo [("entries", es)])
-      redact headers = case headers of
+      -- The core clean rules apply (clean.keys, every registered value); the
+      -- feature's own `redact` list ADDS header names on top of them.
+      redact ctx headers = case headers of
         VMap _ -> do
           opts <- readIORef options
-          patterns <- optStrList opts "redact" ["authorization", "cookie", "set-cookie", "api-key", "apikey", "x-api-key", "idempotency-key"]
+          patterns <- map lower <$> optStrList opts "redact" []
           out <- emptyMap; ks <- keysof headers
-          forM_ ks $ \k -> if lower k `elem` patterns then setp out k (VStr "<redacted>") else do v <- getp headers k; setp out k v
-          pure out
+          forM_ ks $ \k -> if lower k `elem` patterns then setp out k (VStr "[redacted]") else do v <- getp headers k; setp out k v
+          cleanUtil ctx out
         _ -> emptyMap
       finish ctx ok = do
         entryV <- scratchGet ctx "debug_entry"
@@ -511,10 +532,14 @@ debugFeature = do
             setp entryV "durationMs" (VNum (max 0 (now - s)))
             st <- getp entryV "status"
             case st of VNoval -> case rv of { VMap _ -> do { rs <- getp rv "status"; setp entryV "status" rs }; _ -> pure () }; _ -> pure ()
-            d <- debug ctx; buf <- getp d "entries"; appendList buf entryV
+            -- The whole entry leaves through the buffer and the callback: the
+            -- url and the error message can carry a query credential the
+            -- header mask never saw.
+            cleaned <- cleanUtil ctx entryV
+            d <- debug ctx; buf <- getp d "entries"; appendList buf cleaned
             mx <- optInt opts "max" 100
             trimList buf mx
-            oe <- getp opts "onEntry"; case oe of VFunc _ -> () <$ callVfn oe entryV; _ -> pure ()
+            oe <- getp opts "onEntry"; case oe of VFunc _ -> () <$ callVfn oe cleaned; _ -> pure ()
           _ -> pure ()
       hookFn name ctx = do
         a <- readIORef active
@@ -527,7 +552,7 @@ debugFeature = do
             (methodV, urlV, hdrs) <- case specV of
               VMap _ -> do m <- getp specV "method"; u0 <- getStrD specV "url" ""; p0 <- getStrD specV "path" ""; h <- getp specV "headers"; pure (m, VStr (if u0 /= "" then u0 else p0), h)
               _ -> pure (VNoval, VNoval, VNoval)
-            rh <- redact hdrs
+            rh <- redact ctx hdrs
             entry <- jo [("op", VStr opname), ("method", methodV), ("url", urlV), ("headers", rh), ("start", VNum now), ("status", VNoval), ("ok", VNoval), ("durationMs", VNoval), ("error", VNoval)]
             scratchSet ctx "debug_entry" entry
           "PreResponse" -> do
@@ -584,7 +609,8 @@ auditFeature = do
               _ -> pure ac
             now <- nowOf opts; op <- readIORef (cOp ctx)
             rv <- readIORef (cResult ctx); statusV <- case rv of VMap _ -> getp rv "status"; _ -> pure VNoval
-            record <- jo [ ("seq", vint sq), ("ts", VNum now), ("actor", actor)
+            record <- cleanUtil ctx =<< jo
+                         [ ("seq", vint sq), ("ts", VNum now), ("actor", actor)
                          , ("entity", VStr (if opEntity op /= "" then opEntity op else "_"))
                          , ("op", VStr (if opName op /= "" then opName op else "_"))
                          , ("outcome", VStr outcome), ("status", statusV), ("correlationId", VStr (cId ctx)) ]
@@ -840,7 +866,26 @@ proxyFeature = do
   options <- newIORef =<< emptyMap
   purl <- newIORef VNoval
   noproxy <- newIORef ([] :: [String])
-  let track ctx = do cl <- cc ctx; pv <- readIORef purl; bucket <- trackBucket cl "proxy" (jo [("routed", VNum 0), ("url", pv)]); bumpNum bucket "routed" 1
+  let track ctx = do cl <- cc ctx; pv <- readIORef purl; pvc <- cleanUtil ctx pv; bucket <- trackBucket cl "proxy" (jo [("routed", VNum 0), ("url", pvc)]); bumpNum bucket "routed" 1
+      -- A proxy URL may carry credentials as userinfo, from the option or the
+      -- environment, and neither is under a sensitive key name.
+      registerUserinfo ctx = do
+        pv <- readIORef purl
+        case pv of
+          VStr url -> do
+            let afterScheme = case breakOn "://" url of Just rest -> rest; Nothing -> url
+                authority = takeWhile (/= '/') afterScheme
+            when ('@' `elem` authority) $ do
+              let info = reverse (drop 1 (dropWhile (/= '@') (reverse authority)))
+                  (user, pass0) = break (== ':') info
+                  parts = user : (case pass0 of (_ : p) -> [p]; [] -> [])
+              forM_ parts $ \part -> when (part /= "") $ do
+                cleanAddUtil ctx (VStr part)
+                cleanAddUtil ctx (VStr (percentDecode part))
+          _ -> pure ()
+      breakOn pat s = go s
+        where go [] = Nothing
+              go xs@(_ : rest) = if take (length pat) xs == pat then Just (drop (length pat) xs) else go rest
       bypass url = do np <- readIORef noproxy; if null np then pure False else do { let { host = urlHost url }; pure (any (\p -> p == "*" || host == p || endsWith host ("." ++ stripLeadDot p)) np) }
       route ctx url fd = do
         pv <- readIORef purl
@@ -874,6 +919,7 @@ proxyFeature = do
               mv <- firstEnv ["NO_PROXY", "no_proxy"]
               case mv of Just v -> writeIORef npListRef (filter (/= "") (map strip (splitOnChar ',' v))); Nothing -> pure ()
           npFinal <- readIORef npListRef; writeIORef noproxy npFinal
+          registerUserinfo ctx
           u <- cu ctx; inner <- readIORef (uFetcher u); writeIORef (uFetcher u) (\c ur f -> do f2 <- route c ur f; inner c ur f2)
   pure Feature { fName = "proxy", fVersion = "0.0.1", fActive = active, fOptions = fopts, fInit = initFn, fHook = \_ _ -> pure () }
 

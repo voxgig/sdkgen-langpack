@@ -529,7 +529,7 @@ tests c = do
     ss <- readIORef seen
     e0 <- case ss of (s : _) -> pure s; [] -> pure VNoval
     hdrs <- getp e0 "headers"; auth <- getp hdrs "authorization"
-    pure (length es == 1 && length ss == 2 && vstring auth == "<redacted>")
+    pure (length es == 1 && length ss == 2 && vstring auth == "[redacted]")
 
   runTest c "feature.debug_captures_failures" $ do
     nopts <- jo [("failTimes", VNum 1), ("failStatus", VNum 500)]
@@ -551,7 +551,7 @@ tests c = do
     entries <- getp bucket "entries"; es <- listVals entries
     e0 <- case es of (s : _) -> pure s; [] -> pure VNoval
     hdrs <- getp e0 "headers"; sec <- getp hdrs "x-secret"; okh <- getp hdrs "x-ok"
-    pure (vstring sec == "<redacted>" && vstring okh == "show")
+    pure (vstring sec == "[redacted]" && vstring okh == "show")
 
   runTest c "feature.debug_inactive_records_nothing" $ do
     dopts <- jo [("active", VBool False)]

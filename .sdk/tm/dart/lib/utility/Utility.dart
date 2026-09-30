@@ -33,6 +33,7 @@ import 'StructUtility.dart';
 
 class Utility {
   dynamic clean = u.clean;
+  dynamic cleanAdd = u.cleanAdd;
   dynamic done = u.done;
   dynamic makeError = u.makeError;
   dynamic featureAdd = u.featureAdd;
@@ -75,6 +76,9 @@ class Utility {
     switch (name) {
       case 'clean':
         clean = fn;
+        break;
+      case 'cleanAdd':
+        cleanAdd = fn;
         break;
       case 'done':
         done = fn;
@@ -176,6 +180,8 @@ class Utility {
     switch (name) {
       case 'clean':
         return clean;
+      case 'cleanAdd':
+        return cleanAdd;
       case 'done':
         return done;
       case 'makeError':

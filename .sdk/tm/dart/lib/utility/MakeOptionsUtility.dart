@@ -2,11 +2,34 @@ import '../ProjectNameError.dart';
 
 import 'voxgig_struct.dart' as vs;
 
+import 'CleanUtility.dart';
+import 'ErrUtility.dart';
 import 'FetcherUtility.dart';
 
 dynamic makeOptions(dynamic ctx) {
   final utility = ctx.utility;
   final options = ctx.options;
+
+  // The secret registry exists BEFORE validation, fed from the raw input, so
+  // the constructor's own rejection of a mistyped credential is clean too.
+  final rawclean = vs.getprop(options, 'clean');
+  final cleancfg = makeCleanConfig(vs.merge([
+    {},
+    vs.clone(CLEAN_OPTSPEC),
+    rawclean is Map ? vs.clone(rawclean) : {},
+  ]));
+  final cleanctx = {
+    'options': {
+      '__derived__': {'clean': cleancfg}
+    }
+  };
+  for (final raw in [
+    vs.getprop(options, 'apikey'),
+    vs.getprop(options, 'secret'),
+    ...splitvalues(rawclean is Map ? rawclean['values'] : null),
+  ]) {
+    cleanAdd(cleanctx, raw);
+  }
 
   // Custom utility overrides.
   final customUtils = vs.getprop(options, 'utility') ?? {};
@@ -64,9 +87,7 @@ dynamic makeOptions(dynamic ctx) {
         '`\$OPEN`': true,
       },
     },
-    'clean': {
-      'keys': 'key,token,id',
-    },
+    'clean': CLEAN_OPTSPEC,
     // Server-variable values for a templated base URL (OpenAPI server
     // variables): {name} placeholders in "base" are substituted from this
     // map at construction. Spec defaults arrive via the generated config;
@@ -127,7 +148,17 @@ dynamic makeOptions(dynamic ctx) {
     opts.remove('auth');
   }
 
-  opts = vs.validate(opts, optspec);
+  try {
+    opts = vs.validate(opts, optspec);
+  } catch (err) {
+    // The rejection quotes the offending value. StructError's message is
+    // final, so the cleaned one is rebuilt rather than edited.
+    final msg = clean(cleanctx, errmsg(err));
+    if (err is vs.StructError) {
+      throw vs.StructError(msg);
+    }
+    throw ProjectNameError('options_invalid', msg, ctx);
+  }
 
   // Restore the suppression the optspec default would otherwise erase.
   if (authSuppressed && opts is Map) {
@@ -177,18 +208,6 @@ dynamic makeOptions(dynamic ctx) {
     opts['system'] = {'fetch': sysFetch};
   }
 
-  final cleanKeys =
-      (vs.getpath(opts, 'clean.keys') ?? 'key,token,id').toString();
-
-  final parts = <String>[];
-  for (final part in cleanKeys.split(',')) {
-    final trimmed = part.trim();
-    if ('' != trimmed) {
-      parts.add(vs.escre(trimmed));
-    }
-  }
-  final keyre = parts.join('|');
-
   // Resolve the feature add-order: an explicit List order (above) wins;
   // otherwise order the map test-first, then the remaining names sorted, so
   // the outcome is deterministic and `test` is always the base transport.
@@ -223,11 +242,21 @@ dynamic makeOptions(dynamic ctx) {
   }
 
   opts['__derived__'] = {
-    'clean': {
-      'keyre': '' == keyre ? null : keyre,
-    },
+    'clean': cleancfg,
     'featureorder': featureorder,
   };
+
+  // Every string under a sensitive name anywhere in the options - a custom
+  // auth header, a feature credential - is a secret the SDK now handles.
+  final optctx = {'options': opts};
+  final scan = vs.clone(opts);
+  scan.remove('__derived__');
+  vs.walk(scan, before: (dynamic key, dynamic val, dynamic parent, dynamic path) {
+    if (val is String && cleanKey(optctx, key)) {
+      cleanAdd(optctx, val);
+    }
+    return val;
+  });
 
   return opts;
 }
