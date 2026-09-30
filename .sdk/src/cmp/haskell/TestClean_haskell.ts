@@ -92,7 +92,7 @@ import Data.IORef
 import Data.List (intercalate, isInfixOf, isSuffixOf)
 import Data.Maybe (isJust)
 
-import VoxgigStruct (Value (..), emptyMap, listItems, ismap, stringify)
+import VoxgigStruct (Value (..), emptyMap, listItems, ismap, stringify, vint)
 import SdkTypes
 import SdkHelpers
 import SdkRuntime (base64Encode, escurlS, contextToValue)
@@ -102,14 +102,14 @@ import Testutil
 
 -- Generated: the credential's wire placement is fixed when the SDK is built.
 -- The haskell runtime carries the credential in the Authorization header
--- whatever the model's placement says (its prepareAuth is header-only), so
--- that is the slot asserted. Placement: ${auth.where} (${auth.name}), basic: ${auth.basic}.
+-- whatever the model's placement says (its prepareAuth is header-only, and
+-- the option spec has no Basic \`secret\`), so that is the slot asserted.
+-- Placement: ${auth.where} (${auth.name}), basic: ${auth.basic}.
 authSuppressed :: Bool
 authSuppressed = ${auth.suppressed ? 'True' : 'False'}
 
-canaryApikey, canarySecret, canaryHeader, canaryValue, mask :: String
+canaryApikey, canaryHeader, canaryValue, mask :: String
 canaryApikey = "CANARY-APIKEY-k9x2m7q4p1"
-canarySecret = "CANARY-SECRET-w3e8r5t2y6"
 canaryHeader = "CANARY-HEADER-z1x4c7v0b3"
 canaryValue = "CANARY-VALUE-n5m8b2v9c4"
 mask = "[redacted]"
@@ -117,10 +117,10 @@ mask = "[redacted]"
 -- Every form a canary can travel in.
 forms :: IO [String]
 forms = do
-  encs <- forM [canaryApikey, canarySecret, canaryHeader, canaryValue] $ \\v -> do
+  encs <- forM [canaryApikey, canaryHeader, canaryValue] $ \\v -> do
     pe <- escurlS v
     pure [v, base64Encode v, pe]
-  pure (concat encs ++ [base64Encode (canaryApikey ++ ":" ++ canarySecret)])
+  pure (concat encs)
 
 type Sinks = IORef [(String, String)]
 
@@ -194,7 +194,7 @@ makeSdk sc sinks cleanopts extras = do
         its <- listItems args
         scRespond sc (case its of (u : _) -> vstring u; [] -> ""))
   sys <- jo [("fetch", fetch)]
-  opts <- jo [ ("apikey", VStr canaryApikey), ("secret", VStr canarySecret), ("headers", headers)
+  opts <- jo [ ("apikey", VStr canaryApikey), ("headers", headers)
              , ("clean", clean), ("feature", feature), ("system", sys) ]
   sdk <- C.newSdk opts
   -- Captures the serialised context from inside the pipeline: what a hook
@@ -364,8 +364,7 @@ tests c = do
             sp <- getp e "spec"
             text <- jsonifyCompact sp
             check c "clean.off_raw_spec_carries_credential"
-              (authSuppressed || canaryApikey \`isInfixOf\` text ||
-               base64Encode (canaryApikey ++ ":" ++ canarySecret) \`isInfixOf\` text)
+              (authSuppressed || canaryApikey \`isInfixOf\` text)
 `
 }
 

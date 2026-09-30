@@ -304,7 +304,7 @@ data CleanRule = CleanRule
 cfgStrings :: Value -> String -> IO [String]
 cfgStrings cfg k = do
   v <- getp cfg k
-  case v of VList _ -> do its <- listItems v; pure [s | VStr s <- its]; _ -> pure []
+  case v of { VList _ -> do { its <- listItems v; pure [s | VStr s <- its] }; _ -> pure [] }
 
 cfgInt :: Value -> String -> Int -> IO Int
 cfgInt cfg k d = do v <- getp cfg k; pure (case v of VNum n -> floor n; _ -> d)

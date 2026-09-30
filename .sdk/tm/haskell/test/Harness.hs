@@ -12,7 +12,7 @@ module Harness where
 
 import Control.Exception (SomeException, try)
 import Data.IORef
-import Data.List (sort)
+import Data.List (intercalate, sort)
 
 import VoxgigStruct
   ( Value (..), emptyMap, emptyList, mkList, keysof, clone, ismap, escurl, vint
@@ -187,7 +187,7 @@ buildUrl spec = do
   present <- filterM' (\k -> do v <- getp q k; pure (not (isNoval v))) ks0
   let keys = sort present
   parts <- mapM (\k -> do v <- getp q k; ek <- escurlS k; ev <- escurlS (vstring v); pure (ek ++ "=" ++ ev)) keys
-  let qs = intercalate' "&" parts
+  let qs = intercalate "&" parts
   pure (base ++ path ++ (if null qs then "" else "?" ++ qs))
 
 filterM' :: (a -> IO Bool) -> [a] -> IO [a]
