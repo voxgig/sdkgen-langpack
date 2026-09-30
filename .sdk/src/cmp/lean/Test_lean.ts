@@ -363,10 +363,10 @@ def makeCleanSdk (sc : Scenario) (cleanopts : Option (Array (String × Value)))
     SdkUtility.sp (← SdkUtility.gpMap client "featureopts") f.name (← newMap #[("active", .bool true)])
   pure client
 
-/-- A feature that throws from inside the pipeline, quoting the request it
-    saw: an error makeError never handled. -/
-def throwFeature : SdkFeature.Feature := { name := "throwhook", hook := fun stage ctx => do
-  if stage == "PreResponse" then
+/-- A feature that throws from inside the pipeline at the named stages,
+    quoting the request it saw: an error makeError never handled. -/
+def throwFeature (stages : Array String) : SdkFeature.Feature := { name := "throwhook", hook := fun stage ctx => do
+  if stages.contains stage then
     let spec ← jsonify (← SdkRuntime.gp ctx "spec") (← newMap #[("indent", .num 0.0)])
     throw (IO.userError ("hook saw " ++ spec)) }
 
@@ -392,19 +392,30 @@ def usableOp : SIO (Option Target) := do
       if ok then return some (c, m)
   pure none
 
+initialize lastThrown : IO.Ref String ← IO.mkRef ""
+
+def sameMap : Value → Value → Bool
+  | .map a, .map b => a == b
+  | _, _ => false
+
 /-- Runs the operation and sweeps what it left; true when it failed. -/
 def drive (client : Value) (target : Target) (ctrl : Value) : SIO Bool := do
+  -- A caller may keep the record it passed rather than read ctrl.explain.
+  let held ← SdkRuntime.gp ctrl "explain"
+  lastThrown.set ""
   let mut threw := false
   try
     let out ← target.1.run client (← newMap target.2) ctrl
     pushValue "result" out
   catch e =>
     pushSink "error:message" (toString e)
+    lastThrown.set (toString e)
     threw := true
   let e ← SdkRuntime.gp ctrl "err"
   if SdkUtility.isMapV e then pushValue "error" e
   let ex ← SdkRuntime.gp ctrl "explain"
   if SdkUtility.isMapV ex then pushValue "explain" ex
+  if SdkUtility.isMapV held && !sameMap held ex then pushValue "explain:held" held
   -- Every feature's records sit in the client's track buckets.
   pushValue "track" (← SdkRuntime.gp client "track")
   pure (threw || SdkUtility.isMapV e)
@@ -446,10 +457,15 @@ def cleanSweep : SIO Unit := do
         (fun _ url _ => do pure ((← scenarioNotfound.respond url), none))
       let _ ← drive mclient target (← emptyMap)
     -- An error a feature hook throws, quoting the request, skips makeError,
-    -- and so does the explain record it leaves behind.
-    let hooked ← makeCleanSdk scenarioOk (some #[]) #[throwFeature]
-    check (← drive hooked target (← newMap #[("explain", ← emptyMap)]))
-      "clean: the throwing hook fails the operation"
+    -- and so does the explain record it leaves behind. This catch path fires
+    -- no PreUnexpected, so the 404 reaches that hook through failOp.
+    for (sc, stages) in #[(scenarioOk, #["PreResponse"]), (scenarioOk, #["PreResponse", "PreUnexpected"]),
+                          (scenarioNotfound, #["PreUnexpected"])] do
+      let hooked ← makeCleanSdk sc (some #[]) #[throwFeature stages]
+      let failed ← drive hooked target (← newMap #[("explain", ← emptyMap)])
+      let label := String.intercalate " " stages.toList
+      check (failed && containsStr (← lastThrown.get) "hook saw")
+        s!"clean: the throwing hook fails the operation ({label})"
     -- Most callers pass no clean block; the defaults alone must mask.
     for sc in #[scenarioNotfound, scenarioTransport] do
       let bare ← makeCleanSdk sc none

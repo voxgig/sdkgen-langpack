@@ -473,16 +473,18 @@ def makeError (ctx : Value) (errv : Value) : SIO Value := do
     one. Mirrors ts's DoneUtility. -/
 def doneExplain (ctx : Value) : SIO Unit := do
   let ctrl ← gp ctx "ctrl"
-  let explain ← gp ctrl "explain"
-  if isMapV explain then do
+  match (← gp ctrl "explain") with
+  | .map id => do
     let r ← cleanRule (← cleanConfig ctx)
     -- A copy even with clean off, masking nothing: the result pruned below
     -- is otherwise the live one, whose error failOp has still to read.
     let copy ← snapshot (if r.active then r else { r with keys := #[], values := #[] })
-      none 0 #[] explain
-    sp ctrl "explain" copy
-    let res ← gp copy "result"
+      none 0 #[] (.map id)
+    -- Written back in place: the caller may hold the record it passed.
+    setMapEntries id (← mapEntriesOf copy)
+    let res ← gp (.map id) "result"
     if isMapV res then dp res "err"
+  | _ => pure ()
 
 /-- Terminal step: the result payload, or the pipeline error. -/
 def done (ctx : Value) : SIO (Value × Option Value) := do
