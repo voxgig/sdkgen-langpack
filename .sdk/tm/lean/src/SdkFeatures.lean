@@ -719,17 +719,23 @@ def proxyFeature : SIO Feature := do
            if (← optActive opts) then do
              let client ← clientOf ctx
              -- A proxy URL may carry credentials as userinfo, and neither
-             -- part is under a sensitive key name.
+             -- part is under a sensitive key name. The init context has no
+             -- options, so they are registered against the client's.
              let purl0 ← gpS om "url"
              let authority := match (purl0.splitOn "://") with
                | [_, rest] => (rest.splitOn "/").headD ""
                | _ => ""
              if (authority.splitOn "@").length > 1 then
                let info := "@".intercalate ((authority.splitOn "@").dropLast)
-               for part in info.splitOn ":" do
+               -- The password runs from the first colon and may hold more.
+               let parts := match info.splitOn ":" with
+                 | user :: rest => [user, ":".intercalate rest]
+                 | [] => []
+               let options ← gp client "options"
+               for part in parts do
                  if part != "" then
-                   SdkUtility.cleanAdd ctx (.str part)
-                   SdkUtility.cleanAdd ctx (.str (SdkUtility.percentDecode part))
+                   SdkUtility.cleanAddOptions options (.str part)
+                   SdkUtility.cleanAddOptions options (.str (SdkUtility.percentDecode part))
              let inner ← getFetcher client
              setFetcher client fun c u f => do
                let o ← optsR.get

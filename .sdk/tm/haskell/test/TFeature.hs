@@ -16,8 +16,24 @@ import System.Environment (lookupEnv, setEnv, unsetEnv)
 import VoxgigStruct (Value (..), emptyMap, emptyList, isNoval)
 import SdkTypes
 import SdkHelpers
+import SdkRuntime (cleanUtil)
+import qualified SdkClient as C
 import Harness
 import Testutil
+
+-- What clean makes of `text` on a real client whose proxy URL is `url`;
+-- Nothing when this SDK has no proxy feature.
+proxyClean :: String -> String -> IO (Maybe String)
+proxyClean url text = do
+  present <- hasFeature "proxy"
+  if not present then pure Nothing else do
+    popts <- jo [("active", VBool True), ("url", VStr url)]
+    fm <- jo [("proxy", popts)]
+    sdk <- C.newSdk =<< jo [("feature", fm)]
+    mroot <- readIORef (clRootctx sdk)
+    case mroot of
+      Nothing -> pure (Just "")
+      Just root -> Just . vstring <$> cleanUtil root (VStr text)
 
 -- number field of a tracking bucket (absent -> -999)
 bnum :: Value -> String -> IO Double
@@ -746,6 +762,12 @@ tests c = do
     fd <- recFetchdef calls 0; px <- getp fd "proxy"
     bucket <- trackGet (hClient h) "proxy"; routed <- bnum bucket "routed"
     pure (vstring px == "http://proxy:8080" && routed == 1)
+
+  -- The client's own constructor, since the harness client carries no
+  -- derived clean registry for the userinfo to reach.
+  runTest c "feature.proxy_registers_a_password_holding_a_colon" $ do
+    s <- proxyClean "http://user:abc:def@proxy.local:8080" "pw abc:def"
+    pure (maybe True (== "pw [redacted]") s)
 
   runTest c "feature.proxy_bypasses_noproxy_hosts" $ do
     (srv, calls) <- recordingServer Nothing

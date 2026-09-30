@@ -6,6 +6,7 @@
 import 'harness.dart';
 import 'feature/harness.dart';
 
+import '../lib/ProjectNameSDK.dart';
 import '../lib/utility/ErrUtility.dart';
 
 class Recording {
@@ -793,6 +794,19 @@ void tests() {
               base: 'http://api.test');
           await h.op({'op': 'load'});
           equal(null, rec.calls[0]['fetchdef']['proxy']);
+        });
+
+        test('registers its userinfo, a password holding a colon whole',
+            (t) async {
+          final sdk = ProjectNameSDK({
+            'feature': {
+              'proxy': {
+                'active': true,
+                'url': 'http://user:abc:def@proxy.local:8080'
+              }
+            }
+          });
+          equal('pw [redacted]', sdk.utility().clean(sdk.rootctx, 'pw abc:def'));
         });
       });
     }
