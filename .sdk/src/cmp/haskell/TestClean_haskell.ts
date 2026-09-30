@@ -169,7 +169,13 @@ scenarios =
       h <- emptyMap
       jo [ ("status", vint 200), ("statusText", VStr "OK"), ("headers", h)
          , ("body", VStr "<html>"), ("json", jsonThunk (VStr "<html>")) ])
+  , thrown
   ]
+
+-- A system.fetch that throws instead, as a client library does, quoting the key.
+thrown :: Scenario
+thrown = Scenario "thrown" (\\url ->
+  ioError (userError ("refused " ++ canaryApikey ++ " (URL was: \\"" ++ url ++ "\\")")))
 
 hookFeature :: String -> (String -> Context -> IO ()) -> IO Feature
 hookFeature name hook = do
@@ -356,6 +362,18 @@ tests c = do
         check c "clean.direct_transport_fails" (not (isTrueV rawOk) && ismap rawErr)
         pushValue sinks "direct" rawErr
 
+        -- A system.fetch that throws fails direct() the same way.
+        thrownSdk <- makeSdk thrown sinks (Just []) []
+        rawThrown <- try (F.direct thrownSdk =<< jo [("path", VStr "raw")]) :: IO (Either SomeException Value)
+        thrownFails <- case rawThrown of
+          Left e -> False <$ pushException sinks "direct-thrown" e
+          Right res -> do
+            tErr <- getp res "err"
+            pushValue sinks "direct-thrown" tErr
+            tOk <- getp res "ok"
+            pure (not (isTrueV tOk) && ismap tErr)
+        check c "clean.direct_thrown_fetch_fails" thrownFails
+
         fs <- forms
         swept <- readIORef sinks
         let leaked = [(n, found) | (n, t) <- swept, let found = leaksIn fs t, not (null found)]
@@ -368,6 +386,7 @@ tests c = do
         errs <- readIORef errors
         exps <- readIORef explains
         check c "clean.404_throws" (isJust (lookup "notfound/throw" errs))
+        check c "clean.thrown_fetch_fails_the_op" (isJust (lookup "thrown/throw" errs))
         notfound <- maybe emptyMap pure (lookup "notfound/throw" errs)
         nfResult <- getp notfound "result"
         st <- case nfResult of VMap _ -> getp nfResult "status"; _ -> pure VNoval

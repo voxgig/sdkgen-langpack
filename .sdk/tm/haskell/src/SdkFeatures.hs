@@ -1274,22 +1274,32 @@ rawRequest client fetchargs = do
       ctx <- makeContextImpl (defaultCtxSpec { csOpname = Just "direct", csCtrl = Just ctrl }) root
       url <- getStrD fetchdef "url" ""
       fetcher <- readIORef (uFetcher u)
-      (fetched, ferr) <- fetcher ctx url fetchdef
-      case ferr of
-        -- Returned rather than thrown, so cleaned here as makeError would.
-        Just fe -> do ev <- cleanUtil ctx =<< errToValue fe; jo [("ok", VBool False), ("err", ev)]
-        Nothing ->
-          if isNoval fetched || isNullV fetched
-            then do e <- mkErr "direct_no_response" "response: undefined"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]
-            else case fetched of
-              VMap _ -> do
-                st <- getp fetched "status"; let status = toInt st
-                headersV <- getp fetched "headers"; headers <- case headersV of VMap _ -> pure headersV; _ -> emptyMap
-                clv <- getp headers "content-length"; let cl = case clv of { VStr s -> s; VNum n -> show (truncate n :: Int); _ -> "" }
-                let noBody = status == 204 || status == 304 || cl == "0"
-                jsonData <- if noBody then pure VNoval else do jf <- getp fetched "json"; case jf of VFunc _ -> callJson jf; _ -> pure VNoval
-                jo [("ok", VBool (status >= 200 && status < 300)), ("status", vint status), ("headers", headers), ("data", jsonData)]
-              _ -> do e <- mkErr "direct_invalid" "invalid response type"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]
+      -- A throw, from the transport or a caller's system.fetch, leaves through
+      -- the operation's catch path and is returned like a transport error.
+      attempt <- try $ do
+        (fetched, ferr) <- fetcher ctx url fetchdef
+        case ferr of
+          -- Returned rather than thrown, so cleaned here as makeError would.
+          Just fe -> do ev <- cleanUtil ctx =<< errToValue fe; jo [("ok", VBool False), ("err", ev)]
+          Nothing ->
+            if isNoval fetched || isNullV fetched
+              then do e <- mkErr "direct_no_response" "response: undefined"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]
+              else case fetched of
+                VMap _ -> do
+                  st <- getp fetched "status"; let status = toInt st
+                  headersV <- getp fetched "headers"; headers <- case headersV of VMap _ -> pure headersV; _ -> emptyMap
+                  clv <- getp headers "content-length"; let cl = case clv of { VStr s -> s; VNum n -> show (truncate n :: Int); _ -> "" }
+                  let noBody = status == 204 || status == 304 || cl == "0"
+                  jsonData <- if noBody then pure VNoval else do jf <- getp fetched "json"; case jf of VFunc _ -> callJson jf; _ -> pure VNoval
+                  jo [("ok", VBool (status >= 200 && status < 300)), ("status", vint status), ("headers", headers), ("data", jsonData)]
+                _ -> do e <- mkErr "direct_invalid" "invalid response type"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]
+      case attempt of
+        Right out -> pure out
+        Left e -> do
+          cleaned <- cleanUnexpected ctx e
+          case fromException cleaned of
+            Just (SdkException ev) -> do ev' <- errToValue ev; jo [("ok", VBool False), ("err", ev')]
+            Nothing -> throwIO cleaned
 
 sdkTest :: Value -> (String -> IO Feature) -> Value -> Value -> IO Client
 sdkTest config makeFeature testopts sdkopts = do
