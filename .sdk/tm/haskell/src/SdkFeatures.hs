@@ -1276,7 +1276,8 @@ rawRequest client fetchargs = do
       fetcher <- readIORef (uFetcher u)
       (fetched, ferr) <- fetcher ctx url fetchdef
       case ferr of
-        Just fe -> do ev <- errToValue fe; jo [("ok", VBool False), ("err", ev)]
+        -- Returned rather than thrown, so cleaned here as makeError would.
+        Just fe -> do ev <- cleanUtil ctx =<< errToValue fe; jo [("ok", VBool False), ("err", ev)]
         Nothing ->
           if isNoval fetched || isNullV fetched
             then do e <- mkErr "direct_no_response" "response: undefined"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]

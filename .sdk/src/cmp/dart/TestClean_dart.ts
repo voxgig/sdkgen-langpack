@@ -462,6 +462,16 @@ void tests() {
         sinks.addAll(forms('bare', bare));
       }
 
+      // The raw path returns its failure rather than throwing it. The key
+      // rides in the query, as a caller of an endpoint wanting it there sends it.
+      final raw = await makeSdk(SCENARIOS[3], sinks).direct({
+        'path': 'raw',
+        'query': {'api_key': CANARY['apikey']},
+      });
+      ok(false == raw['ok'] && null != raw['err'],
+          'a transport failure should fail direct()');
+      sinks.addAll(forms('direct', raw['err']));
+
       final leaked = <String>[];
       for (final s in sinks) {
         final found = leaks(s.text);

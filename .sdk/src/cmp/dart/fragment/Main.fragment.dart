@@ -215,7 +215,7 @@ class ProjectNameSDK {
           'err': ctx.error('direct_no_response', 'response: undefined')
         };
       } else if (iserr(fetched)) {
-        return {'ok': false, 'err': fetched};
+        return {'ok': false, 'err': utility.clean(ctx, sdkerror(fetched, ctx))};
       }
 
       final status = fetched['status'];
@@ -250,7 +250,7 @@ class ProjectNameSDK {
         'data': json,
       };
     } catch (err) {
-      return {'ok': false, 'err': err};
+      return {'ok': false, 'err': utility.clean(ctx, sdkerror(err, ctx))};
     }
   }
 

@@ -3,7 +3,6 @@
 
 import 'dart:async';
 
-import 'ProjectNameError.dart';
 import 'utility/ErrUtility.dart';
 
 // Base class for generated entities. `dataVal`/`matchVal` hold accreted
@@ -272,14 +271,8 @@ class ProjectNameEntityBase {
     final ctrl = ctx.ctrl;
 
     // An error a hook, the fetcher or a parser threw never passed through
-    // makeError. Dart's own errors cannot be edited, so they leave as the
-    // SDK's error, cleaned.
-    err = clean(
-        ctx,
-        err is ProjectNameError
-            ? err
-            : ProjectNameError(
-                '' == errcode(err) ? 'unexpected' : errcode(err), errmsg(err), ctx));
+    // makeError, so it is cleaned here.
+    err = clean(ctx, sdkerror(err, ctx));
 
     ctrl['err'] = err;
 

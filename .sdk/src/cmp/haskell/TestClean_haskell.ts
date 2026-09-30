@@ -97,6 +97,7 @@ import SdkTypes
 import SdkHelpers
 import SdkRuntime (base64Encode, escurlS, contextToValue)
 import qualified SdkClient as C
+import qualified SdkFeatures as F
 import Harness (hasFeature)
 import Testutil
 
@@ -324,6 +325,16 @@ tests c = do
           bare <- makeSdk sc sinks Nothing []
           bctrl <- do ex <- emptyMap; jo [("explain", ex)]
           drive bare target bctrl sinks
+
+        -- The raw path returns its failure rather than throwing it. The key
+        -- rides in the query, as a caller of an endpoint wanting it there sends it.
+        rawSdk <- makeSdk (scenarios !! 3) sinks (Just []) []
+        rawQuery <- jo [("api_key", VStr canaryApikey)]
+        raw <- F.direct rawSdk =<< jo [("path", VStr "raw"), ("query", rawQuery)]
+        rawOk <- getp raw "ok"
+        rawErr <- getp raw "err"
+        check c "clean.direct_transport_fails" (not (isTrueV rawOk) && ismap rawErr)
+        pushValue sinks "direct" rawErr
 
         fs <- forms
         swept <- readIORef sinks
