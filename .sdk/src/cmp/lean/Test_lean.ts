@@ -336,7 +336,7 @@ def scenarios : Array Scenario :=
 /-- A live client over the scenario's transport, every diagnostic feature the
     config carries switched on, and a capture feature that serialises the
     context from inside the pipeline (what a hook author would log). -/
-def makeCleanSdk (sc : Scenario) (cleanopts : Array (String × Value))
+def makeCleanSdk (sc : Scenario) (cleanopts : Option (Array (String × Value)))
     (extra : Array SdkFeature.Feature := #[]) : SIO Value := do
   let feature ← emptyMap
   let config ← SdkJson.jsonRead SdkConfig.configJson
@@ -344,10 +344,12 @@ def makeCleanSdk (sc : Scenario) (cleanopts : Array (String × Value))
   for name in #["log", "debug", "audit", "telemetry", "cost", "metrics", "clienttrack"] do
     if SdkUtility.isMapV (← SdkRuntime.gp cfeat name) then
       SdkUtility.sp feature name (← newMap #[("active", .bool true)])
-  let clean ← newMap (#[("values", Value.str canaryValue)] ++ cleanopts)
   let headers ← newMap #[("X-Custom-Token", .str canaryHeader)]
   let opts ← newMap #[("apikey", .str canaryApikey), ("secret", .str canarySecret),
-                      ("headers", headers), ("clean", clean), ("feature", feature)]
+                      ("headers", headers), ("feature", feature)]
+  -- none builds the client with no clean block at all, as most callers do.
+  if let some more := cleanopts then
+    SdkUtility.sp opts "clean" (← newMap (#[("values", Value.str canaryValue)] ++ more))
   let client ← SdkRuntime.mkClientWith opts SdkConfig.configJson
     (fun _ url _ => do pure ((← sc.respond url), none))
   let capture : SdkFeature.Feature := { name := "capture", hook := fun stage ctx => do
@@ -424,7 +426,7 @@ def cleanSweep : SIO Unit := do
     let mut explains : Array (String × Value) := #[]
     for sc in scenarios do
       for (vname, mk) in variants do
-        let client ← makeCleanSdk sc #[]
+        let client ← makeCleanSdk sc (some #[])
         let ctrl ← mk
         let _ ← drive client target ctrl
         let key := sc.name ++ "/" ++ vname
@@ -434,25 +436,24 @@ def cleanSweep : SIO Unit := do
         if SdkUtility.isMapV ex then explains := explains.push (key, ex)
         -- The client is a struct value whose serialisation IS its options
         -- map (documented as the raw credential), so it is not a surface.
-    -- A credential mistyped as a map. Lean's makeOptions validates nothing,
-    -- so nothing rejects it: what an operation on that client leaves is
-    -- swept instead.
-    let mopts ← newMap #[("apikey", ← newMap #[("value", .str canaryApikey)]),
-                         ("clean", ← newMap #[("values", .str canaryValue)])]
-    let mclient ← SdkRuntime.mkClientWith mopts SdkConfig.configJson
-      (fun _ url _ => do pure ((← scenarioNotfound.respond url), none))
-    let _ ← drive mclient target (← emptyMap)
+    -- A credential mistyped as a map, with and without a clean block. Lean's
+    -- makeOptions validates nothing, so nothing rejects it: what an
+    -- operation on that client leaves is swept instead.
+    for withClean in #[true, false] do
+      let mopts ← newMap #[("apikey", ← newMap #[("value", .str canaryApikey)])]
+      if withClean then SdkUtility.sp mopts "clean" (← newMap #[("values", .str canaryValue)])
+      let mclient ← SdkRuntime.mkClientWith mopts SdkConfig.configJson
+        (fun _ url _ => do pure ((← scenarioNotfound.respond url), none))
+      let _ ← drive mclient target (← emptyMap)
     -- An error a feature hook throws, quoting the request, skips makeError,
     -- and so does the explain record it leaves behind.
-    let hooked ← makeCleanSdk scenarioOk #[] #[throwFeature]
+    let hooked ← makeCleanSdk scenarioOk (some #[]) #[throwFeature]
     check (← drive hooked target (← newMap #[("explain", ← emptyMap)]))
       "clean: the throwing hook fails the operation"
-    -- A client given no clean block at all masks by the schema defaults.
-    let bare ← SdkRuntime.mkClientWith (← newMap #[("apikey", .str canaryApikey),
-        ("headers", ← newMap #[("X-Custom-Token", .str canaryHeader)])]) SdkConfig.configJson
-      (fun _ url _ => do pure ((← scenarioNotfound.respond url), none))
-    check (← drive bare target (← newMap #[("explain", ← emptyMap)]))
-      "clean: a client with no clean block fails on the 404"
+    -- Most callers pass no clean block; the defaults alone must mask.
+    for sc in #[scenarioNotfound, scenarioTransport] do
+      let bare ← makeCleanSdk sc none
+      let _ ← drive bare target (← newMap #[("explain", ← emptyMap)])
     let fs ← canaryForms
     let swept ← cleanSinks.get
     let leaked := swept.filter (fun (_, t) => (leaksIn fs t).size > 0)
@@ -483,7 +484,7 @@ def cleanSensitivity : SIO Unit := do
   | none => IO.println skipLine
   | some target =>
     cleanSinks.set #[]
-    let client ← makeCleanSdk scenarioNotfound #[("active", .bool false)]
+    let client ← makeCleanSdk scenarioNotfound (some #[("active", .bool false)])
     let ctrl ← emptyMap
     let _ ← drive client target ctrl
     let fs ← canaryForms

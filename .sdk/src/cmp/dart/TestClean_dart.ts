@@ -244,8 +244,9 @@ final SCENARIOS = <Scenario>[
       (url, fd) => throw ${Name}Error('refused_' + CANARY['apikey']!, 'refused')),
 ];
 
+// bare builds the client with no clean block at all, as most callers do.
 ${Name}SDK makeSdk(Scenario scenario, List<Sink> sinks,
-    [Map<String, dynamic>? cleanopts, List<BaseFeature>? extra]) {
+    [Map<String, dynamic>? cleanopts, List<BaseFeature>? extra, bool bare = false]) {
   dynamic Function(dynamic) capture(String name) => (dynamic rec) {
         sinks.addAll(forms(name, rec));
         return null;
@@ -281,7 +282,7 @@ ${Name}SDK makeSdk(Scenario scenario, List<Sink> sinks,
     'apikey': CANARY['apikey'],
     'secret': CANARY['secret'],
     'headers': {'X-Custom-Token': CANARY['header']},
-    'clean': clean,
+    if (!bare) 'clean': clean,
     'feature': feature,
     'extend': [CaptureFeature(sinks), ...(extra ?? <BaseFeature>[])],
     'utility': {
@@ -425,19 +426,26 @@ void tests() {
       }
 
       // A credential mistyped as a map is rejected by validation, whose
-      // message quotes the value it rejected.
-      dynamic rejected;
-      try {
-        ${Name}SDK(<String, dynamic>{
-          'apikey': {'value': CANARY['apikey']},
-          'clean': {'values': CANARY['value']},
-        });
-      } catch (e) {
-        rejected = e;
+      // message quotes the value it rejected; with and without a clean block.
+      for (final cleanblock in [
+        <String, dynamic>{
+          'clean': {'values': CANARY['value']}
+        },
+        <String, dynamic>{},
+      ]) {
+        dynamic rejected;
+        try {
+          ${Name}SDK(<String, dynamic>{
+            'apikey': {'value': CANARY['apikey']},
+            ...cleanblock,
+          });
+        } catch (e) {
+          rejected = e;
+        }
+        ok(null != rejected, 'a credential mistyped as a map should be rejected');
+        sinks.addAll(forms('rejected', rejected));
+        sinks.add(Sink('rejected:message', errmsg(rejected)));
       }
-      ok(null != rejected, 'a credential mistyped as a map should be rejected');
-      sinks.addAll(forms('rejected', rejected));
-      sinks.add(Sink('rejected:message', errmsg(rejected)));
 
       // An error a feature hook throws, quoting the request, skips makeError,
       // and so does the explain record it leaves behind.
@@ -446,18 +454,13 @@ void tests() {
           <String, dynamic>{'explain': <String, dynamic>{}}, sinks);
       ok(null != hookerr, 'the throwing hook should fail the operation');
 
-      // A client given no clean block at all masks by the schema defaults.
-      final bare = ${Name}SDK(<String, dynamic>{
-        'apikey': CANARY['apikey'],
-        'headers': {'X-Custom-Token': CANARY['header']},
-        'utility': {
-          'fetcher': (dynamic ctx, dynamic url, dynamic fetchdef) async =>
-              SCENARIOS[1].respond(url.toString(), fetchdef),
-        },
-      });
-      final bareerr = await drive(bare, target,
-          <String, dynamic>{'explain': <String, dynamic>{}}, sinks);
-      ok(null != bareerr, 'the client with no clean block should fail on the 404');
+      // Most callers pass no clean block; the defaults alone must mask.
+      for (final scenario in [SCENARIOS[1], SCENARIOS[3]]) {
+        final bare = makeSdk(scenario, sinks, null, null, true);
+        await drive(bare, target,
+            <String, dynamic>{'explain': <String, dynamic>{}}, sinks);
+        sinks.addAll(forms('bare', bare));
+      }
 
       final leaked = <String>[];
       for (final s in sinks) {

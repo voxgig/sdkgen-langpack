@@ -175,7 +175,8 @@ hookFeature name hook = do
   pure Feature { fName = name, fVersion = "0.0.1", fActive = active
                , fOptions = fopts, fInit = \\_ _ -> pure (), fHook = hook }
 
-makeSdk :: Scenario -> Sinks -> [(String, Value)] -> [Feature] -> IO Client
+-- Nothing builds the client with no clean block at all, as most callers do.
+makeSdk :: Scenario -> Sinks -> Maybe [(String, Value)] -> [Feature] -> IO Client
 makeSdk sc sinks cleanopts extras = do
   let capture name = vfunc1 (\\rec -> do pushValue sinks name rec; pure VNoval)
   feature <- emptyMap
@@ -188,14 +189,14 @@ makeSdk sc sinks cleanopts extras = do
   addFeature "telemetry" [("exporter", capture "telemetry")]
   addFeature "metrics" []
   addFeature "clienttrack" []
-  clean <- jo (("values", VStr canaryValue) : cleanopts)
+  clean <- mapM (\\more -> jo (("values", VStr canaryValue) : more)) cleanopts
   headers <- jo [("X-Custom-Token", VStr canaryHeader)]
   let fetch = vfunc1 (\\args -> do
         its <- listItems args
         scRespond sc (case its of (u : _) -> vstring u; [] -> ""))
   sys <- jo [("fetch", fetch)]
-  opts <- jo [ ("apikey", VStr canaryApikey), ("headers", headers)
-             , ("clean", clean), ("feature", feature), ("system", sys) ]
+  opts <- jo ([ ("apikey", VStr canaryApikey), ("headers", headers)
+              , ("feature", feature), ("system", sys) ] ++ [("clean", cl) | Just cl <- [clean]])
   sdk <- C.newSdk opts
   -- Captures the serialised context from inside the pipeline: what a hook
   -- author would hand to a logger.
@@ -289,7 +290,7 @@ tests c = do
         errors <- newIORef ([] :: [(String, Value)])
         explains <- newIORef ([] :: [(String, Value)])
         forM_ scenarios $ \\sc -> forM_ variants $ \\(vname, mkCtrl) -> do
-          sdk <- makeSdk sc sinks [] []
+          sdk <- makeSdk sc sinks (Just []) []
           ctrl <- mkCtrl
           merr <- drive sdk target ctrl sinks
           let key = scName sc ++ "/" ++ vname
@@ -300,33 +301,29 @@ tests c = do
           -- has no default print to sweep.
 
         -- A credential mistyped as a map is rejected by validation, whose
-        -- message quotes the value it rejected.
-        mistyped <- jo [("value", VStr canaryApikey)]
-        mclean <- jo [("values", VStr canaryValue)]
-        mopts <- jo [("apikey", mistyped), ("clean", mclean)]
-        rejected <- try (C.newSdk mopts) :: IO (Either SomeException Client)
-        case rejected of
-          Left e -> do _ <- pushException sinks "rejected" e; pure ()
-          Right _ -> check c "clean.mistyped_credential_rejected" False
+        -- message quotes the value it rejected; with and without a clean block.
+        forM_ [True, False] $ \\withClean -> do
+          mistyped <- jo [("value", VStr canaryApikey)]
+          mclean <- jo [("values", VStr canaryValue)]
+          mopts <- jo (("apikey", mistyped) : [("clean", mclean) | withClean])
+          rejected <- try (C.newSdk mopts) :: IO (Either SomeException Client)
+          case rejected of
+            Left e -> do _ <- pushException sinks "rejected" e; pure ()
+            Right _ -> check c "clean.mistyped_credential_rejected" False
 
         -- An error a feature hook throws, quoting the request, skips makeError,
         -- and so does the explain record it leaves behind.
         thrower <- throwFeature
-        hooked <- makeSdk (scenarios !! 0) sinks [] [thrower]
+        hooked <- makeSdk (scenarios !! 0) sinks (Just []) [thrower]
         hctrl <- do ex <- emptyMap; jo [("explain", ex)]
         hookerr <- drive hooked target hctrl sinks
         check c "clean.throwing_hook_fails_the_op" (isJust hookerr)
 
-        -- A client given no clean block at all masks by the schema defaults.
-        bareHeaders <- jo [("X-Custom-Token", VStr canaryHeader)]
-        let bareFetch = vfunc1 (\\args -> do
-              its <- listItems args
-              scRespond (scenarios !! 1) (case its of (u : _) -> vstring u; [] -> ""))
-        bareSys <- jo [("fetch", bareFetch)]
-        bare <- C.newSdk =<< jo [("apikey", VStr canaryApikey), ("headers", bareHeaders), ("system", bareSys)]
-        bctrl <- do ex <- emptyMap; jo [("explain", ex)]
-        bareerr <- drive bare target bctrl sinks
-        check c "clean.no_clean_block_fails_on_404" (isJust bareerr)
+        -- Most callers pass no clean block; the defaults alone must mask.
+        forM_ [scenarios !! 1, scenarios !! 3] $ \\sc -> do
+          bare <- makeSdk sc sinks Nothing []
+          bctrl <- do ex <- emptyMap; jo [("explain", ex)]
+          drive bare target bctrl sinks
 
         fs <- forms
         swept <- readIORef sinks
@@ -363,7 +360,7 @@ tests c = do
       Nothing -> putStrLn skipLine
       Just target -> do
         sinks <- newIORef []
-        sdk <- makeSdk (scenarios !! 1) sinks [("active", VBool False)] []
+        sdk <- makeSdk (scenarios !! 1) sinks (Just [("active", VBool False)]) []
         ctrl <- emptyMap
         merr <- drive sdk target ctrl sinks
         fs <- forms
