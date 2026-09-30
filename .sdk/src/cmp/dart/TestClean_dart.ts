@@ -518,6 +518,11 @@ void tests() {
       final err = await drive(sdk, target, <String, dynamic>{}, sinks);
       ok(null != err);
 
+      // Explaining a failure must not cost it its error.
+      final explained = await drive(makeSdk(SCENARIOS[1], <Sink>[], {'active': false}),
+          target, <String, dynamic>{'explain': <String, dynamic>{}}, <Sink>[]);
+      equal(err.message, explained?.message, 'with clean off, explain lost the error');
+
       final leaked = sinks.where((s) => leaks(s.text).isNotEmpty).toList();
       ok(leaked.isNotEmpty, 'with clean off, nothing showed the canary: the sweep is blind');
 

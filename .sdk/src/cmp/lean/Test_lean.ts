@@ -496,6 +496,13 @@ def cleanSensitivity : SIO Unit := do
     check (authSuppressed || containsStr text canaryApikey ||
            containsStr text (SdkUtility.base64Encode (canaryApikey ++ ":" ++ canarySecret)))
       "clean: the raw spec carries the credential when clean is off"
+    -- Explaining a failure must not cost it its error.
+    let ectrl ← newMap #[("explain", ← emptyMap)]
+    let _ ← drive (← makeCleanSdk scenarioNotfound (some #[("active", .bool false)])) target ectrl
+    let plain ← SdkRuntime.gpS e "message"
+    let explained ← SdkRuntime.gpS (← SdkRuntime.gp ectrl "err") "message"
+    check (plain != "" && explained == plain)
+      s!"clean: with clean off, explain keeps the error ({explained})"
 
 def defaultBase : String := "http://localhost:8901"
 

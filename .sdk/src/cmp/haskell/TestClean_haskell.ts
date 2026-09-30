@@ -374,6 +374,17 @@ tests c = do
         sdk <- makeSdk (scenarios !! 1) sinks (Just [("active", VBool False)]) []
         ctrl <- emptyMap
         merr <- drive sdk target ctrl sinks
+
+        -- Explaining a failure must not cost it its error.
+        quiet <- newIORef []
+        esdk <- makeSdk (scenarios !! 1) quiet (Just [("active", VBool False)]) []
+        ectrl <- do ex <- emptyMap; jo [("explain", ex)]
+        explained <- drive esdk target ectrl quiet
+        let message = maybe (pure "") (\\e -> getStrD e "message" "")
+        plainMsg <- message merr
+        explainedMsg <- message explained
+        check c "clean.off_explain_keeps_the_error" (not (null plainMsg) && explainedMsg == plainMsg)
+
         fs <- forms
         swept <- readIORef sinks
         let leaked = [n | (n, t) <- swept, not (null (leaksIn fs t))]
