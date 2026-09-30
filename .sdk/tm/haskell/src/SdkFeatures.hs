@@ -11,7 +11,9 @@
 module SdkFeatures where
 
 import Control.Concurrent (threadDelay)
-import Control.Exception (throwIO, try)
+import Control.Exception
+  ( SomeAsyncException, SomeException, displayException, fromException, throwIO
+  , toException, try )
 import Control.Monad (forM_, when)
 import Data.Bits ((.&.))
 import Data.IORef
@@ -1307,6 +1309,30 @@ sdkTest config makeFeature testopts sdkopts = do
 
 runOpPipeline :: Context -> IO () -> IO Value
 runOpPipeline ctx postDone = do
+  r <- try (runOpStages ctx postDone)
+  case r of
+    Right v -> pure v
+    Left e -> throwIO =<< cleanUnexpected ctx e
+
+-- An error a hook, the fetcher or a parser threw never passed through
+-- makeError, whose own error is already clean and on ctrl.err.
+cleanUnexpected :: Context -> SomeException -> IO SomeException
+cleanUnexpected ctx e
+  | isAsync = pure e
+  | Just (SdkException ev) <- fromException e = do
+      ctrl <- readIORef (cCtrl ctx)
+      made <- getp ctrl "err"
+      if sameNode made ev then pure e else toException . SdkException <$> cleanUtil ctx ev
+  | otherwise = do
+      m <- cleanUtil ctx (VStr (displayException e))
+      toException . SdkException <$> mkErr "unexpected" (vstring m)
+  where
+    isAsync = case (fromException e :: Maybe SomeAsyncException) of Just _ -> True; Nothing -> False
+    sameNode (VMap a) (VMap b) = a == b
+    sameNode _ _ = False
+
+runOpStages :: Context -> IO () -> IO Value
+runOpStages ctx postDone = do
   let fh n = featureHookUtil ctx n
       setOut k v = do out <- readIORef (cOut ctx); setp out k v
   fh "PrePoint"

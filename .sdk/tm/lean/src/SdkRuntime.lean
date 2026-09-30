@@ -387,7 +387,7 @@ def hookOut (out : Value) (key : String) (make : SIO Value) : SIO Value := do
   let v ← gp out key
   if isNv v then make else pure v
 
-def runOp (client : Value) (entityName opName : String)
+def runOpStages (client : Value) (entityName opName : String)
     (matchV dataV callopts : Value) : SIO Value := do
   let options ← gp client "options"
   let config  ← gp client "config"
@@ -458,6 +458,16 @@ def runOp (client : Value) (entityName opName : String)
   SdkUtility.doneExplain ctx
   if SdkUtility.truthy (← gp result "ok") then gp result "resdata"
   else failOp client ctx .noval
+
+/-- An error a hook threw never passed through makeError, so its message is
+    cleaned on the way out; failOp's own message is clean already. -/
+def runOp (client : Value) (entityName opName : String)
+    (matchV dataV callopts : Value) : SIO Value := do
+  try
+    runOpStages client entityName opName matchV dataV callopts
+  catch e =>
+    let ctx ← newMap #[("options", ← gp client "options")]
+    throw (IO.userError (SdkUtility.vs (← SdkUtility.clean ctx (.str (toString e)))))
 
 -- Entity operation wrappers.
 def opList   (c : Value) (e : String) (m co : Value) : SIO Value := do runOp c e "list"   m (← emptyMap) co

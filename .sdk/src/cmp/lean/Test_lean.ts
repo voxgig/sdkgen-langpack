@@ -44,6 +44,23 @@ function selectsByParams(op: any): boolean {
 }
 
 
+// Every path parameter an operation's points declare, as the generated
+// config carries them (point.args.params[].name).
+function pointParams(op: any): string[] {
+  const vals = (x: any): any[] => null == x ? [] : Array.isArray(x) ? x : Object.values(x)
+  const names: string[] = []
+  for (const pt of vals(op?.points)) {
+    if (null == pt || false === pt.a) continue
+    for (const p of vals(pt.g?.params)) {
+      if (null != p && false !== p.a && 'string' === typeof p.n && !names.includes(p.n)) {
+        names.push(p.n)
+      }
+    }
+  }
+  return names
+}
+
+
 function synthData(fields: any): any {
   const o: any = {}
   each(fields, (f: any) => {
@@ -200,9 +217,11 @@ ${body})
       .sort((a, b) => (rank[a] ?? 2) - (rank[b] ?? 2))
     for (const op of ops) {
       const call = 'update' === op
-        ? `${ns}.update c (← emptyMap) (← emptyMap) ctrl`
-        : `${ns}.${op} c (← emptyMap) ctrl`
-      candidates.push(`  { name := "${e.name}.${op}", run := fun c ctrl => do ${call} }`)
+        ? `${ns}.update c m (← emptyMap) ctrl`
+        : `${ns}.${op} c m ctrl`
+      const params = pointParams(e.op[op]).map((p) => JSON.stringify(p)).join(', ')
+      candidates.push(`  { name := "${e.name}.${op}", params := #[${params}],\n` +
+        `    run := fun c m ctrl => do ${call} }`)
     }
   })
   const candidateBody = 0 === candidates.length ? '' : '\n' + candidates.join(',\n')
@@ -317,7 +336,8 @@ def scenarios : Array Scenario :=
 /-- A live client over the scenario's transport, every diagnostic feature the
     config carries switched on, and a capture feature that serialises the
     context from inside the pipeline (what a hook author would log). -/
-def makeCleanSdk (sc : Scenario) (cleanopts : Array (String × Value)) : SIO Value := do
+def makeCleanSdk (sc : Scenario) (cleanopts : Array (String × Value))
+    (extra : Array SdkFeature.Feature := #[]) : SIO Value := do
   let feature ← emptyMap
   let config ← SdkJson.jsonRead SdkConfig.configJson
   let cfeat ← SdkRuntime.gp config "feature"
@@ -333,51 +353,71 @@ def makeCleanSdk (sc : Scenario) (cleanopts : Array (String × Value)) : SIO Val
   let capture : SdkFeature.Feature := { name := "capture", hook := fun stage ctx => do
     if stage == "PreRequest" || stage == "PreResponse" || stage == "PreUnexpected" then
       pushValue ("ctx@" ++ stage) (← SdkUtility.contextJson ctx) }
-  let id ← SdkFeature.registerFeature capture
-  match (← SdkRuntime.gp client "features") with
-  | .list lid => setListItems lid ((← listItems lid).push (.num id.toFloat))
-  | _ => SdkUtility.sp client "features" (← newList #[.num id.toFloat])
-  SdkUtility.sp (← SdkUtility.gpMap client "featureopts") "capture" (← newMap #[("active", .bool true)])
+  for f in (#[capture] ++ extra) do
+    let id ← SdkFeature.registerFeature f
+    match (← SdkRuntime.gp client "features") with
+    | .list lid => setListItems lid ((← listItems lid).push (.num id.toFloat))
+    | _ => SdkUtility.sp client "features" (← newList #[.num id.toFloat])
+    SdkUtility.sp (← SdkUtility.gpMap client "featureopts") f.name (← newMap #[("active", .bool true)])
   pure client
+
+/-- A feature that throws from inside the pipeline, quoting the request it
+    saw: an error makeError never handled. -/
+def throwFeature : SdkFeature.Feature := { name := "throwhook", hook := fun stage ctx => do
+  if stage == "PreResponse" then
+    let spec ← jsonify (← SdkRuntime.gp ctx "spec") (← newMap #[("indent", .num 0.0)])
+    throw (IO.userError ("hook saw " ++ spec)) }
 
 structure Candidate where
   name : String
-  run : Value → Value → SIO Value
+  params : Array String
+  run : Value → Value → Value → SIO Value
 
 def candidates : Array Candidate := #[${candidateBody}
   ]
 
-/-- The first operation that completes against a plain 200 with no arguments
-    (a required path parameter would fail before the request is built). -/
-def usableOp : SIO (Option Candidate) := do
+/-- An operation and the match it completes with. -/
+abbrev Target := Candidate × Array (String × Value)
+
+/-- The first operation that completes against a plain 200: with no
+    arguments, else with every path parameter its points declare filled in. -/
+def usableOp : SIO (Option Target) := do
   for c in candidates do
-    let client ← SdkRuntime.mkClientWith (← newMap #[("apikey", .str canaryApikey)]) SdkConfig.configJson
-      (fun _ _ _ => do pure ((← responseOf 200.0 (← newMap #[("id", .str "i1")]) #[]), none))
-    let ok ← try (do let _ ← c.run client (← emptyMap); pure true) catch _ => pure false
-    if ok then return some c
+    for m in #[(#[] : Array (String × Value)), c.params.map (fun p => (p, Value.str "p1"))] do
+      let client ← SdkRuntime.mkClientWith (← newMap #[("apikey", .str canaryApikey)]) SdkConfig.configJson
+        (fun _ _ _ => do pure ((← responseOf 200.0 (← newMap #[("id", .str "i1")]) #[]), none))
+      let ok ← try (do let _ ← c.run client (← newMap m) (← emptyMap); pure true) catch _ => pure false
+      if ok then return some (c, m)
   pure none
 
-def drive (client : Value) (c : Candidate) (ctrl : Value) : SIO Unit := do
+/-- Runs the operation and sweeps what it left; true when it failed. -/
+def drive (client : Value) (target : Target) (ctrl : Value) : SIO Bool := do
+  let mut threw := false
   try
-    let out ← c.run client ctrl
+    let out ← target.1.run client (← newMap target.2) ctrl
     pushValue "result" out
   catch e =>
     pushSink "error:message" (toString e)
+    threw := true
   let e ← SdkRuntime.gp ctrl "err"
   if SdkUtility.isMapV e then pushValue "error" e
   let ex ← SdkRuntime.gp ctrl "explain"
   if SdkUtility.isMapV ex then pushValue "explain" ex
   -- Every feature's records sit in the client's track buckets.
   pushValue "track" (← SdkRuntime.gp client "track")
+  pure (threw || SdkUtility.isMapV e)
 
 def variants : Array (String × SIO Value) := #[
   ("throw", emptyMap),
   ("explain", do newMap #[("explain", ← emptyMap)]),
   ("nothrow", do newMap #[("throw", .bool false), ("explain", ← emptyMap)]) ]
 
+def skipLine : String :=
+  "SKIP clean: no operation of this SDK completes against a plain 200; nothing to sweep"
+
 def cleanSweep : SIO Unit := do
   match (← usableOp) with
-  | none => fail "clean: no operation completes without arguments; nothing to sweep"
+  | none => IO.println skipLine
   | some target =>
     cleanSinks.set #[]
     let mut errors : Array (String × Value) := #[]
@@ -386,7 +426,7 @@ def cleanSweep : SIO Unit := do
       for (vname, mk) in variants do
         let client ← makeCleanSdk sc #[]
         let ctrl ← mk
-        drive client target ctrl
+        let _ ← drive client target ctrl
         let key := sc.name ++ "/" ++ vname
         let e ← SdkRuntime.gp ctrl "err"
         if SdkUtility.isMapV e then errors := errors.push (key, e)
@@ -394,6 +434,17 @@ def cleanSweep : SIO Unit := do
         if SdkUtility.isMapV ex then explains := explains.push (key, ex)
         -- The client is a struct value whose serialisation IS its options
         -- map (documented as the raw credential), so it is not a surface.
+    -- A credential mistyped as a map. Lean's makeOptions validates nothing,
+    -- so nothing rejects it: what an operation on that client leaves is
+    -- swept instead.
+    let mopts ← newMap #[("apikey", ← newMap #[("value", .str canaryApikey)]),
+                         ("clean", ← newMap #[("values", .str canaryValue)])]
+    let mclient ← SdkRuntime.mkClientWith mopts SdkConfig.configJson
+      (fun _ url _ => do pure ((← scenarioNotfound.respond url), none))
+    let _ ← drive mclient target (← emptyMap)
+    -- An error a feature hook throws, quoting the request, skips makeError.
+    let hooked ← makeCleanSdk scenarioOk #[] #[throwFeature]
+    check (← drive hooked target (← emptyMap)) "clean: the throwing hook fails the operation"
     let fs ← canaryForms
     let swept ← cleanSinks.get
     let leaked := swept.filter (fun (_, t) => (leaksIn fs t).size > 0)
@@ -421,12 +472,12 @@ def cleanSweep : SIO Unit := do
 
 def cleanSensitivity : SIO Unit := do
   match (← usableOp) with
-  | none => fail "clean: no operation completes without arguments; nothing to sweep"
+  | none => IO.println skipLine
   | some target =>
     cleanSinks.set #[]
     let client ← makeCleanSdk scenarioNotfound #[("active", .bool false)]
     let ctrl ← emptyMap
-    drive client target ctrl
+    let _ ← drive client target ctrl
     let fs ← canaryForms
     let swept ← cleanSinks.get
     check ((swept.filter (fun (_, t) => (leaksIn fs t).size > 0)).size > 0)

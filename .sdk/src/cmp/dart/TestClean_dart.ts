@@ -13,6 +13,8 @@ import {
   resolveAuthName,
 } from '@voxgig/sdkgen'
 
+import { dartStringLiteral } from './utility_dart'
+
 
 // The canary sweep (port of the ts TestClean component): canaries in every
 // credential slot, every diagnostic feature capturing into a sink, a real
@@ -39,13 +41,32 @@ const TestClean = cmp(function TestClean(props: any) {
         .filter((op) => ['list', 'load', 'create', 'update', 'remove'].includes(op))
         .sort((a, b) => (rank[a] ?? 2) - (rank[b] ?? 2))
       for (const op of ops) {
+        const params = pointParams(ent.op[op]).map(dartStringLiteral).join(', ')
         candidates.push(
-          `  _Candidate('${ent.name}.${op}', (sdk, ctrl) => sdk.${nom(ent, 'Name')}().${op}({}, ctrl)),`)
+          `  _Candidate('${ent.name}.${op}', <String>[${params}],\n` +
+          `      (sdk, match, ctrl) => sdk.${nom(ent, 'Name')}().${op}(match, ctrl)),`)
       }
     })
 
   File({ name: 'clean_test.dart' }, () => Content(render(nom(model.const, 'Name'), auth, candidates)))
 })
+
+
+// Every path parameter an operation's points declare, as the generated
+// config carries them (point.args.params[].name).
+function pointParams(op: any): string[] {
+  const vals = (x: any): any[] => null == x ? [] : Array.isArray(x) ? x : Object.values(x)
+  const names: string[] = []
+  for (const pt of vals(op?.points)) {
+    if (null == pt || false === pt.a) continue
+    for (const p of vals(pt.g?.params)) {
+      if (null != p && false !== p.a && 'string' === typeof p.n && !names.includes(p.n)) {
+        names.push(p.n)
+      }
+    }
+  }
+  return names
+}
 
 
 function render(
@@ -69,6 +90,7 @@ import 'feature/harness.dart' show hasFeature;
 import '../lib/${Name}SDK.dart';
 import '../lib/${Name}Error.dart';
 import '../lib/feature/base/BaseFeature.dart';
+import '../lib/utility/ErrUtility.dart' show errmsg;
 
 // Generated: the credential's wire placement is fixed when the SDK is built.
 // The dart runtime always carries the credential in the Authorization
@@ -220,7 +242,7 @@ final SCENARIOS = <Scenario>[
 ];
 
 ${Name}SDK makeSdk(Scenario scenario, List<Sink> sinks,
-    [Map<String, dynamic>? cleanopts]) {
+    [Map<String, dynamic>? cleanopts, List<BaseFeature>? extra]) {
   dynamic Function(dynamic) capture(String name) => (dynamic rec) {
         sinks.addAll(forms(name, rec));
         return null;
@@ -258,7 +280,7 @@ ${Name}SDK makeSdk(Scenario scenario, List<Sink> sinks,
     'headers': {'X-Custom-Token': CANARY['header']},
     'clean': clean,
     'feature': feature,
-    'extend': [CaptureFeature(sinks)],
+    'extend': [CaptureFeature(sinks), ...(extra ?? <BaseFeature>[])],
     'utility': {
       'fetcher': (dynamic ctx, dynamic url, dynamic fetchdef) async =>
           scenario.respond(url.toString(), fetchdef),
@@ -268,8 +290,15 @@ ${Name}SDK makeSdk(Scenario scenario, List<Sink> sinks,
 
 class _Candidate {
   final String name;
-  final Future<dynamic> Function(dynamic sdk, dynamic ctrl) run;
-  const _Candidate(this.name, this.run);
+  final List<String> params;
+  final Future<dynamic> Function(dynamic sdk, dynamic match, dynamic ctrl) run;
+  const _Candidate(this.name, this.params, this.run);
+}
+
+class _Target {
+  final _Candidate op;
+  final Map<String, dynamic> match;
+  const _Target(this.op, this.match);
 }
 
 // Every entity operation this SDK offers, list and load first.
@@ -277,33 +306,54 @@ final CANDIDATES = <_Candidate>[
 ${candidates.join('\n')}
 ];
 
-// The first operation that completes against a plain 200 with no arguments
-// (a required path parameter would fail before the request is built).
-Future<_Candidate?> usableOp() async {
+// The first operation that completes against a plain 200: with no
+// arguments, else with every path parameter its points declare filled in.
+Future<_Target?> usableOp() async {
   for (final c in CANDIDATES) {
-    final plain = ${Name}SDK(<String, dynamic>{
-      'apikey': CANARY['apikey'],
-      'utility': {
-        'fetcher': (dynamic ctx, dynamic url, dynamic fd) async =>
-            response(200, {'id': 'i1'}),
-      },
-    });
-    try {
-      await c.run(plain, <String, dynamic>{});
-      return c;
-    } catch (_e) {
-      continue;
+    final filled = <String, dynamic>{for (final p in c.params) p: 'p1'};
+    for (final match in [<String, dynamic>{}, filled]) {
+      final plain = ${Name}SDK(<String, dynamic>{
+        'apikey': CANARY['apikey'],
+        'utility': {
+          'fetcher': (dynamic ctx, dynamic url, dynamic fd) async =>
+              response(200, {'id': 'i1'}),
+        },
+      });
+      try {
+        await c.run(plain, Map<String, dynamic>.of(match), <String, dynamic>{});
+        return _Target(c, match);
+      } catch (_e) {
+        continue;
+      }
     }
   }
   return null;
 }
 
-Future<dynamic> drive(dynamic sdk, _Candidate target, Map<String, dynamic> ctrl,
+// A feature that throws from inside the pipeline, quoting the request it
+// saw: an error makeError never handled.
+class ThrowFeature extends BaseFeature {
+  ThrowFeature() {
+    name = 'throwhook';
+    version = '0.0.1';
+    active = true;
+  }
+
+  @override
+  dynamic init(dynamic ctx, dynamic opts) => null;
+
+  @override
+  dynamic PreResponse(dynamic ctx) {
+    throw Exception('hook saw ' + jsonEncode(ctx.spec));
+  }
+}
+
+Future<dynamic> drive(dynamic sdk, _Target target, Map<String, dynamic> ctrl,
     List<Sink> sinks) async {
   dynamic out;
   dynamic err;
   try {
-    out = await target.run(sdk, ctrl);
+    out = await target.op.run(sdk, Map<String, dynamic>.of(target.match), ctrl);
   } catch (e) {
     err = e;
   }
@@ -336,7 +386,10 @@ void tests() {
   describe('clean', () {
     test('no credential leaves the SDK in any form', (t) async {
       final target = await usableOp();
-      ok(null != target, 'no operation completes without arguments; nothing to sweep');
+      if (null == target) {
+        t.skip('no operation of this SDK completes against a plain 200; nothing to sweep');
+        return;
+      }
 
       final sinks = <Sink>[];
       final errors = <String, dynamic>{};
@@ -346,7 +399,7 @@ void tests() {
         for (final variant in VARIANTS) {
           final sdk = makeSdk(scenario, sinks);
           final ctrl = variant.ctrl();
-          final err = await drive(sdk, target!, ctrl, sinks);
+          final err = await drive(sdk, target, ctrl, sinks);
           final key = scenario.name + '/' + variant.name;
           if (null != err) {
             errors[key] = err;
@@ -357,6 +410,26 @@ void tests() {
           sinks.addAll(forms('sdk', sdk));
         }
       }
+
+      // A credential mistyped as a map is rejected by validation, whose
+      // message quotes the value it rejected.
+      dynamic rejected;
+      try {
+        ${Name}SDK(<String, dynamic>{
+          'apikey': {'value': CANARY['apikey']},
+          'clean': {'values': CANARY['value']},
+        });
+      } catch (e) {
+        rejected = e;
+      }
+      ok(null != rejected, 'a credential mistyped as a map should be rejected');
+      sinks.addAll(forms('rejected', rejected));
+      sinks.add(Sink('rejected:message', errmsg(rejected)));
+
+      // An error a feature hook throws, quoting the request, skips makeError.
+      final hooked = makeSdk(SCENARIOS[0], sinks, null, [ThrowFeature()]);
+      final hookerr = await drive(hooked, target, <String, dynamic>{}, sinks);
+      ok(null != hookerr, 'the throwing hook should fail the operation');
 
       final leaked = <String>[];
       for (final s in sinks) {
@@ -394,11 +467,14 @@ void tests() {
     test('the sweep can see a leak: clean switched off shows the credential',
         (t) async {
       final target = await usableOp();
-      ok(null != target);
+      if (null == target) {
+        t.skip('no operation of this SDK completes against a plain 200; nothing to sweep');
+        return;
+      }
 
       final sinks = <Sink>[];
       final sdk = makeSdk(SCENARIOS[1], sinks, {'active': false});
-      final err = await drive(sdk, target!, <String, dynamic>{}, sinks);
+      final err = await drive(sdk, target, <String, dynamic>{}, sinks);
       ok(null != err);
 
       final leaked = sinks.where((s) => leaks(s.text).isNotEmpty).toList();

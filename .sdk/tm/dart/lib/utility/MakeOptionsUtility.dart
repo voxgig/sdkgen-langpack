@@ -23,11 +23,8 @@ dynamic makeOptions(dynamic ctx) {
       '__derived__': {'clean': cleancfg}
     }
   };
-  for (final raw in [
-    vs.getprop(options, 'apikey'),
-    vs.getprop(options, 'secret'),
-    ...splitvalues(rawclean is Map ? rawclean['values'] : null),
-  ]) {
+  cleanAddSensitive(cleanctx, _without(options, ['clean']));
+  for (final raw in splitvalues(rawclean is Map ? rawclean['values'] : null)) {
     cleanAdd(cleanctx, raw);
   }
 
@@ -246,17 +243,22 @@ dynamic makeOptions(dynamic ctx) {
     'featureorder': featureorder,
   };
 
-  // Every string under a sensitive name anywhere in the options - a custom
-  // auth header, a feature credential - is a secret the SDK now handles.
-  final optctx = {'options': opts};
-  final scan = vs.clone(opts);
-  scan.remove('__derived__');
-  vs.walk(scan, before: (dynamic key, dynamic val, dynamic parent, dynamic path) {
-    if (val is String && cleanKey(optctx, key)) {
-      cleanAdd(optctx, val);
-    }
-    return val;
-  });
+  // Again over the merged result: the config's own defaults can carry one.
+  cleanAddSensitive({'options': opts}, _without(opts, ['clean', '__derived__']));
 
   return opts;
+}
+
+// A shallow copy without the named keys; the values are shared, not cloned.
+dynamic _without(dynamic map, List<String> keys) {
+  if (map is! Map) {
+    return map;
+  }
+  final out = <dynamic, dynamic>{};
+  map.forEach((k, v) {
+    if (!keys.contains(k)) {
+      out[k] = v;
+    }
+  });
+  return out;
 }

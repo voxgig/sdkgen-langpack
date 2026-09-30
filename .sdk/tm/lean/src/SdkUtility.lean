@@ -235,6 +235,18 @@ def sensitiveKey (keys : Array String) (key : Option String) : Bool :=
 def cleanKey (ctx : Value) (key : String) : SIO Bool := do
   pure (sensitiveKey (← cfgStrings (← cleanConfig ctx) "keys") (some key))
 
+/-- A registered value used as a property name is masked like any other
+    string; names that mask alike take a counter, so none is lost. -/
+def cleanName (r : CleanRule) (out : Array (String × Value)) (key : String) : String := Id.run do
+  let name := cleanStr r key
+  let taken := fun (n : String) => out.any (fun e => e.1 == n)
+  if name == key || !taken name then return name
+  -- One of out.size + 1 counters is always free.
+  for i in [1 : out.size + 2] do
+    let n := name ++ "#" ++ toString i
+    if !taken n then return n
+  return name
+
 /-- A masked plain-data copy: functions dropped, cycles cut, and nothing
     shared with the live value, whose spec must stay raw. -/
 partial def snapshot (r : CleanRule) (key : Option String) (depth : Nat) (seen : Array Nat)
@@ -260,9 +272,39 @@ partial def snapshot (r : CleanRule) (key : Option String) (depth : Nat) (seen :
       for (k, x) in (← mapEntries id) do
         match x with
         | .func _ => pure ()
-        | _ => out := out.push (k, ← snapshot r (some k) (depth + 1) (seen.push id) x)
+        | _ =>
+          let y ← snapshot r (some k) (depth + 1) (seen.push id) x
+          out := out.push (cleanName r out k, y)
       newMap out
   | _ => pure (if sensitive then .str r.mask else v)
+
+/-- Every scalar under a sensitive name, at any depth and of any shape: a
+    credential mistyped as a map or a number is still a credential. -/
+partial def cleanAddSensitiveCfg (cfg : Value) (v : Value) (under : Bool := false)
+    (depth : Nat := 0) (seen : Array Nat := #[]) : SIO Unit := do
+  if depth >= CLEAN_MAXDEPTH then return ()
+  match v with
+  | .str _ => if under then cleanAddCfg cfg v
+  | .num n => if under then cleanAddCfg cfg (.str (numToString n))
+  | .list id =>
+    if !seen.contains id then
+      for x in (← listItems id) do
+        cleanAddSensitiveCfg cfg x under (depth + 1) (seen.push id)
+  | .map id =>
+    if !seen.contains id then
+      let keys ← cfgStrings cfg "keys"
+      for (k, x) in (← mapEntries id) do
+        cleanAddSensitiveCfg cfg x (under || sensitiveKey keys (some k)) (depth + 1) (seen.push id)
+  | _ => pure ()
+
+def cleanAddSensitive (ctx : Value) (v : Value) : SIO Unit := do
+  cleanAddSensitiveCfg (← cleanConfig ctx) v
+
+/-- A shallow copy of a map without the named keys; the values are shared. -/
+def withoutKeys (v : Value) (ks : Array String) : SIO Value := do
+  match v with
+  | .map id => newMap ((← mapEntries id).filter (fun e => !ks.contains e.1))
+  | _ => pure v
 
 def cleanWithCfg (cfg : Value) (v : Value) : SIO Value := do
   let r ← cleanRule cfg
@@ -342,8 +384,7 @@ def makeOptions (config options : Value) : SIO Value := do
   let rawcleanM ← match rawclean with | .map _ => clone rawclean | _ => emptyMap
   let cleanmerged ← merge (← newList #[← emptyMap, ← cleanOptSpec, rawcleanM])
   let cleancfg ← makeCleanConfig cleanmerged
-  cleanAddCfg cleancfg (← gp uopts "apikey")
-  cleanAddCfg cleancfg (← gp uopts "secret")
+  cleanAddSensitiveCfg cleancfg (← withoutKeys uopts #["clean"])
   for v in (← splitvalues (← gp rawclean "values")) do
     cleanAddCfg cleancfg (.str v)
   let parts ← newList #[base, copts, uopts]
@@ -360,16 +401,8 @@ def makeOptions (config options : Value) : SIO Value := do
         sp e "alias" a
     | _ => pure ()
   sp out "__derived__" (← newMap #[("clean", cleancfg)])
-  -- Every string under a sensitive name anywhere in the options - a custom
-  -- auth header, a feature credential - is a secret the SDK now handles.
-  let scan ← clone out
-  dp scan "__derived__"
-  let keys ← cfgStrings cleancfg "keys"
-  let _ ← walk scan (before := some (fun key val _ _ => do
-    match val, key with
-    | .str _, .str k => if sensitiveKey keys (some k) then cleanAddCfg cleancfg val
-    | _, _ => pure ()
-    pure val))
+  -- Again over the merged result: the config's own defaults can carry one.
+  cleanAddSensitiveCfg cleancfg (← withoutKeys out #["clean", "__derived__"])
   pure out
 
 def makeContext (ctxmap : Value) : SIO Value := do

@@ -230,6 +230,36 @@ tests c alltests = do
     pure (vstring auth == "[redacted]" && vstring tok == "[redacted]" && vstring acc == "json"
           && vstring note == "key [redacted] sent" && vstring orig == "Bearer SECRET-abcdef")
 
+  runTest c "primary.clean_masks_registered_property_names" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    raw <- emptyMap; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    writeIORef (cOptions ctx) o
+    cleanAddUtil ctx (VStr "ZZVAL-abc123")
+    cleanAddUtil ctx (VStr "ZZVAL-xyz789")
+    v <- jo [("ZZVAL-abc123", VNum 1), ("ZZVAL-xyz789", VNum 2), ("plain", VNum 3)]
+    r <- cleanUtil ctx v
+    ks <- case r of VMap ref -> map fst <$> readIORef ref; _ -> pure []
+    pure (ks == ["[redacted]", "[redacted]#1", "plain"])
+
+  runTest c "primary.clean_add_sensitive_every_scalar" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    raw <- emptyMap; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    writeIORef (cOptions ctx) o
+    apikey <- jo [("value", VStr "NESTED-SECRET-1")]
+    listed <- ja [VStr "LISTED-SECRET-2"]
+    hdrs <- jo [("X-Api-Token", listed)]
+    loop <- jo [("token", VStr "LOOP-SECRET-3")]
+    setp loop "self" loop
+    v <- jo [("apikey", apikey), ("headers", hdrs), ("secret", VNum 123456789)
+            , ("name", VStr "not-a-secret"), ("loop", loop)]
+    cleanAddSensitiveUtil ctx v
+    values <- getpathS o "__derived__.clean.values"
+    vals <- case values of VList _ -> map vstring <$> vlistItems values; _ -> pure []
+    pure (all (`elem` vals) ["NESTED-SECRET-1", "LISTED-SECRET-2", "123456789", "LOOP-SECRET-3"]
+          && "not-a-secret" `notElem` vals)
+
   runTest c "primary.make_request_guard_no_spec" $ do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"
     writeIORef (cSpec ctx) VNoval

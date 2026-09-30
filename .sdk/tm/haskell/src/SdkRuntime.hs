@@ -422,7 +422,7 @@ snapshot r key depth seen v = case v of
     es <- readIORef ref
     es' <- mapM (\(k, x) -> do y <- snapshot r (VStr k) (depth + 1) (SeenM ref : seen) x; pure (k, y))
                 [(k, x) | (k, x) <- es, not (isfunc x)]
-    mkMap es'
+    mkMap (cleanNames r es')
   _ -> pure (if sensitive then VStr (crMask r) else v)
   where
     sensitive = sensitiveKey (crKeys r) key
@@ -430,6 +430,46 @@ snapshot r key depth seen v = case v of
       | depth >= cleanMaxDepth || s `elem` seen = pure (VStr cleanCircular)
       | sensitive = pure (VStr (crMask r))
       | otherwise = body
+
+-- A registered value used as a property name is masked like any other
+-- string; names that mask alike take a counter, so none is lost.
+cleanNames :: CleanRule -> [(String, Value)] -> [(String, Value)]
+cleanNames r = reverse . foldl add []
+  where
+    add out (k, v) =
+      let name = cleanStr r k
+          taken n = any ((== n) . fst) out
+          bump i = let n = name ++ "#" ++ show i in if taken n then bump (i + 1) else n
+      in (if name == k || not (taken name) then name else bump (1 :: Int), v) : out
+
+-- Every scalar under a sensitive name, at any depth and of any shape: a
+-- credential mistyped as a map or a number is still a credential, and the
+-- validation error that rejects it quotes it.
+cleanAddSensitiveCfg :: Value -> Value -> IO ()
+cleanAddSensitiveCfg cfg v0 = do
+  keys <- cfgStrings cfg "keys"
+  let go under depth seen v
+        | depth >= cleanMaxDepth = pure ()
+        | otherwise = case v of
+            VStr _ -> when under (cleanAddCfg cfg v)
+            VNum _ -> when under (do t <- stringify v; cleanAddCfg cfg (VStr t))
+            VList ref | SeenL ref `notElem` seen -> do
+              its <- readIORef ref
+              mapM_ (go under (depth + 1) (SeenL ref : seen)) its
+            VMap ref | SeenM ref `notElem` seen -> do
+              es <- readIORef ref
+              mapM_ (\(k, x) -> go (under || sensitiveKey keys (VStr k)) (depth + 1) (SeenM ref : seen) x) es
+            _ -> pure ()
+  go False (0 :: Int) [] v0
+
+cleanAddSensitiveUtil :: Context -> Value -> IO ()
+cleanAddSensitiveUtil ctx v = do cfg <- cleanConfigOf ctx; cleanAddSensitiveCfg cfg v
+
+-- A shallow copy of a map without the named keys; the values are shared.
+withoutKeys :: [String] -> Value -> IO Value
+withoutKeys ks v = case v of
+  VMap ref -> do es <- readIORef ref; mkMap [(k, x) | (k, x) <- es, k `notElem` ks]
+  _ -> pure v
 
 cleanWithCfg :: Value -> Value -> IO Value
 cleanWithCfg cfg v = do
@@ -1373,11 +1413,10 @@ makeOptionsUtil ctx = do
   emc <- emptyMap
   cleanmerged <- merge =<< ja [emc, specclean, rawcleanM]
   cleancfg <- makeCleanConfig cleanmerged
-  apikeyV <- getp opts0 "apikey"
-  secretV <- getp opts0 "secret"
+  cleanAddSensitiveCfg cleancfg =<< withoutKeys ["clean"] opts0
   cvalsV <- case rawclean of VMap _ -> getp rawclean "values"; _ -> pure VNoval
   cvals <- splitvalues cvalsV
-  forM_ (apikeyV : secretV : map VStr cvals) (cleanAddCfg cleancfg)
+  forM_ (map VStr cvals) (cleanAddCfg cleancfg)
   -- Feature add-order. options.feature may be given as an ordered LIST of
   -- {name, active, ...opts} entries (list position = add order) or a
   -- {name => {opts}} map. Normalize a list to a map (so merge/validate/init
@@ -1483,16 +1522,8 @@ makeOptionsUtil ctx = do
   orderList <- ja (map VStr featureOrder)
   setp derived "featureorder" orderList
   setp opts "__derived__" derived
-  -- Every string under a sensitive name anywhere in the options - a custom
-  -- auth header, a feature credential - is a secret the SDK now handles.
-  scan <- clone opts
-  _ <- delprop scan (VStr "__derived__")
-  keys <- cfgStrings cleancfg "keys"
-  _ <- walk (Just (\key val _ _ -> do
-         case val of
-           VStr _ | sensitiveKey keys key -> cleanAddCfg cleancfg val
-           _ -> pure ()
-         pure val)) Nothing VNoval scan
+  -- Again over the merged result: the config's own defaults can carry one.
+  cleanAddSensitiveCfg cleancfg =<< withoutKeys ["clean", "__derived__"] opts
   pure opts
 
 -- ------------------------------------------------------------------

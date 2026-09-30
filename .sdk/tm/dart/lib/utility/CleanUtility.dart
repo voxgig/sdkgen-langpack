@@ -242,10 +242,24 @@ Map<String, dynamic> _plain(Map cfg, Map val, int depth, List seen) {
   for (final k in val.keys) {
     final v = _snapshot(cfg, val[k], k, depth + 1, seen);
     if (!identical(v, _drop)) {
-      out[k.toString()] = v;
+      out[_cleanName(cfg, out, k.toString())] = v;
     }
   }
   return out;
+}
+
+// A registered value used as a property name is masked like any other
+// string; names that mask alike take a counter, so none is lost.
+String _cleanName(Map cfg, Map out, String key) {
+  final name = _cleanString(cfg, key);
+  if (name == key || !out.containsKey(name)) {
+    return name;
+  }
+  var i = 1;
+  while (out.containsKey(name + '#' + i.toString())) {
+    i++;
+  }
+  return name + '#' + i.toString();
 }
 
 // The SDK's own error is cleaned in place, since it is about to be thrown.
@@ -276,3 +290,48 @@ dynamic clean(dynamic ctx, dynamic val) {
 }
 
 bool cleanKey(dynamic ctx, dynamic key) => _sensitiveKey(_cleanConfig(ctx), key);
+
+// Every scalar under a sensitive name, at any depth and of any shape: a
+// credential mistyped as a map or a number is still a credential, and the
+// validation error that rejects it quotes it.
+void cleanAddSensitive(dynamic ctx, dynamic val,
+    [bool under = false, int depth = 0, List? seen]) {
+  if (null == val || MAXDEPTH <= depth) {
+    return;
+  }
+  if (val is String) {
+    if (under) {
+      cleanAdd(ctx, val);
+    }
+    return;
+  }
+  if (val is num) {
+    if (under) {
+      cleanAdd(ctx, _numText(val));
+    }
+    return;
+  }
+  if (val is! Map && val is! List) {
+    return;
+  }
+  final visited = seen ?? [];
+  if (visited.any((s) => identical(s, val))) {
+    return;
+  }
+  visited.add(val);
+  if (val is Map) {
+    for (final k in val.keys) {
+      cleanAddSensitive(ctx, val[k], under || cleanKey(ctx, k), depth + 1, visited);
+    }
+  } else {
+    for (final item in val as List) {
+      cleanAddSensitive(ctx, item, under, depth + 1, visited);
+    }
+  }
+}
+
+// The decimal text JSON and ts give a number: 12345678.0 is "12345678".
+String _numText(num n) =>
+    (n is double && n.isFinite && n == n.truncateToDouble())
+        ? n.toInt().toString()
+        : n.toString();

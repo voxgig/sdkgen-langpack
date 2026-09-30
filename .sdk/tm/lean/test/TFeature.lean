@@ -454,6 +454,48 @@ def main : IO UInt32 := do
       check ((← gpS (← gp ex "err") "code") == "request_status")
         "pipeline: the failure is reported on the explain record itself")
 
+    -- pipeline: an error a hook throws never passed through makeError, so
+    -- runOp cleans it on the way out.
+    (do
+      let opts ← liveOpts #[("probe", ← onOpts #[])]
+      SdkUtility.sp opts "apikey" (.str "HOOKED-SECRET-4")
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+      addProbe c (fun s ctx => do
+        if s == "PreResponse" then
+          throw (IO.userError ("hook saw " ++ (← stringify (← gp ctx "spec")))))
+      let msg ← thrown (SdkRuntime.opList c "widget" (← emptyMap) (← emptyMap))
+      check (hasSub msg "hook saw" && !hasSub msg "HOOKED-SECRET-4")
+        s!"pipeline: an error a hook throws leaves cleaned ({msg})")
+
+    -- clean: a registered value used as a property name is masked, and
+    -- names that mask alike are all kept.
+    (do
+      let ctx ← newMap #[("options", ← SdkUtility.makeOptions (← emptyMap) (← emptyMap))]
+      SdkUtility.cleanAdd ctx (.str "ZZVAL-abc123")
+      SdkUtility.cleanAdd ctx (.str "ZZVAL-xyz789")
+      let out ← SdkUtility.clean ctx (← newMap #[("ZZVAL-abc123", .num 1.0),
+        ("ZZVAL-xyz789", .num 2.0), ("plain", .num 3.0)])
+      let names := (← mapEntriesOf out).map (·.1)
+      check (names == #["[redacted]", "[redacted]#1", "plain"])
+        "clean: a registered value used as a property name is masked, collisions kept")
+
+    -- clean: every scalar under a sensitive option name is registered, at any
+    -- depth and of any shape, so a mistyped credential is masked too.
+    (do
+      let ctx ← newMap #[("options", ← SdkUtility.makeOptions (← emptyMap) (← emptyMap))]
+      let loop ← newMap #[("token", .str "LOOP-SECRET-3")]
+      SdkUtility.sp loop "self" loop
+      SdkUtility.cleanAddSensitive ctx (← newMap #[
+        ("apikey", ← newMap #[("value", .str "NESTED-SECRET-1")]),
+        ("headers", ← newMap #[("X-Api-Token", ← newList #[.str "LISTED-SECRET-2"])]),
+        ("secret", .num 123456789.0), ("name", .str "not-a-secret"), ("loop", loop)])
+      let values ← SdkUtility.cfgStrings (← SdkUtility.cleanConfig ctx) "values"
+      check (#["NESTED-SECRET-1", "LISTED-SECRET-2", "123456789", "LOOP-SECRET-3"].all values.contains
+             && !values.contains "not-a-secret")
+        "clean: cleanAddSensitive registers every scalar under a sensitive name")
+
     -- pipeline: a hook that has done a stage's work short-circuits it, as
     -- ts's makeSpec, makeRequest, makeResponse and makeResult each do on
     -- ctx.out. runOp honoured only out.point, so a feature that replaced a

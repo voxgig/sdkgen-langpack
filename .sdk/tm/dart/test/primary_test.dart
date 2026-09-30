@@ -14,6 +14,7 @@ import 'omni.dart';
 
 import '../lib/ProjectNameSDK.dart';
 import '../lib/Point.dart';
+import '../lib/utility/CleanUtility.dart' as cu;
 import '../lib/utility/ErrUtility.dart';
 import '../lib/utility/voxgig_struct.dart' as vs;
 
@@ -423,6 +424,47 @@ void tests() {
       final val = {'key': 'secret123', 'name': 'test'};
       final cleaned = _utility.clean(ctx, val);
       ok(null != cleaned);
+    });
+
+    test('clean-masks-registered-property-names', (t) async {
+      final ctx = {
+        'options': {
+          '__derived__': {'clean': cu.makeCleanConfig(cu.CLEAN_OPTSPEC)}
+        }
+      };
+      cu.cleanAdd(ctx, 'ZZVAL-abc123');
+      cu.cleanAdd(ctx, 'ZZVAL-xyz789');
+      final out =
+          cu.clean(ctx, {'ZZVAL-abc123': 1, 'ZZVAL-xyz789': 2, 'plain': 3});
+      deepEqual(out, {'[redacted]': 1, '[redacted]#1': 2, 'plain': 3});
+    });
+
+    test('cleanAddSensitive-registers-every-scalar-under-a-sensitive-name',
+        (t) async {
+      final cfg = cu.makeCleanConfig(cu.CLEAN_OPTSPEC);
+      final ctx = {
+        'options': {
+          '__derived__': {'clean': cfg}
+        }
+      };
+      cu.cleanAddSensitive(ctx, {
+        'apikey': {'value': 'NESTED-SECRET-1'},
+        'headers': {
+          'X-Api-Token': ['LISTED-SECRET-2']
+        },
+        'secret': 123456789,
+        'name': 'not-a-secret',
+      });
+      final List values = cfg['values'];
+      ok(values.contains('NESTED-SECRET-1'));
+      ok(values.contains('LISTED-SECRET-2'));
+      ok(values.contains('123456789'));
+      ok(!values.contains('not-a-secret'));
+
+      final loop = <String, dynamic>{'token': 'LOOP-SECRET-3'};
+      loop['self'] = loop;
+      cu.cleanAddSensitive(ctx, loop);
+      ok(values.contains('LOOP-SECRET-3'));
     });
 
     // The whole-suite backstop, behind `_sec`'s per-section guards: those
