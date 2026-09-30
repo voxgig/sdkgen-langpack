@@ -230,6 +230,20 @@ tests c alltests = do
     pure (vstring auth == "[redacted]" && vstring tok == "[redacted]" && vstring acc == "json"
           && vstring note == "key [redacted] sent" && vstring orig == "Bearer SECRET-abcdef")
 
+  runTest c "primary.make_error_cleans_the_code" $ do
+    cl <- C.testSdk0
+    ctrl <- jo [("throw", VBool False)]
+    ctx <- mkCtxCtrl cl "load" ctrl
+    raw <- emptyMap; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    writeIORef (cOptions ctx) o
+    cleanAddUtil ctx (VStr "CODE-SECRET-12")
+    e <- mkErr "refused_CODE-SECRET-12" "refused"
+    _ <- makeErrorUtil ctx (Just e)
+    made <- (`getp` "err") =<< readIORef (cCtrl ctx)
+    code <- getp made "code"
+    pure (vstring code == "refused_[redacted]")
+
   runTest c "primary.clean_masks_registered_property_names" $ do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"
     raw <- emptyMap; writeIORef (cOptions ctx) raw

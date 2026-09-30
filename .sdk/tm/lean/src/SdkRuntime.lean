@@ -356,7 +356,7 @@ def failOp (client ctx : Value) (errv : Value) : SIO Value := do
   let e ← SdkUtility.makeError ctx errv
   let orig ← if (← SdkUtility.isErrV errv) then pure errv else gp result "err"
   let code ← gpS orig "code"
-  if code != "" then SdkUtility.sp e "code" (.str code)
+  if code != "" then SdkUtility.sp e "code" (← SdkUtility.clean ctx (.str code))
   SdkUtility.sp e "status" (← gp result "status")
   SdkUtility.sp e "result" (← SdkUtility.clean ctx result)
   SdkUtility.sp e "spec" (← SdkUtility.clean ctx (← gp ctx "spec"))

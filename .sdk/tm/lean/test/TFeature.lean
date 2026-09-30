@@ -514,6 +514,18 @@ def main : IO UInt32 := do
       check (hasSub ex "authorization" && !hasSub ex "EXPLAIN-SECRET-6")
         s!"pipeline: a hook's throw leaves its explain record cleaned ({ex})")
 
+    -- pipeline: the error's code is cleaned like its message.
+    (do
+      let opts ← liveOpts #[]
+      SdkUtility.sp opts "apikey" (.str "CODE-SECRET-12")
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do pure (.noval, some (← SdkUtility.mkErr "refused_CODE-SECRET-12" "refused"))))
+      let ctrl ← newMap #[("throw", .bool false)]
+      let _ ← SdkRuntime.opList c "widget" (← emptyMap) ctrl
+      let code ← gpS (← gp ctrl "err") "code"
+      check (code == "refused_[redacted]") s!"pipeline: the error's code is cleaned ({code})")
+
     -- clean: a registered value used as a property name is masked, and
     -- names that mask alike are all kept.
     (do

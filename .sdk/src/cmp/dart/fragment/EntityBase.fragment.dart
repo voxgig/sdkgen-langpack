@@ -273,11 +273,13 @@ class ProjectNameEntityBase {
 
     // An error a hook, the fetcher or a parser threw never passed through
     // makeError. Dart's own errors cannot be edited, so they leave as the
-    // SDK's error carrying the cleaned message.
-    err = err is ProjectNameError
-        ? clean(ctx, err)
-        : ProjectNameError('' == errcode(err) ? 'unexpected' : errcode(err),
-            clean(ctx, errmsg(err)), ctx);
+    // SDK's error, cleaned.
+    err = clean(
+        ctx,
+        err is ProjectNameError
+            ? err
+            : ProjectNameError(
+                '' == errcode(err) ? 'unexpected' : errcode(err), errmsg(err), ctx));
 
     ctrl['err'] = err;
 

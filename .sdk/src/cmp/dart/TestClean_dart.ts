@@ -239,6 +239,9 @@ final SCENARIOS = <Scenario>[
         'body': '<html>',
         'json': () => throw FormatException('Unexpected token < in JSON'),
       }),
+  // A provider failing with the SDK's own error, its code quoting the key.
+  Scenario('coded',
+      (url, fd) => throw ${Name}Error('refused_' + CANARY['apikey']!, 'refused')),
 ];
 
 ${Name}SDK makeSdk(Scenario scenario, List<Sink> sinks,
@@ -330,6 +333,16 @@ Future<_Target?> usableOp() async {
   return null;
 }
 
+// An error with a code of its own, as a library a hook calls might throw.
+class HookError implements Exception {
+  final String code;
+  final String message;
+  HookError(this.code, this.message);
+
+  @override
+  String toString() => code + ': ' + message;
+}
+
 // A feature that throws from inside the pipeline, quoting the request it
 // saw: an error makeError never handled.
 class ThrowFeature extends BaseFeature {
@@ -344,7 +357,7 @@ class ThrowFeature extends BaseFeature {
 
   @override
   dynamic PreResponse(dynamic ctx) {
-    throw Exception('hook saw ' + jsonEncode(ctx.spec));
+    throw HookError('hook_' + CANARY['apikey']!, 'hook saw ' + jsonEncode(ctx.spec));
   }
 }
 

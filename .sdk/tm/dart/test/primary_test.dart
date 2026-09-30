@@ -426,6 +426,16 @@ void tests() {
       ok(null != cleaned);
     });
 
+    test('makeError-cleans-the-code', (t) async {
+      await _setup();
+      final ctx = _makeFullCtx();
+      ctx.ctrl['throw'] = false;
+      cu.cleanAdd(ctx, 'CODE-SECRET-12');
+      _utility.makeError(ctx, ctx.error('refused_CODE-SECRET-12', 'refused'));
+      equal('refused_[redacted]', ctx.ctrl['err'].code);
+      ok(!ctx.ctrl['err'].toString().contains('CODE-SECRET-12'));
+    });
+
     test('clean-masks-registered-property-names', (t) async {
       final ctx = {
         'options': {

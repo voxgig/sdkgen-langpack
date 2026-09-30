@@ -569,12 +569,12 @@ makeErrorUtil ctx merr = do
   case explain of
     VMap _ -> do e2 <- jo [("message", VStr msg)]; setp explain "err" e2
     _ -> pure ()
-  ecode <- errCode err
+  ecode <- cleanUtil ctx . VStr =<< errCode err
   -- Cleaned COPIES: masking them can never mask the pipeline's own request.
   rv <- cleanUtil ctx =<< resultToValue result
   specV <- readIORef (cSpec ctx)
   sv <- case specV of VMap _ -> cleanUtil ctx =<< specToValue specV; _ -> pure VNoval
-  sdkErr <- jo [ ("__sdkerr__", VBool True), ("code", VStr ecode), ("message", VStr msg)
+  sdkErr <- jo [ ("__sdkerr__", VBool True), ("code", ecode), ("message", VStr msg)
                , ("result", rv), ("spec", sv) ]
   setp ctrl "err" sdkErr
   -- Fire PreUnexpected so observability features (metrics, telemetry, audit,

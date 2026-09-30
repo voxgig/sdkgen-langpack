@@ -275,6 +275,7 @@ dynamic clean(dynamic ctx, dynamic val) {
   }
 
   if (val is ProjectNameError) {
+    val.code = _cleanString(cfg, val.code);
     val.message = _cleanString(cfg, val.message);
     if (null != val.result) {
       val.result = _snapshot(cfg, val.result, 'result', 1, []);
