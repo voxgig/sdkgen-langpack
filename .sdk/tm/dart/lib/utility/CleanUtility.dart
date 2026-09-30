@@ -132,9 +132,10 @@ void cleanAdd(dynamic ctx, dynamic value) {
   }
 }
 
+// The hint is compared as a difference: 2 * hint overflows for a large one.
 String _maskValue(Map cfg, String value) {
   final int hint = cfg['hint'];
-  if (0 < hint && value.length > 2 * hint) {
+  if (0 < hint && value.length - hint > hint) {
     return cfg['mask'] + value.substring(value.length - hint);
   }
   return cfg['mask'];

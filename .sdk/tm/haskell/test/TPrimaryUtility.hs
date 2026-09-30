@@ -244,6 +244,15 @@ tests c alltests = do
     code <- getp made "code"
     pure (vstring code == "refused_[redacted]")
 
+  runTest c "primary.clean_with_a_huge_hint_still_masks" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    hc <- jo [("hint", VStr "5000000000000000000")]
+    raw <- jo [("apikey", VStr "HINT-SECRET-abcdef"), ("clean", hc)]; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    writeIORef (cOptions ctx) o
+    s <- cleanUtil ctx (VStr "k HINT-SECRET-abcdef")
+    pure (vstring s == "k [redacted]")
+
   runTest c "primary.clean_masks_registered_property_names" $ do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"
     raw <- emptyMap; writeIORef (cOptions ctx) raw

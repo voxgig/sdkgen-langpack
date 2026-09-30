@@ -259,11 +259,15 @@ splitvalues v = case v of
 
 countOpt :: Value -> Int -> Int
 countOpt v dflt = case v of
-  VNum n | n >= 0 -> floor n
+  VNum n | n >= 0 -> clampCount n
   VStr s -> case readMaybe s :: Maybe Double of
-    Just n | n >= 0 -> floor n
+    Just n | n >= 0 -> clampCount n
     _ -> dflt
   _ -> dflt
+
+-- floor of a Double beyond the Int range is undefined, so a count caps.
+clampCount :: Double -> Int
+clampCount n = if n >= fromIntegral (maxBound :: Int) then maxBound else floor n
 
 -- The derived clean block is a map, so features can register into its
 -- `values` list after makeOptions; `keys` holds the normalised names.
@@ -307,7 +311,7 @@ cfgStrings cfg k = do
   case v of { VList _ -> do { its <- listItems v; pure [s | VStr s <- its] }; _ -> pure [] }
 
 cfgInt :: Value -> String -> Int -> IO Int
-cfgInt cfg k d = do v <- getp cfg k; pure (case v of VNum n -> floor n; _ -> d)
+cfgInt cfg k d = do v <- getp cfg k; pure (case v of VNum n -> clampCount n; _ -> d)
 
 cleanRule :: Value -> IO CleanRule
 cleanRule cfg = do
@@ -402,11 +406,12 @@ cleanAddCfg cfg value = do
 cleanAddUtil :: Context -> Value -> IO ()
 cleanAddUtil ctx value = do cfg <- cleanConfigOf ctx; cleanAddCfg cfg value
 
+-- The hint is compared as a difference: 2 * hint overflows for a large one.
 maskValue :: CleanRule -> String -> String
 maskValue r value =
-  if crHint r > 0 && length value > 2 * crHint r
-    then crMask r ++ drop (length value - crHint r) value
-    else crMask r
+  let h = crHint r
+      n = length value
+  in if h > 0 && n - h > h then crMask r ++ drop (n - h) value else crMask r
 
 cleanStr :: CleanRule -> String -> String
 cleanStr r = \text -> foldl swap text (crValues r)

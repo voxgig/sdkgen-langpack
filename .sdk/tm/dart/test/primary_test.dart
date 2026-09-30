@@ -436,6 +436,19 @@ void tests() {
       ok(!ctx.ctrl['err'].toString().contains('CODE-SECRET-12'));
     });
 
+    test('clean-with-a-huge-hint-still-masks', (t) async {
+      final ctx = {
+        'options': {
+          '__derived__': {
+            'clean': cu.makeCleanConfig(
+                {...cu.CLEAN_OPTSPEC, 'hint': '5000000000000000000'})
+          }
+        }
+      };
+      cu.cleanAdd(ctx, 'HINT-SECRET-abcdef');
+      equal('k [redacted]', cu.clean(ctx, 'k HINT-SECRET-abcdef'));
+    });
+
     test('clean-masks-registered-property-names', (t) async {
       final ctx = {
         'options': {

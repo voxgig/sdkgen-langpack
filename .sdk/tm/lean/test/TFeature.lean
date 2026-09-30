@@ -526,6 +526,15 @@ def main : IO UInt32 := do
       let code ← gpS (← gp ctrl "err") "code"
       check (code == "refused_[redacted]") s!"pipeline: the error's code is cleaned ({code})")
 
+    -- clean: a hint beyond any value's length leaves nothing of it visible.
+    (do
+      let opts ← SdkUtility.makeOptions (← emptyMap) (← newMap #[
+        ("apikey", .str "HINT-SECRET-abcdef"),
+        ("clean", ← newMap #[("hint", .str "5000000000000000000")])])
+      let s ← SdkUtility.clean (← newMap #[("options", opts)]) (.str "k HINT-SECRET-abcdef")
+      check (SdkUtility.vs s == "k [redacted]")
+        s!"clean: a huge hint still masks the whole value ({SdkUtility.vs s})")
+
     -- clean: a registered value used as a property name is masked, and
     -- names that mask alike are all kept.
     (do
