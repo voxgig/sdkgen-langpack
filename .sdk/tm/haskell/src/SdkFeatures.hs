@@ -1290,7 +1290,8 @@ rawRequest client fetchargs = do
                   headersV <- getp fetched "headers"; headers <- case headersV of VMap _ -> pure headersV; _ -> emptyMap
                   clv <- getp headers "content-length"; let cl = case clv of { VStr s -> s; VNum n -> show (truncate n :: Int); _ -> "" }
                   let noBody = status == 204 || status == 304 || cl == "0"
-                  jsonData <- if noBody then pure VNoval else do jf <- getp fetched "json"; case jf of VFunc _ -> callJson jf; _ -> pure VNoval
+                  -- A body that does not parse leaves data unset; the call still reports its status.
+                  jsonData <- if noBody then pure VNoval else do jf <- getp fetched "json"; case jf of VFunc _ -> orNoval (callJson jf); _ -> pure VNoval
                   jo [("ok", VBool (status >= 200 && status < 300)), ("status", vint status), ("headers", headers), ("data", jsonData)]
                 _ -> do e <- mkErr "direct_invalid" "invalid response type"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]
       case attempt of
@@ -1300,6 +1301,17 @@ rawRequest client fetchargs = do
           case fromException cleaned of
             Just (SdkException ev) -> do ev' <- errToValue ev; jo [("ok", VBool False), ("err", ev')]
             Nothing -> throwIO cleaned
+
+orNoval :: IO Value -> IO Value
+orNoval act = do
+  r <- try act
+  case r of
+    Right v -> pure v
+    Left e | isAsyncException e -> throwIO e
+           | otherwise -> pure VNoval
+
+isAsyncException :: SomeException -> Bool
+isAsyncException e = isJust (fromException e :: Maybe SomeAsyncException)
 
 sdkTest :: Value -> (String -> IO Feature) -> Value -> Value -> IO Client
 sdkTest config makeFeature testopts sdkopts = do
@@ -1332,7 +1344,7 @@ guardOp ctx act = do
 -- makeError, whose own error and explain record are already clean.
 cleanUnexpected :: Context -> SomeException -> IO SomeException
 cleanUnexpected ctx e
-  | isAsync = pure e
+  | isAsyncException e = pure e
   | Just (SdkException ev) <- fromException e = do
       ctrl <- readIORef (cCtrl ctx)
       made <- getp ctrl "err"
@@ -1344,7 +1356,6 @@ cleanUnexpected ctx e
       m <- cleanUtil ctx (VStr (displayException e))
       toException . SdkException <$> mkErr "unexpected" (vstring m)
   where
-    isAsync = case (fromException e :: Maybe SomeAsyncException) of Just _ -> True; Nothing -> False
     sameNode (VMap a) (VMap b) = a == b
     sameNode _ _ = False
 

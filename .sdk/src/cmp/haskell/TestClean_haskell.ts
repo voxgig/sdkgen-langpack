@@ -177,6 +177,13 @@ thrown :: Scenario
 thrown = Scenario "thrown" (\\url ->
   ioError (userError ("refused " ++ canaryApikey ++ " (URL was: \\"" ++ url ++ "\\")")))
 
+-- A 200 whose body is not JSON: the parser fails, quoting what it read.
+unparsed :: Scenario
+unparsed = Scenario "unparsed" (\\_ -> do
+  h <- emptyMap
+  jo [ ("status", vint 200), ("statusText", VStr "OK"), ("headers", h), ("body", VStr "<html>")
+     , ("json", vfunc1 (\\_ -> ioError (userError ("Unexpected token < in JSON: " ++ canaryApikey)))) ])
+
 hookFeature :: String -> (String -> Context -> IO ()) -> IO Feature
 hookFeature name hook = do
   active <- newIORef True
@@ -373,6 +380,19 @@ tests c = do
             tOk <- getp res "ok"
             pure (not (isTrueV tOk) && ismap tErr)
         check c "clean.direct_thrown_fetch_fails" thrownFails
+
+        -- A body that does not parse fails nothing: data stays unset and ok
+        -- follows the status, as the ts direct() does.
+        unparsedSdk <- makeSdk unparsed sinks (Just []) []
+        rawUnparsed <- try (F.direct unparsedSdk =<< jo [("path", VStr "raw")]) :: IO (Either SomeException Value)
+        unparsedOk <- case rawUnparsed of
+          Left e -> False <$ pushException sinks "direct-unparsed" e
+          Right res -> do
+            pushValue sinks "direct-unparsed" res
+            let absent v = case v of VNoval -> True; VNull -> True; _ -> False
+            uOk <- getp res "ok"; uData <- getp res "data"; uErr <- getp res "err"
+            pure (isTrueV uOk && absent uData && absent uErr)
+        check c "clean.direct_unparsed_body_is_ok" unparsedOk
 
         fs <- forms
         swept <- readIORef sinks
