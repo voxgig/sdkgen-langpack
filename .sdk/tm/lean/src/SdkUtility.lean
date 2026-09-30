@@ -139,20 +139,20 @@ def cfgNat (cfg : Value) (k : String) (d : Nat) : SIO Nat := do
 def base64Encode (s : String) : String := Id.run do
   let tbl := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toList.toArray
   let bytes := s.toUTF8
-  let at (n : Nat) : Char := tbl[n % 64]!
+  let enc (n : Nat) : Char := tbl[n % 64]!
   let mut out := ""
   for t in [0 : bytes.size / 3] do
     let i := t * 3
     let n := (bytes[i]!.toNat <<< 16) ||| (bytes[i + 1]!.toNat <<< 8) ||| bytes[i + 2]!.toNat
-    out := (((out.push (at (n >>> 18))).push (at (n >>> 12))).push (at (n >>> 6))).push (at n)
+    out := (((out.push (enc (n >>> 18))).push (enc (n >>> 12))).push (enc (n >>> 6))).push (enc n)
   let i := (bytes.size / 3) * 3
   let rem := bytes.size - i
   if rem == 2 then
     let n := (bytes[i]!.toNat <<< 16) ||| (bytes[i + 1]!.toNat <<< 8)
-    out := (((out.push (at (n >>> 18))).push (at (n >>> 12))).push (at (n >>> 6))).push '='
+    out := (((out.push (enc (n >>> 18))).push (enc (n >>> 12))).push (enc (n >>> 6))).push '='
   else if rem == 1 then
     let n := bytes[i]!.toNat <<< 16
-    out := (((out.push (at (n >>> 18))).push (at (n >>> 12))).push '=').push '='
+    out := (((out.push (enc (n >>> 18))).push (enc (n >>> 12))).push '=').push '='
   return out
 
 def hexDigitVal (c : Char) : Option Nat :=
@@ -175,7 +175,7 @@ def percentDecode (s : String) : String := String.ofList (percentDecodeList s.to
 def cleanForms (value : String) : SIO (Array String) := do
   let pe ← match (← escurl (.str value)) with | .str s => pure s | _ => pure value
   let js := jsonEscapeStr value
-  let jsIn := if js.length >= 2 then (js.drop 1).dropRight 1 else js
+  let jsIn := if js.length >= 2 then ((js.drop 1).dropEnd 1).toString else js
   let mut out : Array String := #[]
   for f in #[value, base64Encode value, pe, jsIn] do
     if f != "" && !out.contains f then out := out.push f
@@ -188,8 +188,8 @@ def cleanAddCfg (cfg : Value) (value : Value) : SIO Unit := do
     if s.length < mn then return ()
     match (← gp cfg "values") with
     | .list id =>
-      let have := (← listItems id).filterMap (fun x => match x with | .str t => some t | _ => none)
-      let mut merged := have
+      let cur := (← listItems id).filterMap (fun x => match x with | .str t => some t | _ => none)
+      let mut merged := cur
       let mut changed := false
       for f in (← cleanForms s) do
         if f.length >= mn && !merged.contains f then

@@ -325,7 +325,7 @@ def scenarioNotfound : Scenario := { name := "notfound", respond := fun _ => do
 def scenarioServer : Scenario := { name := "server", respond := fun _ => do
   responseOf 500.0 (← newMap #[("error", .str "boom")]) #[] }
 -- A transport failure is thrown, quoting the URL as a client library would.
-def scenarioTransport : Scenario := { name := "transport", respond := fun url =>
+def scenarioTransport : Scenario := { name := "transport", respond := fun url => do
   throw (IO.userError s!"socket hang up (URL was: \\"{url}\\")") }
 def scenarioNotjson : Scenario := { name := "notjson", respond := fun _ => do
   responseOf 200.0 (.str "<html>") #[] }
