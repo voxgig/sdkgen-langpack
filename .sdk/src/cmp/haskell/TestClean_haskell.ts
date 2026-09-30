@@ -47,7 +47,8 @@ const TestClean = cmp(function TestClean(props: any) {
         const params = pointParams(ent.op[op]).map((p) => JSON.stringify(p)).join(', ')
         candidates.push(
           `  , Candidate "${ent.name}.${op}" [${params}]\n` +
-          `      (\\sdk m ctrl -> do ent <- C.${fn} sdk VNoval; ${call})`)
+          `      (\\sdk m ctrl -> do ent <- C.${fn} sdk VNoval; ${call})\n` +
+          `      (\\sdk m -> do ent <- C.${fn} sdk VNoval; eStream ent "${op}" m VNoval)`)
       }
     })
 
@@ -88,6 +89,7 @@ module TClean (tests) where
 
 import Control.Exception (SomeException, displayException, fromException, try)
 import Control.Monad (forM, forM_, when)
+import Data.Either (isLeft)
 import Data.IORef
 import Data.List (intercalate, isInfixOf, isSuffixOf)
 import Data.Maybe (isJust)
@@ -217,8 +219,17 @@ throwFeature = hookFeature "throwhook" (\\name ctx ->
     j <- case sp of VMap _ -> jsonifyCompact sp; _ -> pure ""
     ioError (userError ("hook saw " ++ j)))
 
+-- A stream that fails while the caller iterates it, quoting a credential.
+streamThrowFeature :: IO Feature
+streamThrowFeature = hookFeature "streamthrow" (\\name ctx ->
+  when (name == "PreDone") $ do
+    rv <- readIORef (cResult ctx)
+    when (ismap rv) $
+      setp rv "stream" (vfunc1 (\\_ -> ioError (userError ("stream saw " ++ canaryApikey)))))
+
 data Candidate = Candidate
-  { cdName :: String, cdParams :: [String], cdRun :: Client -> Value -> Value -> IO Value }
+  { cdName :: String, cdParams :: [String], cdRun :: Client -> Value -> Value -> IO Value
+  , cdStream :: Client -> Value -> IO [Value] }
 
 -- An operation and the match it completes with.
 type Target = (Candidate, [(String, Value)])
@@ -227,6 +238,7 @@ type Target = (Candidate, [(String, Value)])
 candidates :: [Candidate]
 candidates =
   [ Candidate "_.none" [] (\\_ _ _ -> ioError (userError "no candidate"))
+      (\\_ _ -> ioError (userError "no candidate"))
 ${candidates.join('\n')}
   ]
 
@@ -319,6 +331,14 @@ tests c = do
         hctrl <- do ex <- emptyMap; jo [("explain", ex)]
         hookerr <- drive hooked target hctrl sinks
         check c "clean.throwing_hook_fails_the_op" (isJust hookerr)
+
+        -- Iterating a stream runs inside the same catch path as the operation.
+        streamer <- streamThrowFeature
+        streamed <- makeSdk (scenarios !! 0) sinks (Just []) [streamer]
+        smatch <- jo (snd target)
+        streamerr <- try (cdStream (fst target) streamed smatch) :: IO (Either SomeException [Value])
+        either (\\e -> () <$ pushException sinks "stream" e) (const (pure ())) streamerr
+        check c "clean.failing_stream_throws" (isLeft streamerr)
 
         -- Most callers pass no clean block; the defaults alone must mask.
         forM_ [scenarios !! 1, scenarios !! 3] $ \\sc -> do

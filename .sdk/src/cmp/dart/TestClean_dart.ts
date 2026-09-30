@@ -44,7 +44,8 @@ const TestClean = cmp(function TestClean(props: any) {
         const params = pointParams(ent.op[op]).map(dartStringLiteral).join(', ')
         candidates.push(
           `  _Candidate('${ent.name}.${op}', <String>[${params}],\n` +
-          `      (sdk, match, ctrl) => sdk.${nom(ent, 'Name')}().${op}(match, ctrl)),`)
+          `      (sdk, match, ctrl) => sdk.${nom(ent, 'Name')}().${op}(match, ctrl),\n` +
+          `      (sdk, match) => sdk.${nom(ent, 'Name')}().stream('${op}', {'reqmatch': match})),`)
       }
     })
 
@@ -296,7 +297,8 @@ class _Candidate {
   final String name;
   final List<String> params;
   final Future<dynamic> Function(dynamic sdk, dynamic match, dynamic ctrl) run;
-  const _Candidate(this.name, this.params, this.run);
+  final Stream<dynamic> Function(dynamic sdk, dynamic match) stream;
+  const _Candidate(this.name, this.params, this.run, this.stream);
 }
 
 class _Target {
@@ -359,6 +361,26 @@ class ThrowFeature extends BaseFeature {
   @override
   dynamic PreResponse(dynamic ctx) {
     throw HookError('hook_' + CANARY['apikey']!, 'hook saw ' + jsonEncode(ctx.spec));
+  }
+}
+
+// A stream that fails while the caller iterates it, quoting a credential.
+class StreamThrowFeature extends BaseFeature {
+  StreamThrowFeature() {
+    name = 'streamthrow';
+    version = '0.0.1';
+    active = true;
+  }
+
+  @override
+  dynamic init(dynamic ctx, dynamic opts) => null;
+
+  @override
+  dynamic PreDone(dynamic ctx) {
+    ctx.result.stream = () async* {
+      throw Exception('stream saw ' + CANARY['apikey']!);
+    };
+    return null;
   }
 }
 
@@ -453,6 +475,18 @@ void tests() {
       final hookerr = await drive(hooked, target,
           <String, dynamic>{'explain': <String, dynamic>{}}, sinks);
       ok(null != hookerr, 'the throwing hook should fail the operation');
+
+      // Iterating a stream runs inside the same catch path as the operation.
+      final streamed = makeSdk(SCENARIOS[0], sinks, null, [StreamThrowFeature()]);
+      dynamic streamerr;
+      try {
+        await for (final _ in target.op
+            .stream(streamed, Map<String, dynamic>.of(target.match))) {}
+      } catch (e) {
+        streamerr = e;
+      }
+      ok(null != streamerr, 'the failing stream should throw');
+      sinks.addAll(forms('stream', streamerr));
 
       // Most callers pass no clean block; the defaults alone must mask.
       for (final scenario in [SCENARIOS[1], SCENARIOS[3]]) {

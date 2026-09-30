@@ -1309,8 +1309,11 @@ sdkTest config makeFeature testopts sdkopts = do
 -- ------------------------------------------------------------------
 
 runOpPipeline :: Context -> IO () -> IO Value
-runOpPipeline ctx postDone = do
-  r <- try (runOpStages ctx postDone)
+runOpPipeline ctx postDone = guardOp ctx (runOpStages ctx postDone)
+
+guardOp :: Context -> IO a -> IO a
+guardOp ctx act = do
+  r <- try act
   case r of
     Right v -> pure v
     Left e -> throwIO =<< cleanUnexpected ctx e
@@ -1469,19 +1472,22 @@ makeEntity client name entopts = do
               rd <- case rdV of VMap _ -> pure rdV; _ -> emptyMap
               setp rd "body$" body
               writeIORef (cReqdata ctx) rd
-            _ <- runOpPipeline ctx (pure ())
-            rv <- readIORef (cResult ctx)
-            raw <- case rv of
-              VMap _ -> do
-                sf <- getp rv "stream"
-                case sf of
-                  VFunc _ -> do r <- callVfn sf VNoval; case r of VList _ -> listItems r; _ -> pure []
-                  _ -> do resdata <- getp rv "resdata"; case resdata of VList _ -> listItems resdata; VNoval -> pure []; v -> pure [v]
-              _ -> pure []
-            sig <- getp coV "signal"
-            case sig of
-              VFunc _ -> streamTakeUntil sig raw
-              _ -> pure raw
+            -- The stream is read inside the operation's catch path: a feature's
+            -- stream that fails leaves cleaned, like any other failure.
+            guardOp ctx $ do
+              _ <- runOpStages ctx (pure ())
+              rv <- readIORef (cResult ctx)
+              raw <- case rv of
+                VMap _ -> do
+                  sf <- getp rv "stream"
+                  case sf of
+                    VFunc _ -> do r <- callVfn sf VNoval; case r of VList _ -> listItems r; _ -> pure []
+                    _ -> do resdata <- getp rv "resdata"; case resdata of VList _ -> listItems resdata; VNoval -> pure []; v -> pure [v]
+                _ -> pure []
+              sig <- getp coV "signal"
+              case sig of
+                VFunc _ -> streamTakeUntil sig raw
+                _ -> pure raw
         }
   root <- readIORef (clRootctx client)
   entctx <- makeContextImpl (defaultCtxSpec { csEntity = Just ent, csEntopts = Just entopts' }) root
