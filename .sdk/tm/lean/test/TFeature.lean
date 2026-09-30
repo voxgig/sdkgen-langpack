@@ -454,6 +454,20 @@ def main : IO UInt32 := do
       check ((← gpS (← gp ex "err") "code") == "request_status")
         "pipeline: the failure is reported on the explain record itself")
 
+    -- pipeline: with clean off, done still prunes a copy of the explain
+    -- record, so the failure keeps its own error.
+    (do
+      let w ← mkWire
+      let opts ← newMap #[("clean", ← newMap #[("active", .bool false)])]
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 404.0 "Not Found" (← emptyMap) #[]))
+      let ctrl ← newMap #[("explain", ← emptyMap), ("throw", .bool false)]
+      let _ ← SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "nope")]) ctrl
+      let e ← gp ctrl "err"
+      let msg ← gpS e "message"
+      check ((← gpS e "code") == "request_status" && !hasSub msg "unknown error")
+        s!"pipeline: with clean off, done leaves the live result's error ({msg})")
+
     -- pipeline: an error a hook throws never passed through makeError, so
     -- runOp cleans it on the way out.
     (do

@@ -455,9 +455,13 @@ def doneExplain (ctx : Value) : SIO Unit := do
   let ctrl ← gp ctx "ctrl"
   let explain ← gp ctrl "explain"
   if isMapV explain then do
-    let cleaned ← clean ctx explain
-    sp ctrl "explain" cleaned
-    let res ← gp cleaned "result"
+    let r ← cleanRule (← cleanConfig ctx)
+    -- A copy even with clean off, masking nothing: the result pruned below
+    -- is otherwise the live one, whose error failOp has still to read.
+    let copy ← snapshot (if r.active then r else { r with keys := #[], values := #[] })
+      none 0 #[] explain
+    sp ctrl "explain" copy
+    let res ← gp copy "result"
     if isMapV res then dp res "err"
 
 /-- Terminal step: the result payload, or the pipeline error. -/
