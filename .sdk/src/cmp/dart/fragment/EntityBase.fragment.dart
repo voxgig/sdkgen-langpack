@@ -202,6 +202,8 @@ class ProjectNameEntityBase {
       // Inbound: prefer the streaming feature's incremental Stream; else fall
       // back to the materialised items so `stream` always yields.
       if (null != result && result.stream is Function) {
+        // done() does not run on this path, so its record is cleaned here.
+        utility.cleanExplain(ctx);
         await for (final item in result.stream()) {
           if (_streamAborted(signal)) {
             return;
@@ -265,8 +267,6 @@ class ProjectNameEntityBase {
 
   dynamic unexpected(dynamic ctx, dynamic err) {
     final clean = utility.clean;
-    final struct = utility.struct;
-    final delprop = struct.delprop;
 
     final ctrl = ctx.ctrl;
 
@@ -277,8 +277,7 @@ class ProjectNameEntityBase {
     ctrl['err'] = err;
 
     if (null != ctrl['explain']) {
-      ctx.ctrl['explain'] = clean(ctx, ctx.ctrl['explain']);
-      delprop(ctx.ctrl['explain']['result'], 'err');
+      utility.cleanExplain(ctx);
 
       if (null != ctx.result && null != ctx.result.err) {
         ctrl['explain']['err'] = clean(ctx, {

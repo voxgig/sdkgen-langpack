@@ -45,7 +45,8 @@ const TestClean = cmp(function TestClean(props: any) {
         candidates.push(
           `  _Candidate('${ent.name}.${op}', <String>[${params}],\n` +
           `      (sdk, match, ctrl) => sdk.${nom(ent, 'Name')}().${op}(match, ctrl),\n` +
-          `      (sdk, match) => sdk.${nom(ent, 'Name')}().stream('${op}', {'reqmatch': match})),`)
+          `      (sdk, match, callopts) =>\n` +
+          `          sdk.${nom(ent, 'Name')}().stream('${op}', {'reqmatch': match}, callopts)),`)
       }
     })
 
@@ -297,7 +298,7 @@ class _Candidate {
   final String name;
   final List<String> params;
   final Future<dynamic> Function(dynamic sdk, dynamic match, dynamic ctrl) run;
-  final Stream<dynamic> Function(dynamic sdk, dynamic match) stream;
+  final Stream<dynamic> Function(dynamic sdk, dynamic match, dynamic callopts) stream;
   const _Candidate(this.name, this.params, this.run, this.stream);
 }
 
@@ -349,7 +350,9 @@ class HookError implements Exception {
 // A feature that throws from inside the pipeline, quoting the request it
 // saw: an error makeError never handled.
 class ThrowFeature extends BaseFeature {
-  ThrowFeature() {
+  final bool unexpected;
+
+  ThrowFeature([this.unexpected = false]) {
     name = 'throwhook';
     version = '0.0.1';
     active = true;
@@ -361,6 +364,15 @@ class ThrowFeature extends BaseFeature {
   @override
   dynamic PreResponse(dynamic ctx) {
     throw HookError('hook_' + CANARY['apikey']!, 'hook saw ' + jsonEncode(ctx.spec));
+  }
+
+  // Fired from the operation's catch block, before its cleaning.
+  @override
+  dynamic PreUnexpected(dynamic ctx) {
+    if (unexpected) {
+      throw HookError('hook_' + CANARY['apikey']!, 'hook saw ' + jsonEncode(ctx.spec));
+    }
+    return null;
   }
 }
 
@@ -384,8 +396,32 @@ class StreamThrowFeature extends BaseFeature {
   }
 }
 
+// A stream that succeeds, so the pipeline's terminal step never runs.
+class StreamOkFeature extends BaseFeature {
+  StreamOkFeature() {
+    name = 'streamok';
+    version = '0.0.1';
+    active = true;
+  }
+
+  @override
+  dynamic init(dynamic ctx, dynamic opts) => null;
+
+  @override
+  dynamic PreDone(dynamic ctx) {
+    final data = ctx.result.resdata;
+    final items = data is List ? data : (null == data ? [] : [data]);
+    ctx.result.stream = () async* {
+      yield* Stream.fromIterable(items);
+    };
+    return null;
+  }
+}
+
 Future<dynamic> drive(dynamic sdk, _Target target, Map<String, dynamic> ctrl,
     List<Sink> sinks) async {
+  // A caller may keep the record it passed rather than read ctrl['explain'].
+  final held = ctrl['explain'];
   dynamic out;
   dynamic err;
   try {
@@ -401,6 +437,9 @@ Future<dynamic> drive(dynamic sdk, _Target target, Map<String, dynamic> ctrl,
   }
   if (null != ctrl['explain']) {
     sinks.addAll(forms('explain', ctrl['explain']));
+  }
+  if (null != held && !identical(held, ctrl['explain'])) {
+    sinks.addAll(forms('explain:held', held));
   }
   return err;
 }
@@ -471,22 +510,39 @@ void tests() {
 
       // An error a feature hook throws, quoting the request, skips makeError,
       // and so does the explain record it leaves behind.
-      final hooked = makeSdk(SCENARIOS[0], sinks, null, [ThrowFeature()]);
-      final hookerr = await drive(hooked, target,
-          <String, dynamic>{'explain': <String, dynamic>{}}, sinks);
-      ok(null != hookerr, 'the throwing hook should fail the operation');
-
-      // Iterating a stream runs inside the same catch path as the operation.
-      final streamed = makeSdk(SCENARIOS[0], sinks, null, [StreamThrowFeature()]);
-      dynamic streamerr;
-      try {
-        await for (final _ in target.op
-            .stream(streamed, Map<String, dynamic>.of(target.match))) {}
-      } catch (e) {
-        streamerr = e;
+      for (final unexpected in [false, true]) {
+        final hooked = makeSdk(SCENARIOS[0], sinks, null, [ThrowFeature(unexpected)]);
+        final hookerr = await drive(hooked, target,
+            <String, dynamic>{'explain': <String, dynamic>{}}, sinks);
+        ok(null != hookerr, 'the throwing hook should fail the operation');
       }
-      ok(null != streamerr, 'the failing stream should throw');
-      sinks.addAll(forms('stream', streamerr));
+
+      // Iterating a stream runs inside the same catch path as the operation,
+      // and the explain record the caller passed is cleaned however it ends.
+      for (final entry in <String, List<BaseFeature>>{
+        'stream': [StreamThrowFeature()],
+        'stream-ok': [StreamOkFeature()],
+        'stream-plain': [],
+      }.entries) {
+        final streamed = makeSdk(SCENARIOS[0], sinks, null, entry.value);
+        final explain = <String, dynamic>{};
+        dynamic streamerr;
+        try {
+          await for (final _ in target.op.stream(streamed,
+              Map<String, dynamic>.of(target.match), {
+            'ctrl': {'explain': explain}
+          })) {}
+        } catch (e) {
+          streamerr = e;
+        }
+        ok(('stream' == entry.key) == (null != streamerr),
+            entry.key + ': only the failing stream throws');
+        if (null != streamerr) {
+          sinks.addAll(forms(entry.key, streamerr));
+        }
+        ok(explain.isNotEmpty, entry.key + ': the explain record was not filled');
+        sinks.addAll(forms(entry.key + ':explain', explain));
+      }
 
       // Most callers pass no clean block; the defaults alone must mask.
       for (final scenario in [SCENARIOS[1], SCENARIOS[3]]) {
