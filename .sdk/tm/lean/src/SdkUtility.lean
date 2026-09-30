@@ -161,15 +161,19 @@ def hexDigitVal (c : Char) : Option Nat :=
   else if 'A' ≤ c && c ≤ 'F' then some (c.toNat - 'A'.toNat + 10)
   else none
 
-partial def percentDecodeList : List Char → List Char
-  | '%' :: a :: b :: rest =>
+partial def percentDecodeBytes : List Char → ByteArray → Option ByteArray
+  | '%' :: a :: b :: rest, acc =>
     match hexDigitVal a, hexDigitVal b with
-    | some x, some y => Char.ofNat (x * 16 + y) :: percentDecodeList rest
-    | _, _ => '%' :: percentDecodeList (a :: b :: rest)
-  | c :: rest => c :: percentDecodeList rest
-  | [] => []
+    | some x, some y => percentDecodeBytes rest (acc.push (x * 16 + y).toUInt8)
+    | _, _ => none
+  | '%' :: _, _ => none
+  | c :: rest, acc => percentDecodeBytes rest (acc ++ c.toString.toUTF8)
+  | [], acc => some acc
 
-def percentDecode (s : String) : String := String.ofList (percentDecodeList s.toList)
+/-- The decoded form, as decodeURIComponent reads it: the escapes are UTF-8
+    octets, and a malformed escape or sequence has no decoded form. -/
+def percentDecode (s : String) : Option String :=
+  (percentDecodeBytes s.toList ByteArray.empty).bind String.fromUTF8?
 
 /-- The encoded forms a value travels in. -/
 def cleanForms (value : String) : SIO (Array String) := do

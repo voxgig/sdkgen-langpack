@@ -577,6 +577,15 @@ def main : IO UInt32 := do
       check (SdkUtility.vs s == "pw [redacted]")
         s!"proxy: a password holding a colon is registered whole ({SdkUtility.vs s})")
 
+    (do
+      let w ← mkWire
+      let opts ← liveOpts #[("proxy", ← onOpts #[("url", .str "http://user:p%C3%A4ss@proxy.local:8080")])]
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+      let s ← SdkUtility.clean (← newMap #[("options", ← gp c "options")]) (.str "pw päss")
+      check (SdkUtility.vs s == "pw [redacted]")
+        s!"proxy: a percent-encoded password is registered decoded as UTF-8 ({SdkUtility.vs s})")
+
     -- pipeline: a hook that has done a stage's work short-circuits it, as
     -- ts's makeSpec, makeRequest, makeResponse and makeResult each do on
     -- ctx.out. runOp honoured only out.point, so a feature that replaced a

@@ -735,7 +735,8 @@ def proxyFeature : SIO Feature := do
                for part in parts do
                  if part != "" then
                    SdkUtility.cleanAddOptions options (.str part)
-                   SdkUtility.cleanAddOptions options (.str (SdkUtility.percentDecode part))
+                   if let some decoded := SdkUtility.percentDecode part then
+                     SdkUtility.cleanAddOptions options (.str decoded)
              let inner ← getFetcher client
              setFetcher client fun c u f => do
                let o ← optsR.get

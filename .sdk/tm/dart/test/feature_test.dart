@@ -808,6 +808,19 @@ void tests() {
           });
           equal('pw [redacted]', sdk.utility().clean(sdk.rootctx, 'pw abc:def'));
         });
+
+        test('registers a percent-encoded password decoded as UTF-8',
+            (t) async {
+          final sdk = ProjectNameSDK({
+            'feature': {
+              'proxy': {
+                'active': true,
+                'url': 'http://user:p%C3%A4ss@proxy.local:8080'
+              }
+            }
+          });
+          equal('pw [redacted]', sdk.utility().clean(sdk.rootctx, 'pw päss'));
+        });
       });
     }
 

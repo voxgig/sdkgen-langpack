@@ -769,6 +769,10 @@ tests c = do
     s <- proxyClean "http://user:abc:def@proxy.local:8080" "pw abc:def"
     pure (maybe True (== "pw [redacted]") s)
 
+  runTest c "feature.proxy_registers_a_password_decoded_as_utf8" $ do
+    s <- proxyClean "http://user:p%C3%A4ss@proxy.local:8080" "pw päss"
+    pure (maybe True (== "pw [redacted]") s)
+
   runTest c "feature.proxy_bypasses_noproxy_hosts" $ do
     (srv, calls) <- recordingServer Nothing
     np <- ja [VStr "api.test"]

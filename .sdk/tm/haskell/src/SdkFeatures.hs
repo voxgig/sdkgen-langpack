@@ -883,7 +883,7 @@ proxyFeature = do
                   parts = user : (case pass0 of (_ : p) -> [p]; [] -> [])
               forM_ parts $ \part -> when (part /= "") $ do
                 cleanAddUtil ctx (VStr part)
-                cleanAddUtil ctx (VStr (percentDecode part))
+                forM_ (percentDecode part) (cleanAddUtil ctx . VStr)
           _ -> pure ()
       breakOn pat s = go s
         where go [] = Nothing

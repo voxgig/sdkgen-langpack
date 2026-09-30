@@ -345,11 +345,34 @@ base64Encode s = go (utf8Bytes s)
       in [at (n `shiftR` 18), at (n `shiftR` 12), '=', '=']
     go [] = []
 
-percentDecode :: String -> String
-percentDecode ('%' : a : b : rest)
-  | isHexDigit a && isHexDigit b = chr (digitToInt a * 16 + digitToInt b) : percentDecode rest
-percentDecode (c : rest) = c : percentDecode rest
-percentDecode [] = []
+-- The decoded form, as decodeURIComponent reads it: the escapes are UTF-8
+-- octets, and a malformed escape or sequence has no decoded form.
+percentDecode :: String -> Maybe String
+percentDecode = go []
+  where
+    go acc ('%' : a : b : rest)
+      | isHexDigit a && isHexDigit b = go ((digitToInt a * 16 + digitToInt b) : acc) rest
+    go _ ('%' : _) = Nothing
+    go acc (c : rest) = go (reverse (utf8Bytes [c]) ++ acc) rest
+    go acc [] = utf8Decode (reverse acc)
+
+-- Strict UTF-8: an overlong, surrogate, out-of-range or truncated sequence
+-- is Nothing.
+utf8Decode :: [Int] -> Maybe String
+utf8Decode [] = Just []
+utf8Decode (b : rest)
+  | b < 0x80 = (chr b :) <$> utf8Decode rest
+  | b >= 0xC2 && b < 0xE0 = multi 1 (b .&. 0x1F) 0x80
+  | b >= 0xE0 && b < 0xF0 = multi 2 (b .&. 0x0F) 0x800
+  | b >= 0xF0 && b < 0xF5 = multi 3 (b .&. 0x07) 0x10000
+  | otherwise = Nothing
+  where
+    multi n lead lo = case splitAt n rest of
+      (cs, more) | length cs == n && all (\c -> c .&. 0xC0 == 0x80) cs ->
+        let cp = foldl (\a c -> (a `shiftL` 6) .|. (c .&. 0x3F)) lead cs
+        in if cp < lo || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) then Nothing
+           else (chr cp :) <$> utf8Decode more
+      _ -> Nothing
 
 -- The encoded forms a value travels in.
 cleanForms :: String -> IO [String]
