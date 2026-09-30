@@ -447,6 +447,12 @@ def cleanSweep : SIO Unit := do
     let hooked ← makeCleanSdk scenarioOk #[] #[throwFeature]
     check (← drive hooked target (← newMap #[("explain", ← emptyMap)]))
       "clean: the throwing hook fails the operation"
+    -- A client given no clean block at all masks by the schema defaults.
+    let bare ← SdkRuntime.mkClientWith (← newMap #[("apikey", .str canaryApikey),
+        ("headers", ← newMap #[("X-Custom-Token", .str canaryHeader)])]) SdkConfig.configJson
+      (fun _ url _ => do pure ((← scenarioNotfound.respond url), none))
+    check (← drive bare target (← newMap #[("explain", ← emptyMap)]))
+      "clean: a client with no clean block fails on the 404"
     let fs ← canaryForms
     let swept ← cleanSinks.get
     let leaked := swept.filter (fun (_, t) => (leaksIn fs t).size > 0)

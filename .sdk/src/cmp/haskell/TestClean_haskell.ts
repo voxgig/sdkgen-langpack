@@ -317,6 +317,17 @@ tests c = do
         hookerr <- drive hooked target hctrl sinks
         check c "clean.throwing_hook_fails_the_op" (isJust hookerr)
 
+        -- A client given no clean block at all masks by the schema defaults.
+        bareHeaders <- jo [("X-Custom-Token", VStr canaryHeader)]
+        let bareFetch = vfunc1 (\\args -> do
+              its <- listItems args
+              scRespond (scenarios !! 1) (case its of (u : _) -> vstring u; [] -> ""))
+        bareSys <- jo [("fetch", bareFetch)]
+        bare <- C.newSdk =<< jo [("apikey", VStr canaryApikey), ("headers", bareHeaders), ("system", bareSys)]
+        bctrl <- do ex <- emptyMap; jo [("explain", ex)]
+        bareerr <- drive bare target bctrl sinks
+        check c "clean.no_clean_block_fails_on_404" (isJust bareerr)
+
         fs <- forms
         swept <- readIORef sinks
         let leaked = [(n, found) | (n, t) <- swept, let found = leaksIn fs t, not (null found)]

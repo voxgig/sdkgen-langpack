@@ -433,6 +433,19 @@ void tests() {
           <String, dynamic>{'explain': <String, dynamic>{}}, sinks);
       ok(null != hookerr, 'the throwing hook should fail the operation');
 
+      // A client given no clean block at all masks by the schema defaults.
+      final bare = ${Name}SDK(<String, dynamic>{
+        'apikey': CANARY['apikey'],
+        'headers': {'X-Custom-Token': CANARY['header']},
+        'utility': {
+          'fetcher': (dynamic ctx, dynamic url, dynamic fetchdef) async =>
+              SCENARIOS[1].respond(url.toString(), fetchdef),
+        },
+      });
+      final bareerr = await drive(bare, target,
+          <String, dynamic>{'explain': <String, dynamic>{}}, sinks);
+      ok(null != bareerr, 'the client with no clean block should fail on the 404');
+
       final leaked = <String>[];
       for (final s in sinks) {
         final found = leaks(s.text);
