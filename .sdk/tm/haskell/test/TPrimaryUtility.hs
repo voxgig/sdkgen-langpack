@@ -260,6 +260,24 @@ tests c alltests = do
     pure (all (`elem` vals) ["NESTED-SECRET-1", "LISTED-SECRET-2", "123456789", "LOOP-SECRET-3"]
           && "not-a-secret" `notElem` vals)
 
+  runTest c "primary.clean_honours_the_config_clean_block" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    cfgclean <- jo [("keys", VStr "zzsens"), ("values", VStr "CONFIG-SEEDED-1")]
+    cfgopts <- jo [("clean", cfgclean)]
+    config <- jo [("options", cfgopts)]
+    writeIORef (cConfig ctx) config
+    uclean <- jo [("values", VStr "CALLER-SEEDED-2")]
+    raw <- jo [("clean", uclean)]; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    writeIORef (cOptions ctx) o
+    s <- cleanUtil ctx (VStr "a CONFIG-SEEDED-1 b CALLER-SEEDED-2")
+    m <- jo [("my_zzsens", VStr "x"), ("other", VStr "y")]
+    mc <- cleanUtil ctx m
+    sens <- getp mc "my_zzsens"; other <- getp mc "other"
+    seeded <- getp cfgclean "values"
+    pure (vstring s == "a [redacted] b [redacted]" && vstring sens == "[redacted]"
+          && vstring other == "y" && vstring seeded == "CONFIG-SEEDED-1")
+
   runTest c "primary.make_request_guard_no_spec" $ do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"
     writeIORef (cSpec ctx) VNoval

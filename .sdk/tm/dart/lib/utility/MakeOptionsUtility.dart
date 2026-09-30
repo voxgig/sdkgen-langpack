@@ -10,12 +10,17 @@ dynamic makeOptions(dynamic ctx) {
   final utility = ctx.utility;
   final options = ctx.options;
 
+  final config = ctx.config ?? {};
+  final cfgopts = vs.getprop(config, 'options') ?? {};
+
   // The secret registry exists BEFORE validation, fed from the raw input, so
   // the constructor's own rejection of a mistyped credential is clean too.
+  final cfgclean = vs.getprop(cfgopts, 'clean');
   final rawclean = vs.getprop(options, 'clean');
   final cleancfg = makeCleanConfig(vs.merge([
     {},
     vs.clone(CLEAN_OPTSPEC),
+    cfgclean is Map ? vs.clone(cfgclean) : {},
     rawclean is Map ? vs.clone(rawclean) : {},
   ]));
   final cleanctx = {
@@ -24,7 +29,10 @@ dynamic makeOptions(dynamic ctx) {
     }
   };
   cleanAddSensitive(cleanctx, _without(options, ['clean']));
-  for (final raw in splitvalues(rawclean is Map ? rawclean['values'] : null)) {
+  for (final raw in [
+    ...splitvalues(cfgclean is Map ? cfgclean['values'] : null),
+    ...splitvalues(rawclean is Map ? rawclean['values'] : null),
+  ]) {
     cleanAdd(cleanctx, raw);
   }
 
@@ -33,9 +41,6 @@ dynamic makeOptions(dynamic ctx) {
   for (final item in vs.items(customUtils)) {
     utility.setUtility(item[0], item[1]);
   }
-
-  final config = ctx.config ?? {};
-  final cfgopts = vs.getprop(config, 'options') ?? {};
 
   // Standard SDK option values.
   final optspec = {
@@ -138,8 +143,10 @@ dynamic makeOptions(dynamic ctx) {
       options is Map && options.containsKey('auth') && null == options['auth'];
 
   // User option maps are cloned first — their (possibly narrow) literal
-  // types must not constrain the merged structures.
-  dynamic opts = vs.merge([{}, cfgopts, vs.clone(mergeOptions)]);
+  // types must not constrain the merged structures. The config side is the
+  // module-level Config's own maps, which merge writes back into: uncloned,
+  // one client's headers reach every client constructed after it.
+  dynamic opts = vs.merge([{}, vs.clone(cfgopts), vs.clone(mergeOptions)]);
 
   if (authSuppressed && opts is Map) {
     opts.remove('auth');

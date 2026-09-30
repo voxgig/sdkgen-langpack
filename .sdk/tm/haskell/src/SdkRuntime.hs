@@ -1405,17 +1405,23 @@ makeOptionsUtil ctx = do
     _ -> pure ()
   optsC <- clone options
   opts0 <- case optsC of VMap _ -> pure optsC; _ -> emptyMap
+  configV <- readIORef (cConfig ctx)
+  config <- case configV of VMap _ -> pure configV; _ -> emptyMap
+  cfgoptsV <- toMap <$> getp config "options"
+  cfgopts <- case cfgoptsV of VMap _ -> pure cfgoptsV; _ -> emptyMap
   -- The secret registry exists BEFORE validation, fed from the raw input, so
   -- the constructor's own rejection of a mistyped credential is clean too.
+  cfgclean <- getp cfgopts "clean"
+  cfgcleanM <- case cfgclean of VMap _ -> clone cfgclean; _ -> emptyMap
   rawclean <- getp opts0 "clean"
   rawcleanM <- case rawclean of VMap _ -> clone rawclean; _ -> emptyMap
   specclean <- cleanOptSpec
   emc <- emptyMap
-  cleanmerged <- merge =<< ja [emc, specclean, rawcleanM]
+  cleanmerged <- merge =<< ja [emc, specclean, cfgcleanM, rawcleanM]
   cleancfg <- makeCleanConfig cleanmerged
   cleanAddSensitiveCfg cleancfg =<< withoutKeys ["clean"] opts0
-  cvalsV <- case rawclean of VMap _ -> getp rawclean "values"; _ -> pure VNoval
-  cvals <- splitvalues cvalsV
+  cvals <- concat <$> mapM (\cl -> case cl of VMap _ -> splitvalues =<< getp cl "values"; _ -> pure [])
+                          [cfgclean, rawclean]
   forM_ (map VStr cvals) (cleanAddCfg cleancfg)
   -- Feature add-order. options.feature may be given as an ordered LIST of
   -- {name, active, ...opts} entries (list position = add order) or a
@@ -1441,10 +1447,6 @@ makeOptionsUtil ctx = do
       setp opts0 "feature" fmap'
       pure (Just order)
     _ -> pure Nothing
-  configV <- readIORef (cConfig ctx)
-  config <- case configV of VMap _ -> pure configV; _ -> emptyMap
-  cfgoptsV <- toMap <$> getp config "options"
-  cfgopts <- case cfgoptsV of VMap _ -> pure cfgoptsV; _ -> emptyMap
   optspec <- optSpecValue
   sysFetch <- getpathS opts0 "system.fetch"
   em <- emptyMap

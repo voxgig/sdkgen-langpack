@@ -380,12 +380,14 @@ def makeOptions (config options : Value) : SIO Value := do
   let uopts ← asMap options
   -- The secret registry is fed from the RAW input, before anything else
   -- reads the options.
+  let cfgclean ← gp copts "clean"
+  let cfgcleanM ← match cfgclean with | .map _ => clone cfgclean | _ => emptyMap
   let rawclean ← gp uopts "clean"
   let rawcleanM ← match rawclean with | .map _ => clone rawclean | _ => emptyMap
-  let cleanmerged ← merge (← newList #[← emptyMap, ← cleanOptSpec, rawcleanM])
+  let cleanmerged ← merge (← newList #[← emptyMap, ← cleanOptSpec, cfgcleanM, rawcleanM])
   let cleancfg ← makeCleanConfig cleanmerged
   cleanAddSensitiveCfg cleancfg (← withoutKeys uopts #["clean"])
-  for v in (← splitvalues (← gp rawclean "values")) do
+  for v in (← splitvalues (← gp cfgclean "values")) ++ (← splitvalues (← gp rawclean "values")) do
     cleanAddCfg cleancfg (.str v)
   let parts ← newList #[base, copts, uopts]
   let out ← merge parts

@@ -496,6 +496,20 @@ def main : IO UInt32 := do
              && !values.contains "not-a-secret")
         "clean: cleanAddSensitive registers every scalar under a sensitive name")
 
+    -- clean: the config's own clean block reaches the registry, between the
+    -- defaults and the caller's block, and is not changed by it.
+    (do
+      let cfgclean ← newMap #[("keys", .str "zzsens"), ("values", .str "CONFIG-SEEDED-1")]
+      let config ← newMap #[("options", ← newMap #[("clean", cfgclean)])]
+      let opts ← SdkUtility.makeOptions config
+        (← newMap #[("clean", ← newMap #[("values", .str "CALLER-SEEDED-2")])])
+      let ctx ← newMap #[("options", opts)]
+      let s ← SdkUtility.clean ctx (.str "a CONFIG-SEEDED-1 b CALLER-SEEDED-2")
+      let m ← SdkUtility.clean ctx (← newMap #[("my_zzsens", .str "x"), ("other", .str "y")])
+      check (SdkUtility.vs s == "a [redacted] b [redacted]" && (← gpS m "my_zzsens") == "[redacted]"
+             && (← gpS m "other") == "y" && (← gpS cfgclean "values") == "CONFIG-SEEDED-1")
+        "clean: the config's own clean block is honoured")
+
     -- pipeline: a hook that has done a stage's work short-circuits it, as
     -- ts's makeSpec, makeRequest, makeResponse and makeResult each do on
     -- ctx.out. runOp honoured only out.point, so a feature that replaced a

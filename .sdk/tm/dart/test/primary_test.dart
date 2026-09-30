@@ -467,6 +467,37 @@ void tests() {
       ok(values.contains('LOOP-SECRET-3'));
     });
 
+    test('clean-honours-the-config-clean-block', (t) async {
+      await _setup();
+      final dynamic config = {
+        'options': {
+          'clean': {'keys': 'zzsens', 'values': 'CONFIG-SEEDED-1'}
+        }
+      };
+      final ctx = _utility.makeContext({
+        'options': {
+          'clean': {'values': 'CALLER-SEEDED-2'}
+        },
+        'config': config,
+      });
+      ctx.client = _client;
+      ctx.utility = _client.utility();
+      ctx.options = _utility.makeOptions(ctx);
+      equal('a [redacted] b [redacted]',
+          cu.clean(ctx, 'a CONFIG-SEEDED-1 b CALLER-SEEDED-2'));
+      deepEqual(cu.clean(ctx, {'my_zzsens': 'x', 'other': 'y'}),
+          {'my_zzsens': '[redacted]', 'other': 'y'});
+      equal('CONFIG-SEEDED-1', config['options']['clean']['values']);
+    });
+
+    test('options-stay-with-their-client', (t) async {
+      ProjectNameSDK({
+        'headers': {'X-Custom-Token': 'FIRST-CLIENT-TOKEN'}
+      });
+      final second = ProjectNameSDK({});
+      equal(null, vs.getpath(second.options(), 'headers.X-Custom-Token'));
+    });
+
     // The whole-suite backstop, behind `_sec`'s per-section guards: those
     // pin each section to the case count the engine actually drove for it,
     // so a shrunken or emptied section fails in its own case, named. This
