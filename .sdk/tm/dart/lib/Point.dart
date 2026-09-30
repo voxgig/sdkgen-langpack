@@ -35,6 +35,8 @@ class Point {
     transform = vs.getprop(altmap, 'transform', {'req': null, 'res': null});
   }
 
+  Map<String, dynamic> toJson() => toJSON();
+
   Map<String, dynamic> toJSON() => {
         'args': args,
         'rename': rename,

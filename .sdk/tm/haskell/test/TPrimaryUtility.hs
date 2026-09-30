@@ -205,12 +205,140 @@ tests c alltests = do
     o <- makeOptionsUtil ctx
     pure (ismap o)
 
-  runTest c "primary.make_options_derives_clean_keyre" $ do
+  runTest c "primary.make_options_derives_clean_config" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    raw <- jo [("apikey", VStr "SECRET-abcdef")]; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    keys <- getpathS o "__derived__.clean.keys"
+    nkeys <- case keys of VList _ -> length <$> vlistItems keys; _ -> pure 0
+    values <- getpathS o "__derived__.clean.values"
+    vals <- case values of VList _ -> vlistItems values; _ -> pure []
+    mask <- getpathS o "__derived__.clean.mask"
+    pure (nkeys > 0 && any (\v -> vstring v == "SECRET-abcdef") vals && vstring mask == "[redacted]")
+
+  runTest c "primary.clean_masks_registered_and_named" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    raw <- jo [("apikey", VStr "SECRET-abcdef")]; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    writeIORef (cOptions ctx) o
+    h <- jo [("authorization", VStr "Bearer SECRET-abcdef"), ("x-custom-token", VStr "tok-123456"), ("accept", VStr "json")]
+    v <- jo [("headers", h), ("note", VStr "key SECRET-abcdef sent")]
+    r <- cleanUtil ctx v
+    rh <- getp r "headers"
+    auth <- getp rh "authorization"; tok <- getp rh "x-custom-token"; acc <- getp rh "accept"; note <- getp r "note"
+    orig <- getp h "authorization"
+    pure (vstring auth == "[redacted]" && vstring tok == "[redacted]" && vstring acc == "json"
+          && vstring note == "key [redacted] sent" && vstring orig == "Bearer SECRET-abcdef")
+
+  runTest c "primary.make_error_cleans_the_code" $ do
+    cl <- C.testSdk0
+    ctrl <- jo [("throw", VBool False)]
+    ctx <- mkCtxCtrl cl "load" ctrl
+    raw <- emptyMap; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    writeIORef (cOptions ctx) o
+    cleanAddUtil ctx (VStr "CODE-SECRET-12")
+    e <- mkErr "refused_CODE-SECRET-12" "refused"
+    _ <- makeErrorUtil ctx (Just e)
+    made <- (`getp` "err") =<< readIORef (cCtrl ctx)
+    code <- getp made "code"
+    pure (vstring code == "refused_[redacted]")
+
+  runTest c "primary.clean_with_a_huge_hint_still_masks" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    hc <- jo [("hint", VStr "5000000000000000000")]
+    raw <- jo [("apikey", VStr "HINT-SECRET-abcdef"), ("clean", hc)]; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    writeIORef (cOptions ctx) o
+    s <- cleanUtil ctx (VStr "k HINT-SECRET-abcdef")
+    pure (vstring s == "k [redacted]")
+
+  runTest c "primary.clean_masks_registered_property_names" $ do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"
     raw <- emptyMap; writeIORef (cOptions ctx) raw
     o <- makeOptionsUtil ctx
-    kr <- getpathS o "__derived__.clean.keyre"
-    pure (case kr of VStr s -> not (null s); _ -> False)
+    writeIORef (cOptions ctx) o
+    cleanAddUtil ctx (VStr "ZZVAL-abc123")
+    cleanAddUtil ctx (VStr "ZZVAL-xyz789")
+    v <- jo [("ZZVAL-abc123", VNum 1), ("ZZVAL-xyz789", VNum 2), ("plain", VNum 3)]
+    r <- cleanUtil ctx v
+    ks <- case r of VMap ref -> map fst <$> readIORef ref; _ -> pure []
+    pure (ks == ["[redacted]", "[redacted]#1", "plain"])
+
+  runTest c "primary.clean_add_sensitive_every_scalar" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    raw <- emptyMap; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    writeIORef (cOptions ctx) o
+    apikey <- jo [("value", VStr "NESTED-SECRET-1")]
+    listed <- ja [VStr "LISTED-SECRET-2"]
+    hdrs <- jo [("X-Api-Token", listed)]
+    loop <- jo [("token", VStr "LOOP-SECRET-3")]
+    setp loop "self" loop
+    v <- jo [("apikey", apikey), ("headers", hdrs), ("secret", VNum 123456789)
+            , ("name", VStr "not-a-secret"), ("loop", loop)]
+    cleanAddSensitiveUtil ctx v
+    values <- getpathS o "__derived__.clean.values"
+    vals <- case values of VList _ -> map vstring <$> vlistItems values; _ -> pure []
+    pure (all (`elem` vals) ["NESTED-SECRET-1", "LISTED-SECRET-2", "123456789", "LOOP-SECRET-3"]
+          && "not-a-secret" `notElem` vals)
+
+  runTest c "primary.clean_honours_the_config_clean_block" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    cfgclean <- jo [("keys", VStr "zzsens"), ("values", VStr "CONFIG-SEEDED-1")]
+    cfgopts <- jo [("clean", cfgclean)]
+    config <- jo [("options", cfgopts)]
+    writeIORef (cConfig ctx) config
+    uclean <- jo [("values", VStr "CALLER-SEEDED-2")]
+    raw <- jo [("clean", uclean)]; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    writeIORef (cOptions ctx) o
+    s <- cleanUtil ctx (VStr "a CONFIG-SEEDED-1 b CALLER-SEEDED-2")
+    m <- jo [("my_zzsens", VStr "x"), ("other", VStr "y")]
+    mc <- cleanUtil ctx m
+    sens <- getp mc "my_zzsens"; other <- getp mc "other"
+    seeded <- getp cfgclean "values"
+    pure (vstring s == "a [redacted] b [redacted]" && vstring sens == "[redacted]"
+          && vstring other == "y" && vstring seeded == "CONFIG-SEEDED-1")
+
+  runTest c "primary.feature_names_do_not_make_settings_sensitive" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    sec <- jo [("active", VBool False), ("kind", VStr "vaultish"), ("token", VStr "REAL-TOKEN-1")]
+    fm <- jo [("secrets", sec)]
+    raw <- jo [("feature", fm)]; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    values <- getpathS o "__derived__.clean.values"
+    vals <- case values of VList _ -> map vstring <$> vlistItems values; _ -> pure []
+    pure ("REAL-TOKEN-1" `elem` vals && "vaultish" `notElem` vals)
+
+  runTest c "primary.entity_blocks_are_not_read" $ do
+    let seeded kvs = do
+          rec <- jo [("id", VStr "ZZTOKEN01"), ("note", VStr "PLAINRECORD-t5r3e1w9")]
+          ids <- jo [("ZZTOKEN01", rec)]
+          block <- jo kvs; setp block "entity" =<< jo [("zztoken", ids)]; pure block
+        feature = do
+          token <- jo [("active", VBool False), ("apitoken", VStr "FEATTOKEN-z9y8x7w6")]
+          test <- seeded [("active", VBool False)]
+          pure [("zzfeat", token), ("test", test)]
+        named (n, f) = do setp f "name" (VStr n); pure f
+    fmap and $ mapM (\mkFeature -> do
+      cl <- C.testSdk0; ctx <- mkCtx cl "load"
+      alias <- jo [("zzkey", VStr "PLAINALIAS-m2n4b6v8")]
+      ent <- jo [("zztoken", VNull)]; setp ent "zztoken" =<< jo [("alias", alias)]
+      test <- seeded []
+      fv <- mkFeature
+      raw <- jo [("feature", fv), ("entity", ent), ("test", test)]; writeIORef (cOptions ctx) raw
+      o <- makeOptionsUtil ctx
+      writeIORef (cOptions ctx) o
+      values <- getpathS o "__derived__.clean.values"
+      vals <- case values of VList _ -> map vstring <$> vlistItems values; _ -> pure []
+      record <- cleanUtil ctx (VStr "record PLAINRECORD-t5r3e1w9")
+      aliased <- cleanUtil ctx (VStr "alias PLAINALIAS-m2n4b6v8")
+      pure ("FEATTOKEN-z9y8x7w6" `elem` vals
+            && all (`notElem` vals) ["ZZTOKEN01", "PLAINRECORD-t5r3e1w9", "PLAINALIAS-m2n4b6v8"]
+            && vstring record == "record PLAINRECORD-t5r3e1w9"
+            && vstring aliased == "alias PLAINALIAS-m2n4b6v8"))
+      [feature >>= jo, feature >>= mapM named >>= ja]
 
   runTest c "primary.make_request_guard_no_spec" $ do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"

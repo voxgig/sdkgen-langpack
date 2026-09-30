@@ -11,7 +11,9 @@
 module SdkFeatures where
 
 import Control.Concurrent (threadDelay)
-import Control.Exception (throwIO, try)
+import Control.Exception
+  ( SomeAsyncException, SomeException, displayException, fromException, throwIO
+  , toException, try )
 import Control.Monad (forM_, when)
 import Data.Bits ((.&.))
 import Data.IORef
@@ -105,12 +107,30 @@ baseFeature = do
   pure Feature { fName = "base", fVersion = "0.0.1", fActive = active, fOptions = fopts
                , fInit = \_ _ -> pure (), fHook = \_ _ -> pure () }
 
+-- A log line leaves the pipeline, so it carries the cleaned record: the spec
+-- after auth holds the credential, and a logger prints what it is handed.
+-- The record goes to the `logger` option (a struct function); with none
+-- set the feature records nothing.
 logFeature :: IO Feature
 logFeature = do
   (active, fopts) <- featureBase
-  let initFn _ opts = do a <- optActive opts; writeIORef active a
+  options <- newIORef =<< emptyMap
+  let logHooks = [ "PostConstruct", "PostConstructEntity", "SetData", "GetData", "GetMatch"
+                 , "PrePoint", "PreSpec", "PreRequest", "PreResponse", "PreResult" ]
+      hookFn name ctx = do
+        a <- readIORef active
+        opts <- readIORef options
+        logger <- getp opts "logger"
+        when (a && isCallable logger && name `elem` logHooks) $ do
+          op <- readIORef (cOp ctx)
+          spec <- readIORef (cSpec ctx)
+          cv <- contextToValue ctx
+          record <- jo [("hook", VStr name), ("op", VStr (opName op)), ("spec", spec), ("ctx", cv)]
+          cleaned <- cleanUtil ctx record
+          () <$ callVfn logger cleaned
+      initFn _ opts = do om <- toOptsMap opts; writeIORef options om; a <- optActive opts; writeIORef active a
   pure Feature { fName = "log", fVersion = "0.0.1", fActive = active, fOptions = fopts
-               , fInit = initFn, fHook = \_ _ -> pure () }
+               , fInit = initFn, fHook = hookFn }
 
 -- ------------------------------------------------------------------
 -- retry
@@ -438,9 +458,10 @@ telemetryFeature = do
             start <- getp spanV "start"; let s = case start of { VNum n -> n; _ -> 0 }
             setp spanV "durationMs" (VNum (max 0 (end - s)))
             setp spanV "ok" (VBool ok)
+            out <- cleanUtil ctx spanV
             t <- telemetry ctx; bumpNum t "active" (-1)
-            spans <- getp t "spans"; appendList spans spanV
-            expv <- getp opts "exporter"; case expv of VFunc _ -> () <$ callVfn expv spanV; _ -> pure ()
+            spans <- getp t "spans"; appendList spans out
+            expv <- getp opts "exporter"; case expv of VFunc _ -> () <$ callVfn expv out; _ -> pure ()
           _ -> pure ()
       hookFn name ctx = do
         a <- readIORef active
@@ -491,13 +512,15 @@ debugFeature = do
   (active, fopts) <- featureBase
   options <- newIORef =<< emptyMap
   let debug ctx = do cl <- cc ctx; trackBucket cl "debug" (do es <- emptyList; jo [("entries", es)])
-      redact headers = case headers of
+      -- The core clean rules apply (clean.keys, every registered value); the
+      -- feature's own `redact` list ADDS header names on top of them.
+      redact ctx headers = case headers of
         VMap _ -> do
           opts <- readIORef options
-          patterns <- optStrList opts "redact" ["authorization", "cookie", "set-cookie", "api-key", "apikey", "x-api-key", "idempotency-key"]
+          patterns <- map lower <$> optStrList opts "redact" []
           out <- emptyMap; ks <- keysof headers
-          forM_ ks $ \k -> if lower k `elem` patterns then setp out k (VStr "<redacted>") else do v <- getp headers k; setp out k v
-          pure out
+          forM_ ks $ \k -> if lower k `elem` patterns then setp out k (VStr "[redacted]") else do v <- getp headers k; setp out k v
+          cleanUtil ctx out
         _ -> emptyMap
       finish ctx ok = do
         entryV <- scratchGet ctx "debug_entry"
@@ -511,10 +534,14 @@ debugFeature = do
             setp entryV "durationMs" (VNum (max 0 (now - s)))
             st <- getp entryV "status"
             case st of VNoval -> case rv of { VMap _ -> do { rs <- getp rv "status"; setp entryV "status" rs }; _ -> pure () }; _ -> pure ()
-            d <- debug ctx; buf <- getp d "entries"; appendList buf entryV
+            -- The whole entry leaves through the buffer and the callback: the
+            -- url and the error message can carry a query credential the
+            -- header mask never saw.
+            cleaned <- cleanUtil ctx entryV
+            d <- debug ctx; buf <- getp d "entries"; appendList buf cleaned
             mx <- optInt opts "max" 100
             trimList buf mx
-            oe <- getp opts "onEntry"; case oe of VFunc _ -> () <$ callVfn oe entryV; _ -> pure ()
+            oe <- getp opts "onEntry"; case oe of VFunc _ -> () <$ callVfn oe cleaned; _ -> pure ()
           _ -> pure ()
       hookFn name ctx = do
         a <- readIORef active
@@ -527,7 +554,7 @@ debugFeature = do
             (methodV, urlV, hdrs) <- case specV of
               VMap _ -> do m <- getp specV "method"; u0 <- getStrD specV "url" ""; p0 <- getStrD specV "path" ""; h <- getp specV "headers"; pure (m, VStr (if u0 /= "" then u0 else p0), h)
               _ -> pure (VNoval, VNoval, VNoval)
-            rh <- redact hdrs
+            rh <- redact ctx hdrs
             entry <- jo [("op", VStr opname), ("method", methodV), ("url", urlV), ("headers", rh), ("start", VNum now), ("status", VNoval), ("ok", VNoval), ("durationMs", VNoval), ("error", VNoval)]
             scratchSet ctx "debug_entry" entry
           "PreResponse" -> do
@@ -584,7 +611,8 @@ auditFeature = do
               _ -> pure ac
             now <- nowOf opts; op <- readIORef (cOp ctx)
             rv <- readIORef (cResult ctx); statusV <- case rv of VMap _ -> getp rv "status"; _ -> pure VNoval
-            record <- jo [ ("seq", vint sq), ("ts", VNum now), ("actor", actor)
+            record <- cleanUtil ctx =<< jo
+                         [ ("seq", vint sq), ("ts", VNum now), ("actor", actor)
                          , ("entity", VStr (if opEntity op /= "" then opEntity op else "_"))
                          , ("op", VStr (if opName op /= "" then opName op else "_"))
                          , ("outcome", VStr outcome), ("status", statusV), ("correlationId", VStr (cId ctx)) ]
@@ -840,7 +868,26 @@ proxyFeature = do
   options <- newIORef =<< emptyMap
   purl <- newIORef VNoval
   noproxy <- newIORef ([] :: [String])
-  let track ctx = do cl <- cc ctx; pv <- readIORef purl; bucket <- trackBucket cl "proxy" (jo [("routed", VNum 0), ("url", pv)]); bumpNum bucket "routed" 1
+  let track ctx = do cl <- cc ctx; pv <- readIORef purl; pvc <- cleanUtil ctx pv; bucket <- trackBucket cl "proxy" (jo [("routed", VNum 0), ("url", pvc)]); bumpNum bucket "routed" 1
+      -- A proxy URL may carry credentials as userinfo, from the option or the
+      -- environment, and neither is under a sensitive key name.
+      registerUserinfo ctx = do
+        pv <- readIORef purl
+        case pv of
+          VStr url -> do
+            let afterScheme = case breakOn "://" url of Just rest -> rest; Nothing -> url
+                authority = takeWhile (/= '/') afterScheme
+            when ('@' `elem` authority) $ do
+              let info = reverse (drop 1 (dropWhile (/= '@') (reverse authority)))
+                  (user, pass0) = break (== ':') info
+                  parts = user : (case pass0 of (_ : p) -> [p]; [] -> [])
+              forM_ parts $ \part -> when (part /= "") $ do
+                cleanAddUtil ctx (VStr part)
+                forM_ (percentDecode part) (cleanAddUtil ctx . VStr)
+          _ -> pure ()
+      breakOn pat s = go s
+        where go [] = Nothing
+              go xs@(_ : rest) = if take (length pat) xs == pat then Just (drop (length pat) xs) else go rest
       bypass url = do np <- readIORef noproxy; if null np then pure False else do { let { host = urlHost url }; pure (any (\p -> p == "*" || host == p || endsWith host ("." ++ stripLeadDot p)) np) }
       route ctx url fd = do
         pv <- readIORef purl
@@ -874,6 +921,7 @@ proxyFeature = do
               mv <- firstEnv ["NO_PROXY", "no_proxy"]
               case mv of Just v -> writeIORef npListRef (filter (/= "") (map strip (splitOnChar ',' v))); Nothing -> pure ()
           npFinal <- readIORef npListRef; writeIORef noproxy npFinal
+          registerUserinfo ctx
           u <- cu ctx; inner <- readIORef (uFetcher u); writeIORef (uFetcher u) (\c ur f -> do f2 <- route c ur f; inner c ur f2)
   pure Feature { fName = "proxy", fVersion = "0.0.1", fActive = active, fOptions = fopts, fInit = initFn, fHook = \_ _ -> pure () }
 
@@ -1226,21 +1274,44 @@ rawRequest client fetchargs = do
       ctx <- makeContextImpl (defaultCtxSpec { csOpname = Just "direct", csCtrl = Just ctrl }) root
       url <- getStrD fetchdef "url" ""
       fetcher <- readIORef (uFetcher u)
-      (fetched, ferr) <- fetcher ctx url fetchdef
-      case ferr of
-        Just fe -> do ev <- errToValue fe; jo [("ok", VBool False), ("err", ev)]
-        Nothing ->
-          if isNoval fetched || isNullV fetched
-            then do e <- mkErr "direct_no_response" "response: undefined"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]
-            else case fetched of
-              VMap _ -> do
-                st <- getp fetched "status"; let status = toInt st
-                headersV <- getp fetched "headers"; headers <- case headersV of VMap _ -> pure headersV; _ -> emptyMap
-                clv <- getp headers "content-length"; let cl = case clv of { VStr s -> s; VNum n -> show (truncate n :: Int); _ -> "" }
-                let noBody = status == 204 || status == 304 || cl == "0"
-                jsonData <- if noBody then pure VNoval else do jf <- getp fetched "json"; case jf of VFunc _ -> callJson jf; _ -> pure VNoval
-                jo [("ok", VBool (status >= 200 && status < 300)), ("status", vint status), ("headers", headers), ("data", jsonData)]
-              _ -> do e <- mkErr "direct_invalid" "invalid response type"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]
+      -- A throw, from the transport or a caller's system.fetch, leaves through
+      -- the operation's catch path and is returned like a transport error.
+      attempt <- try $ do
+        (fetched, ferr) <- fetcher ctx url fetchdef
+        case ferr of
+          -- Returned rather than thrown, so cleaned here as makeError would.
+          Just fe -> do ev <- cleanUtil ctx =<< errToValue fe; jo [("ok", VBool False), ("err", ev)]
+          Nothing ->
+            if isNoval fetched || isNullV fetched
+              then do e <- mkErr "direct_no_response" "response: undefined"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]
+              else case fetched of
+                VMap _ -> do
+                  st <- getp fetched "status"; let status = toInt st
+                  headersV <- getp fetched "headers"; headers <- case headersV of VMap _ -> pure headersV; _ -> emptyMap
+                  clv <- getp headers "content-length"; let cl = case clv of { VStr s -> s; VNum n -> show (truncate n :: Int); _ -> "" }
+                  let noBody = status == 204 || status == 304 || cl == "0"
+                  -- A body that does not parse leaves data unset; the call still reports its status.
+                  jsonData <- if noBody then pure VNoval else do jf <- getp fetched "json"; case jf of VFunc _ -> orNoval (callJson jf); _ -> pure VNoval
+                  jo [("ok", VBool (status >= 200 && status < 300)), ("status", vint status), ("headers", headers), ("data", jsonData)]
+                _ -> do e <- mkErr "direct_invalid" "invalid response type"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]
+      case attempt of
+        Right out -> pure out
+        Left e -> do
+          cleaned <- cleanUnexpected ctx e
+          case fromException cleaned of
+            Just (SdkException ev) -> do ev' <- errToValue ev; jo [("ok", VBool False), ("err", ev')]
+            Nothing -> throwIO cleaned
+
+orNoval :: IO Value -> IO Value
+orNoval act = do
+  r <- try act
+  case r of
+    Right v -> pure v
+    Left e | isAsyncException e -> throwIO e
+           | otherwise -> pure VNoval
+
+isAsyncException :: SomeException -> Bool
+isAsyncException e = isJust (fromException e :: Maybe SomeAsyncException)
 
 sdkTest :: Value -> (String -> IO Feature) -> Value -> Value -> IO Client
 sdkTest config makeFeature testopts sdkopts = do
@@ -1260,7 +1331,36 @@ sdkTest config makeFeature testopts sdkopts = do
 -- ------------------------------------------------------------------
 
 runOpPipeline :: Context -> IO () -> IO Value
-runOpPipeline ctx postDone = do
+runOpPipeline ctx postDone = guardOp ctx (runOpStages ctx postDone)
+
+guardOp :: Context -> IO a -> IO a
+guardOp ctx act = do
+  r <- try act
+  case r of
+    Right v -> pure v
+    Left e -> throwIO =<< cleanUnexpected ctx e
+
+-- An error a hook, the fetcher or a parser threw never passed through
+-- makeError, whose own error and explain record are already clean.
+cleanUnexpected :: Context -> SomeException -> IO SomeException
+cleanUnexpected ctx e
+  | isAsyncException e = pure e
+  | Just (SdkException ev) <- fromException e = do
+      ctrl <- readIORef (cCtrl ctx)
+      made <- getp ctrl "err"
+      if sameNode made ev then pure e else do
+        cleanExplain ctx
+        toException . SdkException <$> cleanUtil ctx ev
+  | otherwise = do
+      cleanExplain ctx
+      m <- cleanUtil ctx (VStr (displayException e))
+      toException . SdkException <$> mkErr "unexpected" (vstring m)
+  where
+    sameNode (VMap a) (VMap b) = a == b
+    sameNode _ _ = False
+
+runOpStages :: Context -> IO () -> IO Value
+runOpStages ctx postDone = do
   let fh n = featureHookUtil ctx n
       setOut k v = do out <- readIORef (cOut ctx); setp out k v
   fh "PrePoint"
@@ -1393,19 +1493,22 @@ makeEntity client name entopts = do
               rd <- case rdV of VMap _ -> pure rdV; _ -> emptyMap
               setp rd "body$" body
               writeIORef (cReqdata ctx) rd
-            _ <- runOpPipeline ctx (pure ())
-            rv <- readIORef (cResult ctx)
-            raw <- case rv of
-              VMap _ -> do
-                sf <- getp rv "stream"
-                case sf of
-                  VFunc _ -> do r <- callVfn sf VNoval; case r of VList _ -> listItems r; _ -> pure []
-                  _ -> do resdata <- getp rv "resdata"; case resdata of VList _ -> listItems resdata; VNoval -> pure []; v -> pure [v]
-              _ -> pure []
-            sig <- getp coV "signal"
-            case sig of
-              VFunc _ -> streamTakeUntil sig raw
-              _ -> pure raw
+            -- The stream is read inside the operation's catch path: a feature's
+            -- stream that fails leaves cleaned, like any other failure.
+            guardOp ctx $ do
+              _ <- runOpStages ctx (pure ())
+              rv <- readIORef (cResult ctx)
+              raw <- case rv of
+                VMap _ -> do
+                  sf <- getp rv "stream"
+                  case sf of
+                    VFunc _ -> do r <- callVfn sf VNoval; case r of VList _ -> listItems r; _ -> pure []
+                    _ -> do resdata <- getp rv "resdata"; case resdata of VList _ -> listItems resdata; VNoval -> pure []; v -> pure [v]
+                _ -> pure []
+              sig <- getp coV "signal"
+              case sig of
+                VFunc _ -> streamTakeUntil sig raw
+                _ -> pure raw
         }
   root <- readIORef (clRootctx client)
   entctx <- makeContextImpl (defaultCtxSpec { csEntity = Just ent, csEntopts = Just entopts' }) root

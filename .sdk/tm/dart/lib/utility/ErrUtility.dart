@@ -5,6 +5,8 @@
 // `iserr` accepts both. `errmsg`/`errcode` read the conventional members
 // (message/code) from any error-ish value, falling back to toString().
 
+import '../ProjectNameError.dart';
+
 bool iserr(dynamic v) => v is Error || v is Exception;
 
 String errmsg(dynamic err) {
@@ -44,3 +46,10 @@ String errcode(dynamic err) {
   }
   return '';
 }
+
+// A foreign error cannot be edited, so before it is cleaned it becomes the
+// SDK's own, keeping its code and message; the SDK's own passes through.
+ProjectNameError sdkerror(dynamic err, dynamic ctx) => err is ProjectNameError
+    ? err
+    : ProjectNameError(
+        '' == errcode(err) ? 'unexpected' : errcode(err), errmsg(err), ctx);
