@@ -483,6 +483,37 @@ def main : IO UInt32 := do
       check (hasSub msg "hook saw" && !hasSub msg "HOOKED-SECRET-4")
         s!"pipeline: an error a hook throws leaves cleaned ({msg})")
 
+    -- pipeline: an exit before done cleans the explain record, which holds
+    -- the live spec: a stage error through failOp, and a hook's throw.
+    (do
+      let opts ← liveOpts #[("probe", ← onOpts #[])]
+      SdkUtility.sp opts "apikey" (.str "EXPLAIN-SECRET-5")
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+      addProbe c (fun s ctx => do
+        if s == "PreRequest" then SdkUtility.sp ctx "spec" .noval)
+      let ctrl ← newMap #[("explain", ← emptyMap), ("throw", .bool false)]
+      let _ ← SdkRuntime.opList c "widget" (← emptyMap) ctrl
+      let ex ← stringify (← gp ctrl "explain")
+      check ((← gpS (← gp ctrl "err") "code") == "url_no_spec" && hasSub ex "authorization"
+             && !hasSub ex "EXPLAIN-SECRET-5")
+        s!"pipeline: a stage error leaves its explain record cleaned ({ex})")
+
+    (do
+      let opts ← liveOpts #[("probe", ← onOpts #[])]
+      SdkUtility.sp opts "apikey" (.str "EXPLAIN-SECRET-6")
+      let w ← mkWire
+      let c ← SdkRuntime.mkClientWith opts pipeConfig
+        (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+      addProbe c (fun s _ => do
+        if s == "PreResponse" then throw (IO.userError "hook failed"))
+      let ctrl ← newMap #[("explain", ← emptyMap)]
+      let _ ← thrown (SdkRuntime.opList c "widget" (← emptyMap) ctrl)
+      let ex ← stringify (← gp ctrl "explain")
+      check (hasSub ex "authorization" && !hasSub ex "EXPLAIN-SECRET-6")
+        s!"pipeline: a hook's throw leaves its explain record cleaned ({ex})")
+
     -- clean: a registered value used as a property name is masked, and
     -- names that mask alike are all kept.
     (do

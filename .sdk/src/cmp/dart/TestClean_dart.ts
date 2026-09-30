@@ -426,9 +426,11 @@ void tests() {
       sinks.addAll(forms('rejected', rejected));
       sinks.add(Sink('rejected:message', errmsg(rejected)));
 
-      // An error a feature hook throws, quoting the request, skips makeError.
+      // An error a feature hook throws, quoting the request, skips makeError,
+      // and so does the explain record it leaves behind.
       final hooked = makeSdk(SCENARIOS[0], sinks, null, [ThrowFeature()]);
-      final hookerr = await drive(hooked, target, <String, dynamic>{}, sinks);
+      final hookerr = await drive(hooked, target,
+          <String, dynamic>{'explain': <String, dynamic>{}}, sinks);
       ok(null != hookerr, 'the throwing hook should fail the operation');
 
       final leaked = <String>[];

@@ -1315,15 +1315,18 @@ runOpPipeline ctx postDone = do
     Left e -> throwIO =<< cleanUnexpected ctx e
 
 -- An error a hook, the fetcher or a parser threw never passed through
--- makeError, whose own error is already clean and on ctrl.err.
+-- makeError, whose own error and explain record are already clean.
 cleanUnexpected :: Context -> SomeException -> IO SomeException
 cleanUnexpected ctx e
   | isAsync = pure e
   | Just (SdkException ev) <- fromException e = do
       ctrl <- readIORef (cCtrl ctx)
       made <- getp ctrl "err"
-      if sameNode made ev then pure e else toException . SdkException <$> cleanUtil ctx ev
+      if sameNode made ev then pure e else do
+        cleanExplain ctx
+        toException . SdkException <$> cleanUtil ctx ev
   | otherwise = do
+      cleanExplain ctx
       m <- cleanUtil ctx (VStr (displayException e))
       toException . SdkException <$> mkErr "unexpected" (vstring m)
   where

@@ -362,6 +362,8 @@ def failOp (client ctx : Value) (errv : Value) : SIO Value := do
   SdkUtility.sp e "spec" (← SdkUtility.clean ctx (← gp ctx "spec"))
   let ctrl ← gp ctx "ctrl"
   SdkUtility.sp ctrl "err" e
+  -- A stage error leaves before done, and the record holds the live spec.
+  SdkUtility.doneExplain ctx
   let explain ← gp ctrl "explain"
   if SdkUtility.isMapV explain then SdkUtility.sp explain "err" e
   SdkFeature.dispatch client "PreUnexpected" ctx
@@ -459,14 +461,15 @@ def runOpStages (client : Value) (entityName opName : String)
   if SdkUtility.truthy (← gp result "ok") then gp result "resdata"
   else failOp client ctx .noval
 
-/-- An error a hook threw never passed through makeError, so its message is
-    cleaned on the way out; failOp's own message is clean already. -/
+/-- An error a hook threw never passed through makeError, so its message and
+    the explain record are cleaned on the way out; failOp's are clean already. -/
 def runOp (client : Value) (entityName opName : String)
     (matchV dataV callopts : Value) : SIO Value := do
   try
     runOpStages client entityName opName matchV dataV callopts
   catch e =>
-    let ctx ← newMap #[("options", ← gp client "options")]
+    let ctx ← newMap #[("options", ← gp client "options"), ("ctrl", callopts)]
+    SdkUtility.doneExplain ctx
     throw (IO.userError (SdkUtility.vs (← SdkUtility.clean ctx (.str (toString e)))))
 
 -- Entity operation wrappers.

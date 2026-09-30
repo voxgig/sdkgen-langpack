@@ -442,9 +442,11 @@ def cleanSweep : SIO Unit := do
     let mclient ← SdkRuntime.mkClientWith mopts SdkConfig.configJson
       (fun _ url _ => do pure ((← scenarioNotfound.respond url), none))
     let _ ← drive mclient target (← emptyMap)
-    -- An error a feature hook throws, quoting the request, skips makeError.
+    -- An error a feature hook throws, quoting the request, skips makeError,
+    -- and so does the explain record it leaves behind.
     let hooked ← makeCleanSdk scenarioOk #[] #[throwFeature]
-    check (← drive hooked target (← emptyMap)) "clean: the throwing hook fails the operation"
+    check (← drive hooked target (← newMap #[("explain", ← emptyMap)]))
+      "clean: the throwing hook fails the operation"
     let fs ← canaryForms
     let swept ← cleanSinks.get
     let leaked := swept.filter (fun (_, t) => (leaksIn fs t).size > 0)

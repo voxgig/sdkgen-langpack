@@ -309,10 +309,11 @@ tests c = do
           Left e -> do _ <- pushException sinks "rejected" e; pure ()
           Right _ -> check c "clean.mistyped_credential_rejected" False
 
-        -- An error a feature hook throws, quoting the request, skips makeError.
+        -- An error a feature hook throws, quoting the request, skips makeError,
+        -- and so does the explain record it leaves behind.
         thrower <- throwFeature
         hooked <- makeSdk (scenarios !! 0) sinks [] [thrower]
-        hctrl <- emptyMap
+        hctrl <- do ex <- emptyMap; jo [("explain", ex)]
         hookerr <- drive hooked target hctrl sinks
         check c "clean.throwing_hook_fails_the_op" (isJust hookerr)
 
