@@ -168,12 +168,12 @@ bool _sensitiveKey(Map cfg, dynamic key) {
 dynamic _json(dynamic val) {
   try {
     return val.toJSON();
-  } on NoSuchMethodError catch (_e) {
+  } on NoSuchMethodError {
     // No toJSON.
   }
   try {
     return val.toJson();
-  } on NoSuchMethodError catch (_e) {
+  } on NoSuchMethodError {
     return _drop;
   }
 }
