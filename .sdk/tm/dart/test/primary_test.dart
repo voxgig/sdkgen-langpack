@@ -498,6 +498,30 @@ void tests() {
       equal(null, vs.getpath(second.options(), 'headers.X-Custom-Token'));
     });
 
+    test('feature-names-do-not-make-settings-sensitive', (t) async {
+      await _setup();
+      final ctx = _utility.makeContext({
+        'options': {
+          'feature': {
+            'secrets': {
+              'active': false,
+              'kind': 'vaultish',
+              'token': 'REAL-TOKEN-1'
+            }
+          }
+        },
+        'config': <String, dynamic>{},
+      });
+      ctx.client = _client;
+      ctx.utility = _client.utility();
+      ctx.options = _utility.makeOptions(ctx);
+      final List values = ctx.options['__derived__']['clean']['values'];
+      ok(values.contains('REAL-TOKEN-1'));
+      ok(!values.contains('vaultish'), 'a feature name made its settings secret');
+      equal('unknown provider kind: vaultish',
+          cu.clean(ctx, 'unknown provider kind: vaultish'));
+    });
+
     // The whole-suite backstop, behind `_sec`'s per-section guards: those
     // pin each section to the case count the engine actually drove for it,
     // so a shrunken or emptied section fails in its own case, named. This

@@ -471,6 +471,16 @@ withoutKeys ks v = case v of
   VMap ref -> do es <- readIORef ref; mkMap [(k, x) | (k, x) <- es, k `notElem` ks]
   _ -> pure v
 
+-- The keys directly under `feature` name features, not fields: `secrets` is
+-- a feature, and its settings are not secrets for sitting under its name.
+addSensitiveOptions :: Value -> [String] -> Value -> IO ()
+addSensitiveOptions cfg skip opts = do
+  cleanAddSensitiveCfg cfg =<< withoutKeys ("feature" : skip) opts
+  feature <- case opts of VMap _ -> getp opts "feature"; _ -> pure VNoval
+  case feature of
+    VMap ref -> readIORef ref >>= mapM_ (cleanAddSensitiveCfg cfg . snd)
+    _ -> cleanAddSensitiveCfg cfg feature
+
 cleanWithCfg :: Value -> Value -> IO Value
 cleanWithCfg cfg v = do
   r <- cleanRule cfg
@@ -1419,7 +1429,7 @@ makeOptionsUtil ctx = do
   emc <- emptyMap
   cleanmerged <- merge =<< ja [emc, specclean, cfgcleanM, rawcleanM]
   cleancfg <- makeCleanConfig cleanmerged
-  cleanAddSensitiveCfg cleancfg =<< withoutKeys ["clean"] opts0
+  addSensitiveOptions cleancfg ["clean"] opts0
   cvals <- concat <$> mapM (\cl -> case cl of VMap _ -> splitvalues =<< getp cl "values"; _ -> pure [])
                           [cfgclean, rawclean]
   forM_ (map VStr cvals) (cleanAddCfg cleancfg)
@@ -1525,7 +1535,7 @@ makeOptionsUtil ctx = do
   setp derived "featureorder" orderList
   setp opts "__derived__" derived
   -- Again over the merged result: the config's own defaults can carry one.
-  cleanAddSensitiveCfg cleancfg =<< withoutKeys ["clean", "__derived__"] opts
+  addSensitiveOptions cleancfg ["clean", "__derived__"] opts
   pure opts
 
 -- ------------------------------------------------------------------

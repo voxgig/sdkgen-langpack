@@ -28,7 +28,7 @@ dynamic makeOptions(dynamic ctx) {
       '__derived__': {'clean': cleancfg}
     }
   };
-  cleanAddSensitive(cleanctx, _without(options, ['clean']));
+  _addSensitiveOptions(cleanctx, options, ['clean']);
   for (final raw in [
     ...splitvalues(cfgclean is Map ? cfgclean['values'] : null),
     ...splitvalues(rawclean is Map ? rawclean['values'] : null),
@@ -251,9 +251,23 @@ dynamic makeOptions(dynamic ctx) {
   };
 
   // Again over the merged result: the config's own defaults can carry one.
-  cleanAddSensitive({'options': opts}, _without(opts, ['clean', '__derived__']));
+  _addSensitiveOptions({'options': opts}, opts, ['clean', '__derived__']);
 
   return opts;
+}
+
+// The keys directly under `feature` name features, not fields: `secrets` is
+// a feature, and its settings are not secrets for sitting under its name.
+void _addSensitiveOptions(dynamic ctx, dynamic options, List<String> skip) {
+  cleanAddSensitive(ctx, _without(options, [...skip, 'feature']));
+  final feature = vs.getprop(options, 'feature');
+  if (feature is Map) {
+    for (final fopts in feature.values) {
+      cleanAddSensitive(ctx, fopts);
+    }
+  } else {
+    cleanAddSensitive(ctx, feature);
+  }
 }
 
 // A shallow copy without the named keys; the values are shared, not cloned.

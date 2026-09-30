@@ -278,6 +278,16 @@ tests c alltests = do
     pure (vstring s == "a [redacted] b [redacted]" && vstring sens == "[redacted]"
           && vstring other == "y" && vstring seeded == "CONFIG-SEEDED-1")
 
+  runTest c "primary.feature_names_do_not_make_settings_sensitive" $ do
+    cl <- C.testSdk0; ctx <- mkCtx cl "load"
+    sec <- jo [("active", VBool False), ("kind", VStr "vaultish"), ("token", VStr "REAL-TOKEN-1")]
+    fm <- jo [("secrets", sec)]
+    raw <- jo [("feature", fm)]; writeIORef (cOptions ctx) raw
+    o <- makeOptionsUtil ctx
+    values <- getpathS o "__derived__.clean.values"
+    vals <- case values of VList _ -> map vstring <$> vlistItems values; _ -> pure []
+    pure ("REAL-TOKEN-1" `elem` vals && "vaultish" `notElem` vals)
+
   runTest c "primary.make_request_guard_no_spec" $ do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"
     writeIORef (cSpec ctx) VNoval

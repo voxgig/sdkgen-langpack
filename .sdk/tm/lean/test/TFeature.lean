@@ -555,6 +555,17 @@ def main : IO UInt32 := do
              && (← gpS m "other") == "y" && (← gpS cfgclean "values") == "CONFIG-SEEDED-1")
         "clean: the config's own clean block is honoured")
 
+    -- clean: the keys under `feature` name features, so a feature called
+    -- secrets does not make its settings secret; a sensitive field inside
+    -- them still counts.
+    (do
+      let opts ← SdkUtility.makeOptions (← emptyMap) (← newMap #[("feature", ← newMap #[
+        ("secrets", ← newMap #[("active", .bool false), ("kind", .str "vaultish"),
+                               ("token", .str "REAL-TOKEN-1")])])])
+      let values ← SdkUtility.cfgStrings (← SdkUtility.cleanConfig (← newMap #[("options", opts)])) "values"
+      check (values.contains "REAL-TOKEN-1" && !values.contains "vaultish")
+        "clean: a feature's name does not make its settings sensitive")
+
     -- proxy: the userinfo of the proxy URL is registered, and the password
     -- runs from the first colon, colons included.
     (do

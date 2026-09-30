@@ -306,6 +306,14 @@ def withoutKeys (v : Value) (ks : Array String) : SIO Value := do
   | .map id => newMap ((← mapEntries id).filter (fun e => !ks.contains e.1))
   | _ => pure v
 
+/-- The keys directly under `feature` name features, not fields: `secrets`
+    is a feature, and its settings are not secrets for sitting under it. -/
+def cleanAddSensitiveOptions (cfg options : Value) (skip : Array String) : SIO Unit := do
+  cleanAddSensitiveCfg cfg (← withoutKeys options (skip.push "feature"))
+  match (← gp options "feature") with
+  | .map id => for (_, fopts) in (← mapEntries id) do cleanAddSensitiveCfg cfg fopts
+  | feature => cleanAddSensitiveCfg cfg feature
+
 def cleanWithCfg (cfg : Value) (v : Value) : SIO Value := do
   let r ← cleanRule cfg
   if r.active then snapshot r none 0 #[] v else pure v
@@ -386,7 +394,7 @@ def makeOptions (config options : Value) : SIO Value := do
   let rawcleanM ← match rawclean with | .map _ => clone rawclean | _ => emptyMap
   let cleanmerged ← merge (← newList #[← emptyMap, ← cleanOptSpec, cfgcleanM, rawcleanM])
   let cleancfg ← makeCleanConfig cleanmerged
-  cleanAddSensitiveCfg cleancfg (← withoutKeys uopts #["clean"])
+  cleanAddSensitiveOptions cleancfg uopts #["clean"]
   for v in (← splitvalues (← gp cfgclean "values")) ++ (← splitvalues (← gp rawclean "values")) do
     cleanAddCfg cleancfg (.str v)
   let parts ← newList #[base, copts, uopts]
@@ -404,7 +412,7 @@ def makeOptions (config options : Value) : SIO Value := do
     | _ => pure ()
   sp out "__derived__" (← newMap #[("clean", cleancfg)])
   -- Again over the merged result: the config's own defaults can carry one.
-  cleanAddSensitiveCfg cleancfg (← withoutKeys out #["clean", "__derived__"])
+  cleanAddSensitiveOptions cleancfg out #["clean", "__derived__"]
   pure out
 
 def makeContext (ctxmap : Value) : SIO Value := do
