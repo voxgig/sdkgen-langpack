@@ -48,7 +48,7 @@ const TestClean = cmp(function TestClean(props: any) {
         candidates.push(
           `  , Candidate "${ent.name}.${op}" [${params}]\n` +
           `      (\\sdk m ctrl -> do ent <- C.${fn} sdk VNoval; ${call})\n` +
-          `      (\\sdk m -> do ent <- C.${fn} sdk VNoval; eStream ent "${op}" m VNoval)`)
+          `      (\\sdk m co -> do ent <- C.${fn} sdk VNoval; eStream ent "${op}" m co)`)
       }
     })
 
@@ -94,7 +94,7 @@ import Data.IORef
 import Data.List (intercalate, isInfixOf, isSuffixOf)
 import Data.Maybe (isJust)
 
-import VoxgigStruct (Value (..), emptyMap, listItems, ismap, stringify, vint)
+import VoxgigStruct (Value (..), emptyMap, keysof, listItems, ismap, stringify, vint)
 import SdkTypes
 import SdkHelpers
 import SdkRuntime (base64Encode, escurlS, contextToValue)
@@ -223,11 +223,11 @@ makeSdk sc sinks cleanopts extras = do
   modifyIORef (clFeatures sdk) (++ (capFeature : extras))
   pure sdk
 
--- A feature that throws from inside the pipeline, quoting the request it
--- saw: an error makeError never handled.
-throwFeature :: IO Feature
-throwFeature = hookFeature "throwhook" (\\name ctx ->
-  when (name == "PreResponse") $ do
+-- A feature that throws from inside the pipeline at the named stages,
+-- quoting the request it saw: an error makeError never handled.
+throwFeature :: [String] -> IO Feature
+throwFeature stages = hookFeature "throwhook" (\\name ctx ->
+  when (name \`elem\` stages) $ do
     sp <- readIORef (cSpec ctx)
     j <- case sp of VMap _ -> jsonifyCompact sp; _ -> pure ""
     ioError (userError ("hook saw " ++ j)))
@@ -240,9 +240,19 @@ streamThrowFeature = hookFeature "streamthrow" (\\name ctx ->
     when (ismap rv) $
       setp rv "stream" (vfunc1 (\\_ -> ioError (userError ("stream saw " ++ canaryApikey)))))
 
+-- A stream that succeeds, yielding the result's items.
+streamOkFeature :: IO Feature
+streamOkFeature = hookFeature "streamok" (\\name ctx ->
+  when (name == "PreDone") $ do
+    rv <- readIORef (cResult ctx)
+    when (ismap rv) $ do
+      rd <- getp rv "resdata"
+      items <- case rd of VList _ -> pure rd; VNoval -> ja []; v -> ja [v]
+      setp rv "stream" (vfunc1 (\\_ -> pure items)))
+
 data Candidate = Candidate
   { cdName :: String, cdParams :: [String], cdRun :: Client -> Value -> Value -> IO Value
-  , cdStream :: Client -> Value -> IO [Value] }
+  , cdStream :: Client -> Value -> Value -> IO [Value] }
 
 -- An operation and the match it completes with.
 type Target = (Candidate, [(String, Value)])
@@ -251,7 +261,7 @@ type Target = (Candidate, [(String, Value)])
 candidates :: [Candidate]
 candidates =
   [ Candidate "_.none" [] (\\_ _ _ -> ioError (userError "no candidate"))
-      (\\_ _ -> ioError (userError "no candidate"))
+      (\\_ _ _ -> ioError (userError "no candidate"))
 ${candidates.join('\n')}
   ]
 
@@ -284,8 +294,14 @@ pushException sinks name e = do
     Just (SdkException ev) -> do pushValue sinks name ev; pure ev
     Nothing -> jo [("message", VStr (show e))]
 
+sameNode :: Value -> Value -> Bool
+sameNode (VMap a) (VMap b) = a == b
+sameNode _ _ = False
+
 drive :: Client -> Target -> Value -> Sinks -> IO (Maybe Value)
 drive sdk (c, m) ctrl sinks = do
+  -- A caller may keep the record it passed rather than read ctrl.explain.
+  held <- getp ctrl "explain"
   mv <- jo m
   r <- try (cdRun c sdk mv ctrl) :: IO (Either SomeException Value)
   err <- case r of
@@ -293,6 +309,7 @@ drive sdk (c, m) ctrl sinks = do
     Left e -> Just <$> pushException sinks "error" e
   ex <- getp ctrl "explain"
   case ex of VMap _ -> pushValue sinks "explain" ex; _ -> pure ()
+  when (ismap held && not (sameNode held ex)) (pushValue sinks "explain:held" held)
   pure err
 
 variants :: [(String, IO Value)]
@@ -338,20 +355,33 @@ tests c = do
             Right _ -> check c "clean.mistyped_credential_rejected" False
 
         -- An error a feature hook throws, quoting the request, skips makeError,
-        -- and so does the explain record it leaves behind.
-        thrower <- throwFeature
-        hooked <- makeSdk (scenarios !! 0) sinks (Just []) [thrower]
-        hctrl <- do ex <- emptyMap; jo [("explain", ex)]
-        hookerr <- drive hooked target hctrl sinks
-        check c "clean.throwing_hook_fails_the_op" (isJust hookerr)
+        -- and so does the explain record it leaves behind. This catch path fires
+        -- no PreUnexpected, so the 404 reaches that hook through makeError.
+        forM_ [ (scenarios !! 0, ["PreResponse"]), (scenarios !! 0, ["PreResponse", "PreUnexpected"])
+              , (scenarios !! 1, ["PreUnexpected"]) ] $ \\(sc, stages) -> do
+          thrower <- throwFeature stages
+          hooked <- makeSdk sc sinks (Just []) [thrower]
+          hctrl <- do ex <- emptyMap; jo [("explain", ex)]
+          hookerr <- drive hooked target hctrl sinks
+          hookmsg <- maybe (pure "") (\\e -> getStrD e "message" "") hookerr
+          check c ("clean.throwing_hook_fails_the_op " ++ unwords stages) ("hook saw" \`isInfixOf\` hookmsg)
 
-        -- Iterating a stream runs inside the same catch path as the operation.
-        streamer <- streamThrowFeature
-        streamed <- makeSdk (scenarios !! 0) sinks (Just []) [streamer]
-        smatch <- jo (snd target)
-        streamerr <- try (cdStream (fst target) streamed smatch) :: IO (Either SomeException [Value])
-        either (\\e -> () <$ pushException sinks "stream" e) (const (pure ())) streamerr
-        check c "clean.failing_stream_throws" (isLeft streamerr)
+        -- Iterating a stream runs inside the same catch path as the operation,
+        -- and the explain record the caller passed is cleaned however it ends.
+        forM_ [("stream", [streamThrowFeature]), ("stream-ok", [streamOkFeature]), ("stream-plain", [])] $
+          \\(name, mkFeatures) -> do
+            extra <- sequence mkFeatures
+            streamed <- makeSdk (scenarios !! 0) sinks (Just []) extra
+            smatch <- jo (snd target)
+            explain <- emptyMap
+            sctrl <- jo [("explain", explain)]
+            callopts <- jo [("ctrl", sctrl)]
+            streamerr <- try (cdStream (fst target) streamed smatch callopts) :: IO (Either SomeException [Value])
+            either (\\e -> () <$ pushException sinks name e) (const (pure ())) streamerr
+            check c ("clean." ++ name ++ " throws only when it fails") ((name == "stream") == isLeft streamerr)
+            filled <- keysof explain
+            check c ("clean." ++ name ++ " fills the explain record") (not (null filled))
+            pushValue sinks (name ++ ":explain") explain
 
         -- Most callers pass no clean block; the defaults alone must mask.
         forM_ [scenarios !! 1, scenarios !! 3] $ \\sc -> do
