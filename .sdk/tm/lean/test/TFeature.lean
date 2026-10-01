@@ -52,6 +52,11 @@ def onOpts (extra : Array (String × Value)) : SIO Value := do
     SdkUtility.sp o k v
   pure o
 
+/-- List with maps of its own: the runtime records a failure on the caller's
+    options map, so a reused map filters every later list by `err`. -/
+def listAll (c : Value) (ent : String) : SIO Value := do
+  SdkRuntime.opList c ent (← emptyMap) (← emptyMap)
+
 /-- The bucket a feature records into. -/
 def bucketOf (client : Value) (name : String) : SIO Value := do
   gp (← gp client "track") name
@@ -262,7 +267,6 @@ def main : IO UInt32 := do
       match (← findListEntity) with
       | none => IO.println "skip - pipeline apikey: no entity with a parameterless list op"
       | some ent =>
-        let mt ← emptyMap
         let sent ← IO.mkRef 0
         let seen ← IO.mkRef (none : Option String)
         let stub : SdkFeature.Fetcher := fun _ _ f => do
@@ -278,7 +282,7 @@ def main : IO UInt32 := do
           pure (resp, none)
         let opts ← newMap #[("apikey", .str "WIREKEY01")]
         let c ← SdkRuntime.mkClientWith opts SdkConfig.configJson stub
-        let _ ← SdkRuntime.opList c ent mt mt
+        let _ ← listAll c ent
         check ((← sent.get) == 1) "pipeline: the live client reached the transport exactly once"
         check (credentialIs (← seen.get) "WIREKEY01")
           "pipeline: apikey reaches the wire as the authorization header"
@@ -298,7 +302,7 @@ def main : IO UInt32 := do
           pure (resp, none)
         let opts2 ← newMap #[("apikey", .str "WIREKEY01"), ("auth", .null)]
         let c2 ← SdkRuntime.mkClientWith opts2 SdkConfig.configJson stub2
-        let _ ← SdkRuntime.opList c2 ent mt mt
+        let _ ← listAll c2 ent
         check ((← sent2.get) == 1 && (← seen2.get).isNone)
           "pipeline: auth null suppresses the credential on the wire")
 
@@ -759,20 +763,19 @@ def main : IO UInt32 := do
     match (← findSubject) with
     | none => IO.println "skip - no entity with list op and seed data"
     | some (ent, seed, hasCreate) => do
-    let mt ← emptyMap
 
     -- log: counts requests
     (do
       let c ← clientWith seed #[("log", ← onOpts #[])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b ← bucketOf c "log"
       check ((← numAt b "calls") == 1.0) "log: counts one request")
 
     -- metrics: totals and a per-op bucket
     (do
       let c ← clientWith seed #[("metrics", ← onOpts #[])]
-      let _ ← SdkRuntime.opList c ent mt mt
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
+      let _ ← listAll c ent
       let b ← bucketOf c "metrics"
       let total ← gp b "total"
       check ((← numAt total "count") == 2.0) "metrics: counts two operations"
@@ -783,7 +786,7 @@ def main : IO UInt32 := do
     -- telemetry: one span per operation, closed out
     (do
       let c ← clientWith seed #[("telemetry", ← onOpts #[])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b ← bucketOf c "telemetry"
       let spans ← gp b "spans"
       let n ← (match spans with | .list i => do pure (← listItems i).size | _ => pure 0)
@@ -793,7 +796,7 @@ def main : IO UInt32 := do
     -- audit: one record per operation
     (do
       let c ← clientWith seed #[("audit", ← onOpts #[])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b ← bucketOf c "audit"
       let recs ← gp b "records"
       let n ← (match recs with | .list i => do pure (← listItems i).size | _ => pure 0)
@@ -802,7 +805,7 @@ def main : IO UInt32 := do
     -- debug: an entry, with sensitive headers redacted
     (do
       let c ← clientWith seed #[("debug", ← onOpts #[])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b ← bucketOf c "debug"
       let entries ← gp b "entries"
       match entries with
@@ -817,12 +820,12 @@ def main : IO UInt32 := do
     -- idempotency: injects a key header on mutating ops only
     (do
       let c ← clientWith seed #[("idempotency", ← onOpts #[])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b0 ← bucketOf c "idempotency"
       check ((← numAt b0 "issued") == 0.0) "idempotency: no key for a read op"
       if hasCreate then
         let d ← newMap #[("name", .str "idem")]
-        let _ ← SdkRuntime.opCreate c ent d mt
+        let _ ← SdkRuntime.opCreate c ent d (← emptyMap)
         let b ← bucketOf c "idempotency"
         check ((← numAt b "issued") == 1.0) "idempotency: issues a key for create"
         check ((← gpS b "last") != "") "idempotency: records the issued key")
@@ -830,7 +833,7 @@ def main : IO UInt32 := do
     -- clienttrack: request/session headers and a request count
     (do
       let c ← clientWith seed #[("clienttrack", ← onOpts #[])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b ← bucketOf c "clienttrack"
       check ((← numAt b "requests") == 1.0) "clienttrack: counts the request"
       check ((← gpS b "session") != "") "clienttrack: assigns a session id"
@@ -841,7 +844,7 @@ def main : IO UInt32 := do
       let rules ← newMap #[("list", .str "read")]
       let c ← clientWith seed #[("rbac", ← onOpts #[("rules", rules)])]
       let denied ← (try
-          let _ ← SdkRuntime.opList c ent mt mt
+          let _ ← listAll c ent
           pure false
         catch _ => pure true)
       check denied "rbac: denies an operation without the permission"
@@ -851,15 +854,15 @@ def main : IO UInt32 := do
       let rules ← newMap #[("list", .str "read")]
       let perms ← newList #[.str "read"]
       let c ← clientWith seed #[("rbac", ← onOpts #[("rules", rules), ("perms", perms)])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b ← bucketOf c "rbac"
       check ((← numAt b "allowed") == 1.0) "rbac: allows when the permission is granted")
 
     -- cache: second identical read is served from the cache
     (do
       let c ← clientWith seed #[("cache", ← onOpts #[])]
-      let _ ← SdkRuntime.opList c ent mt mt
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
+      let _ ← listAll c ent
       let b ← bucketOf c "cache"
       check ((← numAt b "miss") == 1.0) "cache: first read is a miss"
       check ((← numAt b "hit") == 1.0) "cache: second read is a hit")
@@ -867,8 +870,8 @@ def main : IO UInt32 := do
     -- ratelimit: a tight burst throttles
     (do
       let c ← clientWith seed #[("ratelimit", ← onOpts #[("rate", .num 1.0), ("burst", .num 1.0)])]
-      let _ ← SdkRuntime.opList c ent mt mt
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
+      let _ ← listAll c ent
       let b ← bucketOf c "ratelimit"
       check ((← numAt b "throttled") >= 1.0) "ratelimit: throttles the second call")
 
@@ -876,7 +879,7 @@ def main : IO UInt32 := do
     (do
       let c ← clientWith seed #[("netsim", ← onOpts #[("offline", .bool true)])]
       let failed ← (try
-          let _ ← SdkRuntime.opList c ent mt mt
+          let _ ← listAll c ent
           pure false
         catch _ => pure true)
       check failed "netsim: offline simulation fails the request"
@@ -887,7 +890,7 @@ def main : IO UInt32 := do
     (do
       let c ← clientWith seed #[("netsim", ← onOpts #[("failStatus", .num 503.0)])]
       let _ ← (try
-          let _ ← SdkRuntime.opList c ent mt mt
+          let _ ← listAll c ent
           pure ()
         catch _ => pure ())
       let b ← bucketOf c "netsim"
@@ -896,7 +899,7 @@ def main : IO UInt32 := do
     -- proxy: annotates the transport and records the route
     (do
       let c ← clientWith seed #[("proxy", ← onOpts #[("url", .str "http://proxy.local:8080")])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b ← bucketOf c "proxy"
       check ((← numAt b "routed") == 1.0) "proxy: routes the request"
       check ((← gpS b "url") == "http://proxy.local:8080") "proxy: records the proxy url")
@@ -904,20 +907,20 @@ def main : IO UInt32 := do
     -- timeout: a generous budget does not trip
     (do
       let c ← clientWith seed #[("timeout", ← onOpts #[("ms", .num 30000.0)])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       pass "timeout: request within budget succeeds")
 
     -- retry: a healthy transport is not retried
     (do
       let c ← clientWith seed #[("retry", ← onOpts #[])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b ← bucketOf c "retry"
       check ((← numAt b "attempts") == 0.0) "retry: no retry on a healthy response")
 
     -- paging: annotates the query and counts items
     (do
       let c ← clientWith seed #[("paging", ← onOpts #[("size", .num 2.0)])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b ← bucketOf c "paging"
       check ((← numAt b "pages") == 1.0) "paging: counts the page"
       check ((← numAt b "items") >= 1.0) "paging: counts the returned items")
@@ -925,7 +928,7 @@ def main : IO UInt32 := do
     -- streaming: reports the emitted items
     (do
       let c ← clientWith seed #[("streaming", ← onOpts #[])]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b ← bucketOf c "streaming"
       check ((← numAt b "emitted") >= 1.0) "streaming: emits the list items"
       check ((← numAt b "chunks") == 1.0) "streaming: reports one chunk")
@@ -934,7 +937,7 @@ def main : IO UInt32 := do
     (do
       let off ← newMap #[("active", .bool false)]
       let c ← clientWith seed #[("log", off)]
-      let _ ← SdkRuntime.opList c ent mt mt
+      let _ ← listAll c ent
       let b ← bucketOf c "log"
       match b with
       | .map _ => fail "inactive feature must not record"
