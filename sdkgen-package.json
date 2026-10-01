@@ -3,7 +3,7 @@
     "package": 1
   },
   "name": "@voxgig/sdkgen-langpack",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "engines": {
     "sdkgen": ">=4.25.0"
   },
