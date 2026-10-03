@@ -53,6 +53,17 @@ def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
     (do
+      let point ← newMap #[("method", .str "GET"), ("parts", ← newList #[.str "a"])]
+      let attempt (allowop : String) : SIO Value := do
+        let op ← newMap #[("name", .str "load"), ("points", ← newList #[point])]
+        let options ← newMap #[("allow", ← newMap #[("op", .str allowop)])]
+        SdkUtility.makePoint (← newMap #[("op", op), ("options", options)])
+      let refused ← attempt "reload,unload"
+      let named ← attempt "list,\n LOAD"
+      check ((← gpS refused "code") == "point_op_allow" && (← gpS named "method") == "GET")
+        "makePoint: an allow list names whole operations, in any case")
+
+    (do
       let hdefs ← defs #[("idempotency_key", "Idempotency-Key"), ("page_size", "Page-Size")]
       let args ← newMap #[("header", hdefs)]
       let ctx ← argCtx #[("Idempotency-Key", .str "default"), ("user-agent", .str "sdk")]

@@ -4,9 +4,9 @@
 
 module SdkHelpers where
 
-import Data.Char (toLower, toUpper)
+import Data.Char (isSpace, toLower, toUpper)
 import Data.IORef
-import Data.List (isPrefixOf)
+import Data.List (dropWhileEnd, isPrefixOf)
 
 import VoxgigStruct
   ( Value (..), InjArg (..), dummyInj, emptyList, emptyMap, mkList, mkMap
@@ -296,6 +296,13 @@ substrContains hay needle
   where
     go [] = False
     go s@(_ : rest) = needle `isPrefixOf` s || go rest
+
+-- Whether a comma-separated allow option names the item: whole names, any case.
+allowListHas :: Value -> String -> Bool
+allowListHas (VStr list) item =
+  not (null item) && any ((== upper item) . upper . trim) (splitOnChar ',' list)
+  where trim = dropWhileEnd isSpace . dropWhile isSpace
+allowListHas _ _ = False
 
 strReplaceAll :: String -> String -> String -> String
 strReplaceAll s find repl
