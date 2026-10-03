@@ -847,6 +847,16 @@ def transformResponse (ctx : Value) : SIO Value := do
       | _ => pure .noval
   | _ => pure .noval
 
+/-- The text a transport sends for a body: a raw point's string as given,
+    anything else as JSON, a JSON point's string scalar included. The
+    reference decides from the value alone and sends any string as given. -/
+def bodyText (point body : Value) : SIO (Option String) := do
+  match body with
+  | .noval | .null => return none
+  | .str s => if (← gpS (← gp point "body") "kind") == "raw" then return some s
+              else return some (← jsonify body)
+  | _ => return some (← jsonify body)
+
 /-- The request body: only data-input operations carry one, a raw point's as given. -/
 def prepareBody (ctx : Value) : SIO Value := do
   if opInputOf (← opnameOf ctx) != "data" then return .noval

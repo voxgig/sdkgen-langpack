@@ -140,6 +140,18 @@ def main : IO UInt32 := do
       let b ← SdkUtility.prepareBody ctx
       check (b == .str "hello") "prepareBody: a raw request body is sent as given")
 
+    (do
+      let raw ← newMap #[("body", ← newMap #[("kind", .str "raw"), ("media", .str "text/plain")])]
+      let json ← newMap #[("body", ← newMap #[("kind", .str "json"), ("media", .str "application/json")])]
+      check ((← SdkUtility.bodyText raw (.str "hello")) == some "hello")
+        "bodyText: a raw point's string body is sent as given"
+      check ((← SdkUtility.bodyText json (.str "hello")) == some "\"hello\"")
+        "bodyText: a JSON point's string body is sent as JSON"
+      let node ← newMap #[("a", .str "b")]
+      check ((← SdkUtility.bodyText json node) == some (← jsonify node)
+          && (← SdkUtility.bodyText json .noval) == none)
+        "bodyText: a node is JSON and no body is none")
+
   go.run sctx
   let p ← npass.get
   let f ← nfail.get
