@@ -10,6 +10,7 @@ import 'harness.dart';
 import '../lib/ProjectNameSDK.dart';
 import '../lib/ProjectNameError.dart';
 import '../lib/Operation.dart';
+import '../lib/Point.dart';
 import '../lib/Response.dart';
 import '../lib/Result.dart';
 import '../lib/Spec.dart';
@@ -128,6 +129,48 @@ void tests() {
       equal('point_op_allow', errcode(stdutil.makePoint(ctx)));
     });
 
+    test('an allow list names whole operations, in any case', (t) {
+      final op = {
+        'name': 'load',
+        'points': [
+          {
+            'method': 'GET',
+            'parts': ['a']
+          }
+        ]
+      };
+      equal(
+          'point_op_allow',
+          errcode(stdutil.makePoint(base({
+            'op': op,
+            'options': {
+              'allow': {'op': 'reload,unload'}
+            }
+          }))));
+      final ctx = base({
+        'op': op,
+        'options': {
+          'allow': {'op': 'list,\n LOAD'}
+        }
+      });
+      equal(true, identical(stdutil.makePoint(ctx), ctx.op.points[0]));
+    });
+
+    test('an allow list names whole methods', (t) {
+      final ctx = base({
+        'op': {'name': 'update', 'points': []},
+        'options': {
+          'allow': {'method': 'GET,PUT'},
+          'base': 'http://x'
+        }
+      });
+      ctx.point = Point({
+        'method': 'pu',
+        'parts': ['a']
+      });
+      equal('spec_method_allow', errcode(stdutil.makeSpec(ctx)));
+    });
+
     test('makePoint rejects an operation with no endpoints', (t) {
       final ctx = base({
         'op': {'name': 'load', 'points': []},
@@ -167,6 +210,39 @@ void tests() {
         'out': {'spec': preset}
       });
       equal(true, identical(preset, stdutil.makeSpec(ctx)));
+    });
+  });
+
+  describe('pipeline:prepare + direct', () {
+    test('prepare sends a method allow.method names, in upper case', (t) async {
+      final sdk = ProjectNameSDK.test({}, {
+        'allow': {'method': 'PUT,\n get'}
+      });
+      final fetchdef = await sdk.prepare({'path': '/a', 'method': 'get'});
+      equal('GET', fetchdef['method']);
+      equal('spec_method_allow',
+          errcode(await sdk.prepare({'path': '/a', 'method': 'POST'})));
+      equal('spec_method_allow',
+          errcode(await sdk.prepare({'path': '/a', 'method': 'PU'})));
+    });
+
+    test('direct is refused by a list that names only indirect', (t) async {
+      final sdk = ProjectNameSDK.test({}, {
+        'allow': {'op': 'indirect,reload'}
+      });
+      final res = await sdk.direct({'path': '/a'});
+      equal(false, res['ok']);
+      ok(res['err'].toString().contains('not allowed by SDK option allow.op'));
+    });
+
+    test('direct answers a method allow.method refuses with a result map',
+        (t) async {
+      final sdk = ProjectNameSDK.test({}, {
+        'allow': {'method': 'GET'}
+      });
+      final res = await sdk.direct({'path': '/a', 'method': 'POST'});
+      equal(false, res['ok']);
+      equal('spec_method_allow', errcode(res['err']));
     });
   });
 

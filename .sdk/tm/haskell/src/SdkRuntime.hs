@@ -1216,7 +1216,7 @@ makePointUtil ctx = do
       options <- readIORef (cOptions ctx)
       av <- getpathS options "allow.op"
       let allowOp = case av of VStr s -> s; _ -> ""
-      if not (substrContains allowOp (opName op))
+      if not (allowListHas av (opName op))
         then do
           e <- mkErr "point_op_allow"
                  ("Operation \"" ++ opName op ++ "\" not allowed by SDK option allow.op value: \"" ++ allowOp ++ "\"")
@@ -1342,7 +1342,7 @@ makeSpecUtil ctx = do
       setp sp "method" (VStr method)
       amv <- getpathS options "allow.method"
       let allowMethod = case amv of VStr s -> s; _ -> ""
-      if not (substrContains allowMethod method)
+      if not (allowListHas amv method)
         then do e <- mkErr "spec_method_allow" ("Method \"" ++ method ++ "\" not allowed by SDK option allow.method value: \"" ++ allowMethod ++ "\""); pure (VNoval, Just e)
         else do
           params <- prepareParamsUtil ctx; setp sp "params" params

@@ -888,6 +888,10 @@ def graphqlContentType : String := "application/json"
 private def hasSub (hay needle : String) : Bool :=
   1 < (hay.splitOn needle).length
 
+/-- Whether a comma-separated allow option names the item: whole names, any case. -/
+def allowListHas (names item : String) : Bool :=
+  item != "" && (names.splitOn ",").any (fun name => name.trim.toUpper == item.toUpper)
+
 /-- Map a GraphQL error to the same error codes the HTTP path produces, so a
 caller handles auth or rate limiting identically on both transports. Servers
 put the machine-readable code in `extensions.code`; Linear-style APIs use
@@ -1160,13 +1164,18 @@ def pointShape (pt : Value) : SIO (Nat × Bool) := do
 def makePoint (ctx : Value) : SIO Value := do
   let op ← gp ctx "op"
   let opname ← gpS op "name"
-  -- Substring containment over the comma list, as the ts and go references
-  -- do. An empty or absent value allows everything: lean's makeOptions has no
-  -- optspec, so a hand-built context legitimately carries no `allow`.
-  let allowop ← gpS (← gp (← gp ctx "options") "allow") "op"
-  if allowop != "" && !(hasSub allowop opname) then
+  -- Whole names over the comma list, in any case, as the ts and go references
+  -- match. An absent value or an empty string allows everything: lean's
+  -- makeOptions has no optspec, so a hand-built context legitimately carries
+  -- no `allow`. A value that is not a string allows nothing.
+  let allowv ← gp (← gp (← gp ctx "options") "allow") "op"
+  let refused := match allowv with
+    | .noval => false
+    | .str s => s != "" && !(allowListHas s opname)
+    | _ => true
+  if refused then
     return (← mkErr "point_op_allow"
-      s!"Operation \"{opname}\" not allowed by SDK option allow.op value: \"{allowop}\"")
+      s!"Operation \"{opname}\" not allowed by SDK option allow.op value: \"{vs allowv}\"")
   let input0 ← gpS op "input"
   let input := if input0 == "" then "match" else input0
   -- The call's own arguments, then the entity's current state. `$action` is

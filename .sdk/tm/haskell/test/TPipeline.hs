@@ -4,7 +4,9 @@
 
 module TPipeline (tests) where
 
+import Control.Exception (try)
 import Data.IORef
+import Data.List (isInfixOf)
 import Data.Maybe (isNothing)
 
 import VoxgigStruct (Value (..), emptyMap, emptyList, mkList, size, ismap, isNoval, vint)
@@ -94,6 +96,57 @@ tests c = do
     ao <- jo [("op", VStr "load")]; o <- jo [("allow", ao)]; writeIORef (cOptions ctx) o
     (_, merr) <- makePointUtil ctx
     case merr of Just e -> errCodeIs e "point_op_allow"; Nothing -> pure False
+
+  runTest c "make_point.allow_names_whole_ops" $ do
+    let attempt allowop = do
+          cl <- client; ctx <- mkCtx cl "load"
+          parts <- ja [VStr "a"]
+          point <- jo [("method", VStr "GET"), ("parts", parts)]
+          pts <- ja [point]
+          op <- newOperation =<< jo [("name", VStr "load"), ("points", pts)]
+          writeIORef (cOp ctx) op
+          ao <- jo [("op", VStr allowop)]; o <- jo [("allow", ao)]; writeIORef (cOptions ctx) o
+          snd <$> makePointUtil ctx
+    refused <- attempt "reload,unload"
+    named <- attempt "list,\n LOAD"
+    isRefused <- case refused of Just e -> errCodeIs e "point_op_allow"; Nothing -> pure False
+    pure (isRefused && isNothing named)
+
+  runTest c "make_spec.allow_names_whole_methods" $ do
+    cl <- client; ctx <- mkCtx cl "update"
+    parts <- ja [VStr "a"]
+    point <- jo [("method", VStr "pu"), ("parts", parts)]
+    writeIORef (cPoint ctx) point
+    am <- jo [("method", VStr "GET,PUT")]; o <- jo [("allow", am), ("base", VStr "http://x")]
+    writeIORef (cOptions ctx) o
+    (_, merr) <- makeSpecUtil ctx
+    case merr of Just e -> errCodeIs e "spec_method_allow"; Nothing -> pure False
+
+  runTest c "prepare.allow_names_whole_methods" $ do
+    am <- jo [("method", VStr "PUT,\n get")]; sdkopts <- jo [("allow", am)]
+    cl <- C.testSdk VNoval sdkopts
+    let prep m = do
+          fa <- jo [("path", VStr "/a"), ("method", VStr m)]
+          try (F.prepare cl fa) :: IO (Either SdkException Value)
+        refused r = case r of
+          Left (SdkException e) -> errCodeIs e "spec_method_allow"
+          Right _ -> pure False
+    got <- prep "get"
+    sent <- case got of
+      Right fd -> do m <- getp fd "method"; pure (vstring m == "GET")
+      Left _ -> pure False
+    post <- refused =<< prep "POST"
+    pu <- refused =<< prep "PU"
+    pure (sent && post && pu)
+
+  runTest c "direct.allow_names_whole_ops" $ do
+    ao <- jo [("op", VStr "indirect,reload")]; sdkopts <- jo [("allow", ao)]
+    cl <- C.testSdk VNoval sdkopts
+    fa <- jo [("path", VStr "/a")]
+    res <- F.direct cl fa
+    okv <- getp res "ok"
+    errv <- getp res "err"
+    pure (not (isTrueV okv) && "not allowed by SDK option allow.op" `isInfixOf` vstring errv)
 
   runTest c "make_point.rejects_no_endpoints" $ do
     cl <- client; ctx <- mkCtx cl "load"

@@ -14,7 +14,7 @@ import Control.Concurrent (threadDelay)
 import Control.Exception
   ( SomeAsyncException, SomeException, displayException, fromException, throwIO
   , toException, try )
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, when)
 import Data.Bits ((.&.))
 import Data.IORef
 import Data.Maybe (isJust, isNothing)
@@ -1177,7 +1177,13 @@ prepare client fetchargs = do
   ctx <- makeContextImpl (defaultCtxSpec { csOpname = Just "prepare", csCtrl = Just ctrl }) root
   options <- readIORef (clOptions client)
   path <- getStrD fa "path" ""
-  method <- getStrD fa "method" "GET"
+  given <- getStrD fa "method" "GET"
+  let method = upper (if null given then "GET" else given)
+  amv <- getpathS options "allow.method"
+  unless (allowListHas amv method) $ do
+    e <- mkErr "spec_method_allow" ("Method \"" ++ method ++ "\" not allowed by SDK option allow.method value: \""
+      ++ (case amv of VStr s -> s; _ -> "") ++ "\"")
+    throwIO (SdkException e)
   paramsV <- toMap <$> getp fa "params"; params <- case paramsV of VMap _ -> pure paramsV; _ -> emptyMap
   queryV <- toMap <$> getp fa "query"; query <- case queryV of VMap _ -> pure queryV; _ -> emptyMap
   headers <- prepareHeadersUtil ctx
@@ -1198,7 +1204,7 @@ opAllowed :: Client -> String -> IO Bool
 opAllowed client op = do
   opts <- readIORef (clOptions client)
   allow <- getpathS opts "allow.op"
-  pure (case allow of VStr s -> substrContains s op; _ -> False)
+  pure (allowListHas allow op)
 
 opDenied :: Client -> String -> IO Value
 opDenied client op = do
