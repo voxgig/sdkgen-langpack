@@ -208,7 +208,7 @@ class ProjectNameSDK {
 
     final fetchdef = await prepare(fetchargs);
     if (iserr(fetchdef)) {
-      return fetchdef;
+      return {'ok': false, 'err': fetchdef};
     }
 
     final ctx = makeContext({

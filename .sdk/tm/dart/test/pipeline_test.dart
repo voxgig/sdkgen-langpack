@@ -234,6 +234,16 @@ void tests() {
       equal(false, res['ok']);
       ok(res['err'].toString().contains('not allowed by SDK option allow.op'));
     });
+
+    test('direct answers a method allow.method refuses with a result map',
+        (t) async {
+      final sdk = ProjectNameSDK.test({}, {
+        'allow': {'method': 'GET'}
+      });
+      final res = await sdk.direct({'path': '/a', 'method': 'POST'});
+      equal(false, res['ok']);
+      equal('spec_method_allow', errcode(res['err']));
+    });
   });
 
   describe('pipeline:makeResponse', () {
