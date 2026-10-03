@@ -634,3 +634,64 @@ describe('sdkgen-langpack: dart secrets', () => {
     offclean(plain, 'a model without the feature')
   })
 })
+
+
+// The request-shaping utilities route a header, cookie or query argument the
+// way sdkgen's bundled targets do (voxgig/sdkgen#327, #331, #28 here), checked
+// on the templates as sdkgen's pathquery.test.ts checks its own.
+describe('argument routing in the templates', () => {
+  const TM = Path.join(PKG, '.sdk', 'tm')
+
+  const ROUTING = {
+    dart: {
+      headers: ['dart/lib/utility/PrepareHeadersUtility.dart', 'dynamic prepareHeaders('],
+      query: ['dart/lib/utility/PrepareQueryUtility.dart', 'dynamic prepareQuery('],
+      body: ['dart/lib/utility/TransformRequestUtility.dart', 'dynamic transformRequest('],
+    },
+    haskell: {
+      headers: ['haskell/src/SdkRuntime.hs', 'prepareHeadersUtil :: '],
+      query: ['haskell/src/SdkRuntime.hs', 'prepareQueryUtil :: '],
+      body: ['haskell/src/SdkRuntime.hs', 'transformRequestUtil :: '],
+    },
+    lean: {
+      headers: ['lean/src/SdkUtility.lean', 'def prepareHeaders '],
+      query: ['lean/src/SdkUtility.lean', 'def prepareQuery '],
+      body: ['lean/src/SdkUtility.lean', 'def transformRequest '],
+    },
+  }
+
+  // The definition's body, as far as the next few definitions.
+  function body(lang, part) {
+    const [rel, def] = ROUTING[lang][part]
+    const src = Fs.readFileSync(Path.join(TM, rel), 'utf8')
+    const at = src.indexOf(def)
+    ok(-1 !== at, lang + ': no ' + part + ' definition in ' + rel)
+    return src.slice(at, at + 3000)
+  }
+
+  const calls = (kind) => new RegExp('callArgs\\W{1,4}ctx\\W{1,4}[\'"]' + kind + '[\'"]')
+
+  for (const lang of Object.keys(ROUTING)) {
+    test(lang + ': prepareHeaders sends the header and cookie arguments and the media headers', () => {
+      const src = body(lang, 'headers')
+      ok(calls('header').test(src), lang + ': prepareHeaders reads no header arguments')
+      ok(calls('cookie').test(src), lang + ': prepareHeaders reads no cookie arguments')
+      ok(/cookiePair/.test(src) && /cookieKeep/.test(src),
+        lang + ': prepareHeaders does not pair the cookies or read the cookie header')
+      ok(/mediaHeaders/.test(src), lang + ': prepareHeaders sets no media headers')
+    })
+
+    test(lang + ': prepareQuery keeps path, header and cookie arguments out, and sends a query argument under its orig', () => {
+      const src = body(lang, 'query')
+      for (const kind of ['params', 'header', 'cookie', 'query']) {
+        ok(new RegExp('[\'"]' + kind + '[\'"]').test(src), lang + ': prepareQuery never reads args.' + kind)
+      }
+      ok(/\borig\b/.test(src), lang + ': prepareQuery never maps a query argument to its orig')
+      ok(calls('query').test(src), lang + ': prepareQuery reads only the match')
+    })
+
+    test(lang + ': transformRequest builds the body without the routed arguments', () => {
+      ok(/routedArgNames/.test(body(lang, 'body')), lang + ': transformRequest keeps the routed arguments')
+    })
+  }
+})

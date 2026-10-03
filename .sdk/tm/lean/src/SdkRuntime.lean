@@ -183,10 +183,9 @@ def readBody (headers : Value) (body : String) : SIO Value := do
 /-- The base transport: curl for a live client. `timeout` and `proxy` are
     the fetchdef fields the timeout and proxy features set. A failed curl is
     a transport error, not a thrown exception, so retry sees it. -/
-def liveFetcher : SdkFeature.Fetcher := fun _ctx url fetchdef => do
+def liveFetcher : SdkFeature.Fetcher := fun ctx url fetchdef => do
   let method := asStr (← gp fetchdef "method")
-  let bodyV ← gp fetchdef "body"
-  let bodyStr ← if isNv bodyV then pure none else (do pure (some (← jsonify bodyV)))
+  let bodyStr ← SdkUtility.bodyText (← gp ctx "point") (← gp fetchdef "body")
   let headers ← headerPairs (← gp fetchdef "headers")
   let timeout := match (← gp fetchdef "timeout") with | .num n => n | _ => 0.0
   let proxy ← gpS fetchdef "proxy"

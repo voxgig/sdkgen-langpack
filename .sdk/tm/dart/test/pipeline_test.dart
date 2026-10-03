@@ -605,4 +605,175 @@ void tests() {
       equal(null, ctx.result.body);
     });
   });
+
+  // A header, cookie or query argument travels where the definition declares
+  // it. Port of the ts pathquery.test.ts cases.
+  describe('pipeline:prepareHeaders + prepareQuery + transformRequest', () {
+    dynamic hctx(Map<String, dynamic> point, Map<String, dynamic> reqmatch,
+        Map<String, dynamic> reqdata,
+        [Map<String, dynamic>? headers]) {
+      final ctx = stdutil.makeContext({
+        'point': point,
+        'reqmatch': reqmatch,
+        'reqdata': reqdata,
+      });
+      ctx.utility = stdutil;
+      ctx.client = _OptClient({'headers': headers ?? <String, dynamic>{}});
+      return ctx;
+    }
+
+    final headerPoint = <String, dynamic>{
+      'args': {
+        'header': [
+          {'name': 'idempotency_key', 'orig': 'Idempotency-Key', 'kind': 'header'},
+          {'name': 'x_trace', 'orig': 'X-Trace', 'kind': 'header'},
+          {'name': 'page_size', 'orig': 'Page-Size', 'kind': 'header'},
+        ]
+      }
+    };
+
+    test('a header argument from the match goes out under its orig', (t) {
+      deepEqual({'user-agent': 'sdk', 'idempotency-key': 'k1', 'page-size': '3'},
+          stdutil.prepareHeaders(hctx(headerPoint,
+              {'idempotency_key': 'k1', 'page_size': 3}, {}, {'user-agent': 'sdk'})));
+    });
+
+    test('a header argument from the data goes out too', (t) {
+      deepEqual({'x-trace': 't1'},
+          stdutil.prepareHeaders(hctx(headerPoint, {}, {'x_trace': 't1', 'name': 'n'})));
+    });
+
+    test('an absent or null header argument is not sent', (t) {
+      deepEqual({}, stdutil.prepareHeaders(hctx(headerPoint, {'idempotency_key': null}, {})));
+    });
+
+    test('a header argument replaces a default of the same name in any case', (t) {
+      deepEqual({'user-agent': 'sdk', 'idempotency-key': 'call'},
+          stdutil.prepareHeaders(hctx(headerPoint, {'idempotency_key': 'call'}, {},
+              {'Idempotency-Key': 'default', 'user-agent': 'sdk'})));
+    });
+
+    final cookiePoint = <String, dynamic>{
+      'args': {
+        'header': [
+          {'name': 'x_trace', 'orig': 'X-Trace', 'kind': 'header'}
+        ],
+        'cookie': [
+          {'name': 'session_id', 'orig': 'SESSIONID', 'kind': 'cookie'},
+          {'name': 'theme', 'orig': 'theme', 'kind': 'cookie'},
+          {'name': 'prefs', 'orig': 'prefs', 'kind': 'cookie'},
+        ],
+      }
+    };
+
+    test('a cookie argument goes out in the cookie header as name=value', (t) {
+      deepEqual({'cookie': 'SESSIONID=s1; theme=dark'},
+          stdutil.prepareHeaders(hctx(cookiePoint, {'session_id': 's1'},
+              {'theme': 'dark', 'name': 'n'})));
+    });
+
+    test('a cookie argument follows the cookies the caller sends, whatever the header case', (t) {
+      deepEqual({'user-agent': 'sdk', 'cookie': 'lang=en; SESSIONID=s1'},
+          stdutil.prepareHeaders(hctx(cookiePoint, {'session_id': 's1'}, {},
+              {'Cookie': 'lang=en', 'user-agent': 'sdk'})));
+    });
+
+    test('an absent or null cookie argument leaves the headers alone', (t) {
+      deepEqual({'Cookie': 'lang=en'},
+          stdutil.prepareHeaders(hctx(cookiePoint, {'session_id': null}, {},
+              {'Cookie': 'lang=en'})));
+    });
+
+    test('a cookie argument is form serialized and percent-encoded', (t) {
+      deepEqual({'cookie': 'SESSIONID=a%20b%3Bc%2Cd; theme=dark; theme=x%20y; lang=en%20gb; size=2'},
+          stdutil.prepareHeaders(hctx(cookiePoint, {'session_id': 'a b;c,d'},
+              {'theme': ['dark', 'x y'], 'prefs': {'size': 2, 'lang': 'en gb'}})));
+    });
+
+    test('a cookie argument replaces a cookie of the same name the caller sends', (t) {
+      deepEqual({'cookie': 'theme=dark; lang=en; SESSIONID=s1'},
+          stdutil.prepareHeaders(hctx(cookiePoint, {'session_id': 's1'}, {},
+              {'Cookie': 'SESSIONID=old; theme=dark ;lang=en'})));
+    });
+
+    test('a map cookie argument replaces the cookies its keys name, in their encoded form', (t) {
+      deepEqual({'cookie': 'theme=dark; SESSIONID=s1; lang=en; size=2'},
+          stdutil.prepareHeaders(hctx(cookiePoint, {'session_id': 's1'},
+              {'prefs': {'lang': 'en', 'size': 2}}, {'Cookie': 'lang=old; theme=dark'})));
+      deepEqual({'cookie': 'theme=dark; SESSIONID=s1; x%20y=new'},
+          stdutil.prepareHeaders(hctx(cookiePoint, {'session_id': 's1'},
+              {'prefs': {'x y': 'new'}}, {'Cookie': 'x%20y=old; theme=dark'})));
+    });
+
+    test('a default cookie whose value holds pairs is kept whole', (t) {
+      deepEqual({'cookie': 'session=a=b&theme=old; SESSIONID=s1; theme=dark'},
+          stdutil.prepareHeaders(hctx(cookiePoint, {'session_id': 's1'},
+              {'theme': 'dark'}, {'Cookie': 'session=a=b&theme=old'})));
+    });
+
+    test('the declared response media is asked for, unless the caller set an accept', (t) {
+      final media = <String, dynamic>{
+        'response': {'kind': 'json', 'media': 'application/vnd.api+json'},
+        'body': {'kind': 'json', 'media': 'application/vnd.api+json'},
+      };
+      deepEqual({'accept': 'application/vnd.api+json', 'content-type': 'application/vnd.api+json'},
+          stdutil.prepareHeaders(hctx(media, {}, {}, {'content-type': 'application/json'})));
+      deepEqual({'Accept': 'text/plain', 'content-type': 'text/plain'},
+          stdutil.prepareHeaders(hctx(media, {}, {},
+              {'Accept': 'text/plain', 'content-type': 'text/plain'})));
+    });
+
+    final queryPoint = <String, dynamic>{
+      'params': ['id'],
+      'transform': {'req': '`reqdata`'},
+      'args': {
+        'params': [
+          {'name': 'id'}
+        ],
+        'query': [
+          {'name': 'page_size', 'orig': 'pageSize', 'kind': 'query'},
+          {'name': 'lang', 'orig': 'lang', 'kind': 'query'},
+          {'name': 'trace', 'orig': 'trace', 'kind': 'query'},
+        ],
+        'header': [
+          {'name': 'x_trace', 'orig': 'X-Trace', 'kind': 'header'},
+          {'name': 'trace', 'orig': 'trace', 'kind': 'header'},
+        ],
+        'cookie': [
+          {'name': 'session_id', 'orig': 'SESSIONID', 'kind': 'cookie'},
+          {'name': 'lang', 'orig': 'lang', 'kind': 'cookie'},
+        ],
+      }
+    };
+
+    test('a path, header or cookie argument stays out of the query', (t) {
+      deepEqual({'q': 'x'},
+          stdutil.prepareQuery(hctx(queryPoint,
+              {'id': 'i1', 'x_trace': 't1', 'session_id': 's1', 'q': 'x', r'$action': 'a'}, {})));
+    });
+
+    test('a query argument goes out under its orig, from the match or the data', (t) {
+      deepEqual({'pageSize': 3, 'lang': 'en'},
+          stdutil.prepareQuery(hctx(queryPoint, {'page_size': 3}, {'lang': 'en'})));
+    });
+
+    test('a query argument that shares a header or cookie name still goes out', (t) {
+      deepEqual({'lang': 'en', 'trace': 't1'},
+          stdutil.prepareQuery(hctx(queryPoint, {'lang': 'en', 'trace': 't1'}, {})));
+    });
+
+    test('a routed argument is left out of the body', (t) {
+      deepEqual({'title': 'T'},
+          stdutil.transformRequest(hctx(queryPoint, {},
+              {'x_trace': 't1', 'session_id': 's1', 'page_size': 2, 'title': 'T', r'$action': 'a'})));
+    });
+
+    test('a raw request body is sent as given', (t) {
+      final ctx = hctx(<String, dynamic>{
+        'body': {'kind': 'raw', 'media': 'text/plain'},
+      }, {}, {r'$body': 'hello'});
+      ctx.op = Operation({'name': 'create', 'entity': 'x', 'input': 'data'});
+      equal('hello', stdutil.prepareBody(ctx));
+    });
+  });
 }

@@ -13,9 +13,9 @@ module SdkRuntime where
 import Control.Exception (throwIO, try)
 import Control.Monad (forM_, when)
 import Data.Bits ((.&.), (.|.), shiftL, shiftR)
-import Data.Char (chr, isAlphaNum, isHexDigit, digitToInt, ord, toUpper)
+import Data.Char (chr, isAlphaNum, isHexDigit, isSpace, digitToInt, ord, toLower, toUpper)
 import Data.IORef
-import Data.List (isInfixOf, nub, sortBy)
+import Data.List (dropWhileEnd, intercalate, isInfixOf, isSuffixOf, nub, sortBy)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (isNothing)
 import Data.Ord (Down (..), comparing)
@@ -691,9 +691,109 @@ prepareHeadersUtil ctx = do
   cl <- cc ctx
   options <- clientOptionsMap cl
   h <- getp options "headers"
-  case h of
+  base <- case h of
     VNoval -> emptyMap
     _ -> do c <- clone h; case c of VMap _ -> pure c; _ -> emptyMap
+  point <- readIORef (cPoint ctx)
+  out <- mediaHeaders point base
+
+  -- A header argument replaces a default of the same name, whatever its case.
+  hargs <- callArgs ctx "header"
+  forM_ hargs $ \(_, wire, val) -> when (not (isNullish val)) $ do
+    let key = lowerS wire
+    ks <- keysof out
+    forM_ ks $ \k -> when (lowerS k == key) (delp out k)
+    s <- stringify val
+    setp out key (VStr s)
+
+  -- A cookie argument travels in the cookie header, form serialized and
+  -- percent-encoded, replacing a same-named cookie the caller's headers send.
+  cargs <- callArgs ctx "cookie"
+  let sent = filter (\(_, _, val) -> not (isNullish val)) cargs
+  when (not (null sent)) $ do
+    names <- fmap concat $ mapM (\(_, wire, val) -> case val of
+      VMap _ -> keysof val >>= mapM escurlS
+      _ -> pure [wire]) sent
+    ks <- keysof out
+    kept0 <- fmap concat $ mapM (\k -> if lowerS k /= "cookie" then pure [] else do
+      v <- getp out k
+      delp out k
+      pure (case v of VStr s -> cookieKeep s names; _ -> [])) ks
+    pairs <- mapM (\(_, wire, val) -> cookiePair wire val) sent
+    let kept = kept0 ++ filter (/= "") pairs
+    when (not (null kept)) (setp out "cookie" (VStr (intercalate "; " kept)))
+
+  pure out
+
+trimWs :: String -> String
+trimWs = dropWhileEnd isSpace . dropWhile isSpace
+
+lowerS :: String -> String
+lowerS = map toLower
+
+-- The form style of a cookie parameter: a list repeats the name, a map sends
+-- its own keys, and every value is percent-encoded.
+cookiePair :: String -> Value -> IO String
+cookiePair wire val = do
+  let esc v = stringify v >>= escurlS
+  pairs <- case val of
+    VList _ -> do
+      xs <- listItems val
+      mapM (\x -> do e <- esc x; pure (wire ++ "=" ++ e)) xs
+    VMap _ -> do
+      ks <- keysof val
+      mapM (\k -> do v <- getp val k; e <- esc v; ek <- escurlS k; pure (ek ++ "=" ++ e)) ks
+    _ -> do e <- esc val; pure [wire ++ "=" ++ e]
+  pure (intercalate "; " pairs)
+
+-- The caller's cookie pieces with the named cookies removed: a cookie is one
+-- `;`-delimited piece, whatever its value holds.
+cookieKeep :: String -> [String] -> [String]
+cookieKeep header names =
+  [ cookie | piece <- splitOnChar ';' header, let cookie = trimWs piece
+  , cookie /= "", trimWs (takeWhile (/= '=') cookie) `notElem` names ]
+
+isJsonMedia :: String -> Bool
+isJsonMedia t =
+  let media = lowerS (trimWs (takeWhile (/= ';') t))
+  in media == "application/json" || media == "text/json" || "+json" `isSuffixOf` media
+
+-- The declared JSON type alone, else every declared type in model order; nothing without a body.
+acceptOf :: Value -> IO (Maybe String)
+acceptOf point = do
+  res <- getp point "response"
+  media <- getStrD res "media" ""
+  kind <- getStrD res "kind" ""
+  altsV <- getp res "alternatives"
+  alts <- case altsV of VList _ -> listItems altsV; _ -> pure []
+  ms <- mapM (\a -> getStrD a "media" "") alts
+  pure (if media == "" then Nothing
+        else if kind == "json" then Just media
+        else Just (intercalate ", " (media : filter (/= "") ms)))
+
+hasHeader :: Value -> String -> IO Bool
+hasHeader headers name = any ((== name) . lowerS) <$> keysof headers
+
+-- A caller's accept wins. A declared request type replaces each JSON
+-- content-type, the SDK default, and leaves any other the caller set.
+mediaHeaders :: Value -> Value -> IO Value
+mediaHeaders point headers = do
+  accept <- acceptOf point
+  hasAccept <- hasHeader headers "accept"
+  case accept of
+    Just a | not hasAccept -> setp headers "accept" (VStr a)
+    _ -> pure ()
+  body <- getp point "body"
+  kind <- getStrD body "kind" ""
+  media <- getStrD body "media" ""
+  when ((kind == "raw" || kind == "json") && media /= "") $ do
+    ks <- keysof headers
+    forM_ ks $ \k -> when (lowerS k == "content-type") $ do
+      v <- getp headers k
+      when (isJsonMedia (vstring v)) (delp headers k)
+    hasCT <- hasHeader headers "content-type"
+    when (not hasCT) (setp headers "content-type" (VStr media))
+  pure headers
 
 paramUtil :: Context -> Value -> IO Value
 paramUtil ctx paramdef = do
@@ -721,6 +821,28 @@ paramUtil ctx paramdef = do
   if isNoval v5 && not (null akey)
     then do a <- getp reqdata akey; orElse a (getp dat akey)
     else pure v5
+
+-- A declared header, cookie or query argument of the point: the name it
+-- travels under, and the value the call passes in its match or data.
+callArgs :: Context -> String -> IO [(String, String, Value)]
+callArgs ctx kind = do
+  point <- readIORef (cPoint ctx)
+  defs <- argDefs point kind
+  reqmatch <- readIORef (cReqmatch ctx)
+  reqdata <- readIORef (cReqdata ctx)
+  fmap concat $ mapM (\ad -> do
+    name <- getStrD ad "name" ""
+    if name == "" then pure [] else do
+      orig <- getStrD ad "orig" ""
+      mv <- getp reqmatch name
+      val <- if isNullish mv then getp reqdata name else pure mv
+      pure [(name, if orig == "" then name else orig, val)]) defs
+
+argDefs :: Value -> String -> IO [Value]
+argDefs point kind = do
+  args <- getp point "args"
+  al <- case args of VMap _ -> getp args kind; _ -> pure VNoval
+  case al of VList _ -> listItems al; _ -> pure []
 
 prepareParamsUtil :: Context -> IO Value
 prepareParamsUtil ctx = do
@@ -754,18 +876,49 @@ prepareQueryUtil ctx = do
   reqmatch <- case rmV of VMap _ -> pure rmV; _ -> emptyMap
   pl <- getp point "params"
   params <- case pl of VList _ -> listItems pl; _ -> pure []
-  let containsParam s = any (\v -> case v of VStr x -> x == s; _ -> False) params
+  let argNames kind = argDefs point kind >>= mapM (\d -> getStrD d "name" "")
+
+  -- A path parameter travels in the path. The generated config lists them as
+  -- args.params, which prepareParams reads; params is the older list of names.
+  aparams <- argNames "params"
+  let inpath = [s | VStr s <- params] ++ aparams
+
+  -- A query parameter travels under the name the definition gives it, its
+  -- orig, which the model may have renamed for the caller.
+  qdefs <- argDefs point "query"
+  wires <- mapM (\d -> do n <- getStrD d "name" ""; o <- getStrD d "orig" ""; pure (n, o)) qdefs
+  let declared = [n | (n, _) <- wires, n /= ""]
+      wireOf k = case [o | (n, o) <- wires, n == k, o /= ""] of (o : _) -> o; [] -> k
+
+  -- A header or cookie parameter travels in the headers, which prepareHeaders
+  -- fills, unless a query parameter shares its name: then both are sent.
+  hnames <- argNames "header"
+  cnames <- argNames "cookie"
+  let elsewhere = filter (`notElem` declared) (hnames ++ cnames)
+
   out <- emptyMap
   ks <- keysof reqmatch
   forM_ ks $ \k -> do
     v <- getp reqmatch k
-    when (not (isNoval v) && not (containsParam k)) (setp out k v)
+    when (not (isNullish v) && k /= "$action" && k `notElem` inpath && k `notElem` elsewhere)
+      (setp out (wireOf k) v)
+
+  -- A create or update passes its query arguments in its data.
+  qargs <- callArgs ctx "query"
+  forM_ qargs $ \(name, wire, val) ->
+    when (not (isNullish val) && name `notElem` inpath) (setp out wire val)
   pure out
 
 prepareBodyUtil :: Context -> IO Value
 prepareBodyUtil ctx = do
   op <- readIORef (cOp ctx)
-  if opInput op == "data" then transformRequestUtil ctx else pure VNoval
+  if opInput op /= "data" then pure VNoval else do
+    point <- readIORef (cPoint ctx)
+    body <- getp point "body"
+    kind <- getStrD body "kind" ""
+    if kind == "raw"
+      then readIORef (cReqdata ctx) >>= \rd -> getp rd "$body"
+      else transformRequestUtil ctx
 
 -- ------------------------------------------------------------------
 -- graphql (transport)
@@ -930,15 +1083,35 @@ transformRequestUtil ctx = do
   specV <- readIORef (cSpec ctx)
   case specV of VMap _ -> setp specV "step" (VStr "reqform"); _ -> pure ()
   point <- readIORef (cPoint ctx)
-  reqdata <- readIORef (cReqdata ctx)
+  routed <- routedArgNames ctx
+  reqdata <- readIORef (cReqdata ctx) >>= \rd -> omitKeys rd routed
   tr <- toMap <$> getp point "transform"
-  case tr of
+  out <- case tr of
     VMap _ -> do
       reqform <- getp tr "req"
       case reqform of
         VNoval -> pure reqdata
         _ -> do input <- jo [("reqdata", reqdata)]; transform INone input reqform
     _ -> pure reqdata
+  omitKeys out ["$action"]
+
+-- A header, cookie or query argument travels where prepareHeaders or
+-- prepareQuery sends it, so the body is built from the request data without it.
+routedArgNames :: Context -> IO [String]
+routedArgNames ctx = do
+  args <- mapM (callArgs ctx) ["header", "cookie", "query"]
+  pure [name | (name, _, _) <- concat args]
+
+omitKeys :: Value -> [String] -> IO Value
+omitKeys v names = case v of
+  VMap _ -> do
+    ks <- keysof v
+    let hit = filter (`elem` names) ks
+    if null hit then pure v else do
+      c <- clone v
+      forM_ hit (delp c)
+      pure c
+  _ -> pure v
 
 transformResponseUtil :: Context -> IO Value
 transformResponseUtil ctx = do
