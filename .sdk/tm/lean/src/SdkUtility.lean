@@ -549,17 +549,66 @@ def prepareParams (ctx : Value) : SIO Value := do
   | _ => pure ()
   pure out
 
-/-- Everything in reqmatch that is NOT a declared path param becomes query. -/
+def argDefs (point : Value) (kind : String) : SIO (Array Value) := do
+  match (← gp (← gp point "args") kind) with
+  | .list i => listItems i
+  | _ => pure #[]
+
+/-- A declared header, cookie or query argument of the point: the name it
+    travels under, and the value the call passes in its match or data. -/
+def callArgs (ctx : Value) (kind : String) : SIO (Array (String × String × Value)) := do
+  let point ← gp ctx "point"
+  let reqmatch ← gp ctx "reqmatch"
+  let reqdata ← gp ctx "reqdata"
+  let mut out : Array (String × String × Value) := #[]
+  for ad in (← argDefs point kind) do
+    let name ← gpS ad "name"
+    if name != "" then
+      let orig ← gpS ad "orig"
+      let mv ← gp reqmatch name
+      let val ← if isNov mv then gp reqdata name else pure mv
+      out := out.push (name, (if orig == "" then name else orig), val)
+  pure out
+
+/-- Everything in reqmatch that is NOT a path, header or cookie argument becomes
+    query, under its wire name, with the query arguments the call passes. -/
 def prepareQuery (ctx : Value) : SIO Value := do
   let point ← gp ctx "point"
   let reqmatch ← asMap (← gp ctx "reqmatch")
-  let names ← match (← gp point "params") with
+  let argNames (kind : String) : SIO (Array String) := do
+    (← argDefs point kind).mapM (fun d => gpS d "name")
+
+  -- A path parameter travels in the path. The generated config lists them as
+  -- args.params, which prepareParams reads; params is the older list of names.
+  let params ← match (← gp point "params") with
     | .list i => do pure ((← listItems i).map vs)
     | _ => pure #[]
+  let inpath := params ++ (← argNames "params")
+
+  -- A query parameter travels under the name the definition gives it, its
+  -- orig, which the model may have renamed for the caller.
+  let wires ← (← argDefs point "query").mapM (fun d => do
+    pure ((← gpS d "name"), (← gpS d "orig")))
+  let declared := (wires.map (·.1)).filter (· != "")
+  let wireOf (k : String) : String :=
+    match wires.find? (fun (n, o) => n == k && o != "") with
+    | some (_, o) => o
+    | none => k
+
+  -- A header or cookie parameter travels in the headers, which prepareHeaders
+  -- fills, unless a query parameter shares its name: then both are sent.
+  let elsewhere := ((← argNames "header") ++ (← argNames "cookie")).filter
+    (fun n => !(declared.contains n))
+
   let out ← emptyMap
   for k in (← keysof reqmatch) do
     let v ← gp reqmatch k
-    if !(isNov v) && !(names.contains k) then sp out k v
+    if !(isNov v) && k != "$action" && !(inpath.contains k) && !(elsewhere.contains k) then
+      sp out (wireOf k) v
+
+  -- A create or update passes its query arguments in its data.
+  for (name, wire, val) in (← callArgs ctx "query") do
+    if !(isNov val) && !(inpath.contains name) then sp out wire val
   pure out
 
 /-- Assemble the path template from `point.parts`. This is `struct.join` with
@@ -578,11 +627,103 @@ def prepareMethod (ctx : Value) : SIO String := do
   if m != "" then pure m.toUpper
   else pure (opMethodOf (← opnameOf ctx))
 
+def escurlS (s : String) : SIO String := do
+  match (← escurl (.str s)) with
+  | .str e => pure e
+  | _ => pure s
+
+def isJsonMedia (t : String) : Bool :=
+  let media := (trimS ((t.splitOn ";").headD "")).toLower
+  media == "application/json" || media == "text/json" || media.endsWith "+json"
+
+/-- The declared JSON type alone, else every declared type in model order; nothing without a body. -/
+def acceptOf (point : Value) : SIO (Option String) := do
+  let res ← gp point "response"
+  let media ← gpS res "media"
+  let kind ← gpS res "kind"
+  if media == "" then return none
+  if kind == "json" then return some media
+  let mut all : Array String := #[media]
+  match (← gp res "alternatives") with
+  | .list i =>
+    for alt in (← listItems i) do
+      let m ← gpS alt "media"
+      if m != "" then all := all.push m
+  | _ => pure ()
+  return some (", ".intercalate all.toList)
+
+def hasHeader (headers : Value) (name : String) : SIO Bool := do
+  pure ((← keysof headers).any (fun k => k.toLower == name))
+
+/-- A caller's accept wins. A declared request type replaces each JSON
+    content-type, the SDK default, and leaves any other the caller set. -/
+def mediaHeaders (point headers : Value) : SIO Value := do
+  match (← acceptOf point) with
+  | some a => if !(← hasHeader headers "accept") then sp headers "accept" (.str a)
+  | none => pure ()
+  let body ← gp point "body"
+  let kind ← gpS body "kind"
+  let media ← gpS body "media"
+  if (kind == "raw" || kind == "json") && media != "" then
+    for k in (← keysof headers) do
+      if k.toLower == "content-type" && isJsonMedia (vs (← gp headers k)) then dp headers k
+    if !(← hasHeader headers "content-type") then sp headers "content-type" (.str media)
+  pure headers
+
+/-- The form style of a cookie parameter: a list repeats the name, a map sends
+    its own keys, and every value is percent-encoded. -/
+def cookiePair (wire : String) (val : Value) : SIO String := do
+  let esc (v : Value) : SIO String := do escurlS (← stringify v)
+  let pairs ← match val with
+    | .list i => do (← listItems i).mapM (fun x => do pure (wire ++ "=" ++ (← esc x)))
+    | .map _ => do (← keysof val).mapM (fun k => do
+        pure ((← escurlS k) ++ "=" ++ (← esc (← gp val k))))
+    | _ => do pure #[wire ++ "=" ++ (← esc val)]
+  pure ("; ".intercalate pairs.toList)
+
+/-- The caller's cookie pieces with the named cookies removed: a cookie is one
+    `;`-delimited piece, whatever its value holds. -/
+def cookieKeep (header : String) (names : Array String) : Array String :=
+  ((header.splitOn ";").toArray.map trimS).filter
+    (fun cookie => cookie != "" && !(names.contains (trimS ((cookie.splitOn "=").headD ""))))
+
 def prepareHeaders (ctx : Value) : SIO Value := do
   let options ← gp ctx "options"
-  match (← gp options "headers") with
-  | .map i => clone (.map i)
-  | _ => newMap #[("content-type", .str "application/json")]
+  let base ← match (← gp options "headers") with
+    | .map i => clone (.map i)
+    | _ => newMap #[("content-type", .str "application/json")]
+  let point ← gp ctx "point"
+  let out ← mediaHeaders point base
+
+  -- A header argument replaces a default of the same name, whatever its case.
+  for (_, wire, val) in (← callArgs ctx "header") do
+    if !(isNov val) then
+      let key := wire.toLower
+      for k in (← keysof out) do
+        if k.toLower == key then dp out k
+      sp out key (.str (← stringify val))
+
+  -- A cookie argument travels in the cookie header, form serialized and
+  -- percent-encoded, replacing a same-named cookie the caller's headers send.
+  let sent := (← callArgs ctx "cookie").filter (fun (_, _, val) => !(isNov val))
+  if 0 < sent.size then
+    let mut names : Array String := #[]
+    for (_, wire, val) in sent do
+      match val with
+      | .map _ => for k in (← keysof val) do names := names.push (← escurlS k)
+      | _ => names := names.push wire
+    let mut kept : Array String := #[]
+    for k in (← keysof out) do
+      if k.toLower == "cookie" then
+        match (← gp out k) with
+        | .str s => kept := kept ++ cookieKeep s names
+        | _ => pure ()
+        dp out k
+    for (_, wire, val) in sent do
+      let pair ← cookiePair wire val
+      if pair != "" then kept := kept.push pair
+    if 0 < kept.size then sp out "cookie" (.str ("; ".intercalate kept.toList))
+  pure out
 
 /-- The credential prefix (`Bearer`): the caller's `options.auth.prefix` when
     the caller passed an `auth` map, else the one the API model declares in
@@ -638,21 +779,41 @@ def prepareAuth (ctx : Value) : SIO (Value × Option Value) := do
 -- transforms
 -- ---------------------------------------------------------------------------
 
+def omitKeys (v : Value) (names : Array String) : SIO Value := do
+  match v with
+  | .map _ =>
+    let hit := (← keysof v).filter (fun k => names.contains k)
+    if hit.isEmpty then pure v
+    else
+      let c ← clone v
+      for k in hit do dp c k
+      pure c
+  | _ => pure v
+
+/-- A header, cookie or query argument travels where prepareHeaders or
+    prepareQuery sends it, so the body is built from the request data without it. -/
+def routedArgNames (ctx : Value) : SIO (Array String) := do
+  let mut names : Array String := #[]
+  for kind in #["header", "cookie", "query"] do
+    for (name, _, _) in (← callArgs ctx kind) do names := names.push name
+  pure names
+
 def transformRequest (ctx : Value) : SIO Value := do
   let specV ← gp ctx "spec"
   match specV with
   | .map _ => sp specV "step" (.str "reqform")
   | _ => pure ()
   let point ← gp ctx "point"
-  let reqdata ← gp ctx "reqdata"
-  match (← gp point "transform") with
-  | .map i => do
-    let reqform ← gp (.map i) "req"
-    if isNov reqform then pure reqdata
-    else do
-      let input ← newMap #[("reqdata", reqdata)]
-      transform input reqform
-  | _ => pure reqdata
+  let reqdata ← omitKeys (← gp ctx "reqdata") (← routedArgNames ctx)
+  let out ← match (← gp point "transform") with
+    | .map i => do
+      let reqform ← gp (.map i) "req"
+      if isNov reqform then pure reqdata
+      else do
+        let input ← newMap #[("reqdata", reqdata)]
+        transform input reqform
+    | _ => pure reqdata
+  omitKeys out #["$action"]
 
 def transformResponse (ctx : Value) : SIO Value := do
   let specV ← gp ctx "spec"
@@ -686,10 +847,12 @@ def transformResponse (ctx : Value) : SIO Value := do
       | _ => pure .noval
   | _ => pure .noval
 
-/-- The request body: only data-input operations carry one. -/
+/-- The request body: only data-input operations carry one, a raw point's as given. -/
 def prepareBody (ctx : Value) : SIO Value := do
-  if opInputOf (← opnameOf ctx) == "data" then transformRequest ctx
-  else pure .noval
+  if opInputOf (← opnameOf ctx) != "data" then return .noval
+  let body ← gp (← gp ctx "point") "body"
+  if (← gpS body "kind") == "raw" then gp (← gp ctx "reqdata") "$body"
+  else transformRequest ctx
 
 -- ---------------------------------------------------------------------------
 -- graphql (transport)

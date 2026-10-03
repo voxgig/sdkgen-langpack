@@ -186,7 +186,10 @@ def readBody (headers : Value) (body : String) : SIO Value := do
 def liveFetcher : SdkFeature.Fetcher := fun _ctx url fetchdef => do
   let method := asStr (← gp fetchdef "method")
   let bodyV ← gp fetchdef "body"
-  let bodyStr ← if isNv bodyV then pure none else (do pure (some (← jsonify bodyV)))
+  -- A raw body is sent as given; a node is JSON.
+  let bodyStr ← match bodyV with
+    | .str s => pure (some s)
+    | _ => if isNv bodyV then pure none else (do pure (some (← jsonify bodyV)))
   let headers ← headerPairs (← gp fetchdef "headers")
   let timeout := match (← gp fetchdef "timeout") with | .num n => n | _ => 0.0
   let proxy ← gpS fetchdef "proxy"

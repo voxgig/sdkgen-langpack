@@ -13,7 +13,7 @@ import Control.Monad (when)
 import Data.IORef
 import Data.Maybe (isNothing)
 
-import VoxgigStruct (Value (..), ismap, emptyMap, emptyList, isNoval)
+import VoxgigStruct (Value (..), ismap, emptyMap, emptyList, isNoval, keysof)
 import SdkTypes
 import SdkHelpers
 import SdkRuntime
@@ -58,6 +58,37 @@ namedFeature :: String -> Value -> IO Feature
 namedFeature nm opts = do
   active <- newIORef True; fopts <- newIORef opts
   pure Feature { fName = nm, fVersion = "0.0.1", fActive = active, fOptions = fopts, fInit = \_ _ -> pure (), fHook = \_ _ -> pure () }
+
+-- A ctx for the given op whose point, match and data are the given maps,
+-- on a client whose options send the given default headers.
+argCtx :: String -> [(String, Value)] -> [(String, Value)] -> [(String, Value)] -> [(String, Value)] -> IO Context
+argCtx opname headers point reqmatch reqdata = do
+  cl <- C.testSdk0
+  hs <- jo headers
+  opts <- jo [("headers", hs)]
+  writeIORef (clOptions cl) opts
+  ctx <- mkCtx cl opname
+  p <- jo point; writeIORef (cPoint ctx) p
+  rm <- jo reqmatch; writeIORef (cReqmatch ctx) rm
+  rd <- jo reqdata; writeIORef (cReqdata ctx) rd
+  pure ctx
+
+argDef :: (String, String) -> IO Value
+argDef (name, orig) = jo [("name", VStr name), ("orig", VStr orig)]
+
+cookieArgs :: IO Value
+cookieArgs = do
+  h <- ja =<< mapM argDef [("x_trace", "X-Trace")]
+  c <- ja =<< mapM argDef [("session_id", "SESSIONID"), ("theme", "theme"), ("prefs", "prefs")]
+  jo [("header", h), ("cookie", c)]
+
+queryArgs :: IO Value
+queryArgs = do
+  p <- ja =<< mapM (\n -> jo [("name", VStr n)]) ["id"]
+  q <- ja =<< mapM argDef [("page_size", "pageSize"), ("lang", "lang"), ("trace", "trace")]
+  h <- ja =<< mapM argDef [("x_trace", "X-Trace"), ("trace", "trace")]
+  c <- ja =<< mapM argDef [("session_id", "SESSIONID"), ("lang", "lang")]
+  jo [("params", p), ("query", q), ("header", h), ("cookie", c)]
 
 errCodeIs :: Value -> String -> IO Bool
 errCodeIs e code = do c <- errCode e; pure (c == code)
@@ -433,6 +464,103 @@ tests c alltests = do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"
     h <- prepareHeadersUtil ctx
     pure (ismap h)
+
+  -- A header, cookie or query argument travels where the definition declares
+  -- it. Port of the ts pathquery.test.ts cases.
+  runTest c "primary.prepare_headers_header_arg_replaces_default" $ do
+    hdefs <- ja =<< mapM argDef [("idempotency_key", "Idempotency-Key"), ("page_size", "Page-Size")]
+    args <- jo [("header", hdefs)]
+    ctx <- argCtx "load" [("Idempotency-Key", VStr "default"), ("user-agent", VStr "sdk")]
+      [("args", args)] [("idempotency_key", VStr "k1")] [("page_size", VStr "3")]
+    h <- prepareHeadersUtil ctx
+    k <- getp h "idempotency-key"; old <- getp h "Idempotency-Key"
+    ps <- getp h "page-size"; ua <- getp h "user-agent"
+    pure (vstring k == "k1" && isNoval old && vstring ps == "3" && vstring ua == "sdk")
+
+  runTest c "primary.prepare_headers_cookie_pairs" $ do
+    args <- cookieArgs
+    theme <- ja [VStr "dark", VStr "x y"]
+    prefs <- jo [("lang", VStr "en gb"), ("size", VStr "2")]
+    ctx <- argCtx "load" [] [("args", args)] [("session_id", VStr "a b;c,d")]
+      [("theme", theme), ("prefs", prefs)]
+    h <- prepareHeadersUtil ctx
+    cv <- getp h "cookie"
+    pure (vstring cv == "SESSIONID=a%20b%3Bc%2Cd; theme=dark; theme=x%20y; lang=en%20gb; size=2")
+
+  runTest c "primary.prepare_headers_cookie_replaces_same_name_keeps_others_whole" $ do
+    args <- cookieArgs
+    ctx <- argCtx "load" [("Cookie", VStr "SESSIONID=old; session=a=b&theme=old ;lang=en"), ("user-agent", VStr "sdk")]
+      [("args", args)] [("session_id", VStr "s1")] [("theme", VStr "dark")]
+    h <- prepareHeadersUtil ctx
+    cv <- getp h "cookie"; old <- getp h "Cookie"; ua <- getp h "user-agent"
+    pure (vstring cv == "session=a=b&theme=old; lang=en; SESSIONID=s1; theme=dark"
+      && isNoval old && vstring ua == "sdk")
+
+  runTest c "primary.prepare_headers_cookie_map_replaces_encoded_key" $ do
+    args <- cookieArgs
+    prefs <- jo [("x y", VStr "new")]
+    ctx <- argCtx "load" [("Cookie", VStr "x%20y=old; theme=dark")] [("args", args)]
+      [("session_id", VStr "s1")] [("prefs", prefs)]
+    h <- prepareHeadersUtil ctx
+    cv <- getp h "cookie"
+    pure (vstring cv == "theme=dark; SESSIONID=s1; x%20y=new")
+
+  runTest c "primary.prepare_headers_null_cookie_leaves_headers" $ do
+    args <- cookieArgs
+    ctx <- argCtx "load" [("Cookie", VStr "lang=en")] [("args", args)] [("session_id", VNull)] []
+    h <- prepareHeadersUtil ctx
+    cv <- getp h "Cookie"; lc <- getp h "cookie"
+    pure (vstring cv == "lang=en" && isNoval lc)
+
+  runTest c "primary.prepare_headers_media" $ do
+    res <- jo [("kind", VStr "json"), ("media", VStr "application/vnd.api+json")]
+    body <- jo [("kind", VStr "json"), ("media", VStr "application/vnd.api+json")]
+    ctx <- argCtx "load" [("content-type", VStr "application/json")]
+      [("response", res), ("body", body)] [] []
+    h <- prepareHeadersUtil ctx
+    a <- getp h "accept"; ct <- getp h "content-type"
+    ctx2 <- argCtx "load" [("Accept", VStr "text/plain"), ("content-type", VStr "text/plain")]
+      [("response", res), ("body", body)] [] []
+    h2 <- prepareHeadersUtil ctx2
+    a2 <- getp h2 "Accept"; la2 <- getp h2 "accept"; ct2 <- getp h2 "content-type"
+    pure (vstring a == "application/vnd.api+json" && vstring ct == "application/vnd.api+json"
+      && vstring a2 == "text/plain" && isNoval la2 && vstring ct2 == "text/plain")
+
+  runTest c "primary.prepare_query_routes_arguments" $ do
+    args <- queryArgs
+    paramsL <- ja [VStr "id"]
+    ctx <- argCtx "load" [] [("params", paramsL), ("args", args)]
+      [ ("id", VStr "i1"), ("x_trace", VStr "t1"), ("session_id", VStr "s1"), ("q", VStr "x")
+      , ("$action", VStr "a"), ("page_size", VStr "3"), ("lang", VStr "en"), ("trace", VStr "t1") ] []
+    q <- prepareQueryUtil ctx
+    ks <- keysof q
+    ps <- getp q "pageSize"; l <- getp q "lang"; t <- getp q "trace"; qq <- getp q "q"
+    pure (ks == ["lang", "pageSize", "q", "trace"] && vstring ps == "3" && vstring l == "en"
+      && vstring t == "t1" && vstring qq == "x")
+
+  runTest c "primary.prepare_query_from_data" $ do
+    args <- queryArgs
+    ctx <- argCtx "create" [] [("args", args)] [] [("page_size", VStr "3"), ("lang", VStr "en")]
+    q <- prepareQueryUtil ctx
+    ks <- keysof q; ps <- getp q "pageSize"
+    pure (ks == ["lang", "pageSize"] && vstring ps == "3")
+
+  runTest c "primary.transform_request_omits_routed_arguments" $ do
+    args <- queryArgs
+    tr <- jo [("req", VStr "`reqdata`")]
+    ctx <- argCtx "create" [] [("args", args), ("transform", tr)] []
+      [ ("x_trace", VStr "t1"), ("session_id", VStr "s1"), ("page_size", VStr "2")
+      , ("title", VStr "T"), ("$action", VStr "a") ]
+    b <- transformRequestUtil ctx
+    ks <- keysof b
+    t <- getp b "title"
+    pure (ks == ["title"] && vstring t == "T")
+
+  runTest c "primary.prepare_body_raw" $ do
+    body <- jo [("kind", VStr "raw"), ("media", VStr "text/plain")]
+    ctx <- argCtx "create" [] [("body", body)] [] [("$body", VStr "hello")]
+    b <- prepareBodyUtil ctx
+    pure (vstring b == "hello")
 
   runTest c "primary.prepare_method_get" $ do
     cl <- C.testSdk0; ctx <- mkCtx cl "load"
