@@ -49,6 +49,20 @@ def queryArgs : SIO Value := do
            ("header", ← defs #[("x_trace", "X-Trace"), ("trace", "trace")]),
            ("cookie", ← defs #[("session_id", "SESSIONID"), ("lang", "lang")])]
 
+/-- A header, cookie or query argument the entity declares as a field stays in
+    the body, beside an unmarked one that leaves it. -/
+def fieldArgCase : SIO Unit := do
+  let tr ← newMap #[("req", .str "`reqdata`")]
+  let mut kept := true
+  for kind in #["header", "cookie", "query"] do
+    let locale ← newMap #[("name", .str "locale"), ("orig", .str "Locale"), ("field", .bool true)]
+    let args ← newMap #[(kind, ← newList #[locale, ← argDef ("session_id", "SESSIONID")])]
+    let ctx ← argCtx #[] #[("args", args), ("transform", tr)] #[]
+      #[("name", .str "n"), ("locale", .str "en"), ("session_id", .str "s1")]
+    let b ← SdkUtility.transformRequest ctx
+    kept := kept && (← keysof b) == #["locale", "name"] && (← gpS b "locale") == "en"
+  check kept "transformRequest: an argument the entity declares as a field stays in the body"
+
 def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
@@ -147,6 +161,8 @@ def main : IO UInt32 := do
       let b ← SdkUtility.transformRequest ctx
       check ((← keysof b) == #["title"] && (← gpS b "title") == "T")
         "transformRequest: a routed argument is left out of the body")
+
+    fieldArgCase
 
     (do
       let body ← newMap #[("kind", .str "raw"), ("media", .str "text/plain")]

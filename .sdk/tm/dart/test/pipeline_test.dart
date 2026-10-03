@@ -844,6 +844,23 @@ void tests() {
               {'x_trace': 't1', 'session_id': 's1', 'page_size': 2, 'title': 'T', r'$action': 'a'})));
     });
 
+    test('an argument the entity declares as a field stays in the body', (t) {
+      for (final kind in ['header', 'cookie', 'query']) {
+        final point = <String, dynamic>{
+          'transform': {'req': '`reqdata`'},
+          'args': {
+            kind: [
+              {'name': 'locale', 'orig': 'Locale', 'field': true},
+              {'name': 'session_id', 'orig': 'SESSIONID'},
+            ],
+          },
+        };
+        deepEqual({'name': 'n', 'locale': 'en'},
+            stdutil.transformRequest(
+                hctx(point, {}, {'name': 'n', 'locale': 'en', 'session_id': 's1'})));
+      }
+    });
+
     test('a raw request body is sent as given', (t) {
       final ctx = hctx(<String, dynamic>{
         'body': {'kind': 'raw', 'media': 'text/plain'},
