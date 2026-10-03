@@ -253,6 +253,30 @@ def cleanEntityBlocks : SIO Unit := do
       && SdkUtility.vs aliased == "alias PLAINALIAS-m2n4b6v8"
   check ok "clean: an entity block is not read, whichever form feature takes"
 
+/-- options.allow.method by whole names, in any case; one that is not a string
+    allows nothing. A definition of its own, as `main` is near the compiler's
+    limit. -/
+def allowMethodCases : SIO Unit := do
+  (do
+    let w ← mkWire
+    let opts ← newMap #[("allow", ← newMap #[("method", .str "put,\n get")])]
+    let c ← SdkRuntime.mkClientWith opts pipeConfig
+      (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+    let msg ← thrown (SdkRuntime.opCreate c "widget" (← newMap #[("title", .str "T")]) (← emptyMap))
+    check (hasSub msg "not allowed by SDK option allow.method")
+      s!"pipeline: allow.method refuses a method it does not name ({msg})"
+    check ((← w.calls.get) == 0) "pipeline: a refused method reaches no transport"
+    let _ ← SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "i1")]) (← emptyMap)
+    check ((← w.calls.get) == 1) "pipeline: allow.method permits a method it names, in any case")
+  (do
+    let w ← mkWire
+    let opts ← newMap #[("allow", ← newMap #[("method", .num 5.0)])]
+    let c ← SdkRuntime.mkClientWith opts pipeConfig
+      (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+    let msg ← thrown (SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "i1")]) (← emptyMap))
+    check (hasSub msg "not allowed by SDK option allow.method" && (← w.calls.get) == 0)
+      s!"pipeline: an allow.method that is not a string allows nothing ({msg})")
+
 def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
@@ -397,6 +421,9 @@ def main : IO UInt32 := do
       check ((← w.calls.get) == 0) "pipeline: a refused operation reaches no transport"
       let _ ← SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "i1")]) (← emptyMap)
       check ((← w.calls.get) == 1) "pipeline: allow.op permits the op it names")
+
+    -- pipeline: options.allow.method gates the request's method, as ts and go do
+    allowMethodCases
 
     -- pipeline: a feature's query param (paging, at PreRequest) survives makeSpec
     (do
