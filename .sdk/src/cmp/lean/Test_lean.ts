@@ -213,11 +213,11 @@ ${body})
   each(entity, (e: any) => {
     const ns = e.name.charAt(0).toUpperCase() + e.name.slice(1)
     const ops = Object.keys(e.op || {})
-      .filter((op) => ['list', 'load', 'create', 'update', 'remove'].includes(op))
+      .filter((op) => ['list', 'load', 'create', 'update', 'patch', 'remove'].includes(op))
       .sort((a, b) => (rank[a] ?? 2) - (rank[b] ?? 2))
     for (const op of ops) {
-      const call = 'update' === op
-        ? `${ns}.update c m (← emptyMap) ctrl`
+      const call = 'update' === op || 'patch' === op
+        ? `${ns}.${op} c m (← emptyMap) ctrl`
         : `${ns}.${op} c m ctrl`
       const params = pointParams(e.op[op]).map((p) => JSON.stringify(p)).join(', ')
       candidates.push(`  { name := "${e.name}.${op}", params := #[${params}],\n` +

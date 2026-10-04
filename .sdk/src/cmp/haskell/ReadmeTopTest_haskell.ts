@@ -52,7 +52,7 @@ main = do
         ? `jo [${items.map((it: any) =>
           `("${it.name}", ${it.name === idF ? 'VStr "test01"' : hsLit(it.type)})`).join(', ')}]`
         : 'emptyMap'
-    } else if ('create' === primaryOp || 'update' === primaryOp) {
+    } else if ('create' === primaryOp || 'update' === primaryOp || 'patch' === primaryOp) {
       const items = opRequestShape(exampleEntity, primaryOp).items
         .filter((it: any) => it.name !== idF && it.name !== 'id')
       const required = items.filter((it: any) => !it.optional)

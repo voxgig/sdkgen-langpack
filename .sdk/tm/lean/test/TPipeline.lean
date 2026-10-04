@@ -167,6 +167,10 @@ def main : IO UInt32 := do
           && (← SdkUtility.bodyText json .noval) == none)
         "bodyText: a node is JSON and no body is none")
 
+    check (SdkUtility.opInputOf "patch" == "data" && SdkUtility.opInputOf "update" == "data"
+        && SdkUtility.opInputOf "load" == "match")
+      "opInputOf: a patch, like an update, takes the request data as its input"
+
   go.run sctx
   let p ← npass.get
   let f ← nfail.get

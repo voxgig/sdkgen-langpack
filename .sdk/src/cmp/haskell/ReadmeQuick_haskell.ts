@@ -185,7 +185,8 @@ record.
     const idValueFor = (opname: string): string =>
       hsLit(idParamType(opname), 'example_id')
 
-    if (opnames.includes('create') || opnames.includes('update') || opnames.includes('remove')) {
+    if (opnames.includes('create') || opnames.includes('update') || opnames.includes('patch') ||
+      opnames.includes('remove')) {
       Content(`### 4. Create, update, and remove
 
 `)
@@ -208,6 +209,18 @@ record.
   uctrl <- emptyMap
   updated <- Sdk.eUpdate updateEnt upd uctrl
   print =<< Sdk.eDataGet updated
+\`\`\`
+
+`)
+      }
+      if (opnames.includes('patch')) {
+        const patchPairs = (idF ? [`("${idF}", ${idValueFor('patch')})`] : []).concat(examplePairs('patch'))
+        Content(`\`\`\`haskell
+  patchEnt <- Sdk.${eFn} sdk VNoval
+  pat <- jo [${patchPairs.join(', ')}]  -- only the fields to change
+  pctrl <- emptyMap
+  patched <- Sdk.ePatch patchEnt pat pctrl
+  print =<< Sdk.eDataGet patched
 \`\`\`
 
 `)

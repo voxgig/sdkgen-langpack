@@ -99,7 +99,7 @@ resolveOp ctx opname = do
         else do
           cfg <- readIORef (cConfig ctx)
           opcfg <- getpathS cfg ("entity." ++ entname ++ ".op." ++ opname)
-          let inpt = if opname == "update" || opname == "create" then "data" else "match"
+          let inpt = if opname `elem` ["update", "create", "patch"] then "data" else "match"
           pts <- case opcfg of
             VMap _ -> do p <- getp opcfg "points"; case p of VList _ -> pure p; _ -> emptyList
             _ -> emptyList

@@ -112,6 +112,11 @@ tests c = do
     isRefused <- case refused of Just e -> errCodeIs e "point_op_allow"; Nothing -> pure False
     pure (isRefused && isNothing named)
 
+  runTest c "make_context.patch_takes_data" $ do
+    cl <- client
+    ins <- mapM (\name -> do ctx <- mkCtx cl name; opInput <$> readIORef (cOp ctx)) ["patch", "update", "load"]
+    pure (ins == ["data", "data", "match"])
+
   runTest c "make_spec.allow_names_whole_methods" $ do
     cl <- client; ctx <- mkCtx cl "update"
     parts <- ja [VStr "a"]

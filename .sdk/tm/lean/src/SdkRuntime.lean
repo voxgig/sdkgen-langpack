@@ -257,7 +257,7 @@ def mockOp (client : Value) (entityName opName : String)
     let _ ← setprop ent (.str "id") (.str eid)
     let _ ← setprop entmap (.str eid) ent
     pure ent
-  | "update" => do
+  | "update" | "patch" => do
     let wid0 ← idOf dataV
     let wid ← if wid0 != "" then pure wid0 else idOf matchV
     let cur ← gp entmap wid
@@ -476,6 +476,7 @@ def opList   (c : Value) (e : String) (m co : Value) : SIO Value := do runOp c e
 def opLoad   (c : Value) (e : String) (m co : Value) : SIO Value := do runOp c e "load"   m (← emptyMap) co
 def opCreate (c : Value) (e : String) (d co : Value) : SIO Value := do runOp c e "create" (← emptyMap) d co
 def opUpdate (c : Value) (e : String) (m d co : Value) : SIO Value := do runOp c e "update" m d co
+def opPatch  (c : Value) (e : String) (m d co : Value) : SIO Value := do runOp c e "patch"  m d co
 def opRemove (c : Value) (e : String) (m co : Value) : SIO Value := do runOp c e "remove" m (← emptyMap) co
 
 /-- The client value: options resolved through makeOptions (defaults, then

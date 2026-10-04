@@ -370,6 +370,7 @@ def opMethodOf : String → String
 def opInputOf : String → String
   | "create" => "data"
   | "update" => "data"
+  | "patch"  => "data"
   | _        => "match"
 
 /-- The operation name: `ctx.opname`, falling back to `ctx.op.name`. -/

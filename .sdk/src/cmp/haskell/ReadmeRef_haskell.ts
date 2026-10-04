@@ -52,6 +52,11 @@ const OP_SIGNATURES: Record<string, { sig: string, returns: string, desc: string
     returns: 'the updated entity',
     desc: 'Update an existing entity. The data must include the entity `id`. Resolves to the ENTITY (read the record with `eDataGet`) and raises on error.',
   },
+  patch: {
+    sig: 'ePatch ent data ctrl :: IO Entity',
+    returns: 'the patched entity',
+    desc: 'Change part of an existing entity: only the fields given are sent. The data must include the entity `id`. Resolves to the ENTITY (read the record with `eDataGet`) and raises on error.',
+  },
   remove: {
     sig: 'eRemove ent match ctrl :: IO Entity',
     returns: 'the removed entity',
@@ -213,7 +218,7 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` and raises 
         // Field operations breakdown
         const hasFieldOps = fields.some((f: any) => f.op && Object.keys(f.op).length > 0)
         if (hasFieldOps) {
-          const opcols = ['load', 'list', 'create', 'update', 'remove']
+          const opcols = ['load', 'list', 'create', 'update', 'patch', 'remove']
             .filter((op: string) => opnames.includes(op) && ent.op[op]?.active !== false)
           Content(`### Field Usage by Operation
 
@@ -304,8 +309,8 @@ ${info.desc}
 
 `)
           }
-          else if ('update' === opname) {
-            const updateItems = opRequestShape(ent, 'update').items
+          else if ('update' === opname || 'patch' === opname) {
+            const updateItems = opRequestShape(ent, opname).items
               .filter((it: any) => !it.optional || it.name === idF)
               .sort((a: any, b: any) =>
                 (a.name === idF ? 0 : 1) - (b.name === idF ? 0 : 1))
@@ -318,9 +323,9 @@ ${info.desc}
   ent <- Sdk.${eFn} sdk VNoval
   d <- jo
     [${updateLines}
-    ]  -- fields to update
+    ]  -- ${'patch' === opname ? 'only the fields to change' : 'fields to update'}
   ctrl <- emptyMap
-  result <- Sdk.eUpdate ent d ctrl   -- the ENTITY
+  result <- Sdk.${'patch' === opname ? 'ePatch' : 'eUpdate'} ent d ctrl   -- the ENTITY
   d2 <- Sdk.eDataGet result
 \`\`\`
 

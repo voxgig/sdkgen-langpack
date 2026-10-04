@@ -171,6 +171,12 @@ void tests() {
       equal('spec_method_allow', errcode(stdutil.makeSpec(ctx)));
     });
 
+    test('a patch, like an update, takes the request data as its input', (t) {
+      equal('data', stdutil.makeContext({'opname': 'patch'}).op.input);
+      equal('data', stdutil.makeContext({'opname': 'update'}).op.input);
+      equal('match', stdutil.makeContext({'opname': 'load'}).op.input);
+    });
+
     test('makePoint rejects an operation with no endpoints', (t) {
       final ctx = base({
         'op': {'name': 'load', 'points': []},

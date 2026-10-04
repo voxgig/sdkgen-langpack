@@ -114,7 +114,7 @@ class Context {
       final opcfg = vs.getpath(config, ['entity', entname, 'op', opname]);
       var input = 'match';
 
-      if ('update' == opname || 'create' == opname) {
+      if ('update' == opname || 'create' == opname || 'patch' == opname) {
         input = 'data';
       }
 

@@ -284,6 +284,58 @@ describe('sdkgen-langpack', () => {
 })
 
 
+// A PATCH beside a PUT is a sixth operation, `patch`, which every target
+// generates as it does `update`: its own entry, under its own name.
+const PATCH_OP = `
+main: kit: entity: planet: op: patch: {
+  name: "patch"
+  points: [ {
+    g: { params: [
+      { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "p01" }
+    ] }
+    m: "PATCH", o: "/planet/{id}", s: [{ lit: "planet" }, { var: "id" }]
+    t: { req: "\`reqdata\`", res: "\`body\`" }
+  } ]
+}
+`
+
+
+describe('sdkgen-langpack: patch', () => {
+
+  let consumer
+  let generated
+
+  before(async () => {
+    consumer = stageConsumer({ recordLog: true })
+    await consumer.addPackage(PKG)
+    compile(consumer)
+    generated = await generateInto(consumer, { model: consumerModel(consumer.sdk, PATCH_OP) })
+  })
+
+  after(() => {
+    if (null != consumer) consumer.cleanup()
+  })
+
+  test('every target generates the patch operation', () => {
+    const file = (path) => {
+      ok(null != generated.files[path], 'not generated: ' + path)
+      return generated.files[path]
+    }
+
+    const dart = file('dart/lib/entity/PlanetEntity.dart')
+    ok(/Future<dynamic> patch\(\[dynamic reqdata, dynamic ctrl\]\)/.test(dart) &&
+      /'opname': 'patch'/.test(dart), 'dart: no patch method')
+
+    ok(file('lean/src/SdkClient.lean').includes(
+      'def patch (c m d co : Value) : SIO Value := SdkRuntime.opPatch c "planet" m d co'),
+    'lean: no patch wrapper')
+
+    ok(file('haskell/REFERENCE.md').includes('ePatch ent data ctrl :: IO Entity'),
+      'haskell: the reference does not document ePatch')
+  })
+})
+
+
 // THE DART SECRETS SEAM, and the two hazards only dart has.
 //
 // This test moved here from sdkgen's `generate.test.ts` with the dart target
