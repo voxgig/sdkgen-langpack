@@ -790,12 +790,24 @@ def omitKeys (v : Value) (names : Array String) : SIO Value := do
       pure c
   | _ => pure v
 
+def fieldArg (ctx : Value) (name : String) : SIO Bool := do
+  let point ← gp ctx "point"
+  for kind in #["header", "cookie", "query"] do
+    for ad in (← argDefs point kind) do
+      if (← gpS ad "name") == name then
+        match (← gp ad "field") with
+        | .bool true => return true
+        | _ => pure ()
+  pure false
+
 /-- A header, cookie or query argument travels where prepareHeaders or
-    prepareQuery sends it, so the body is built from the request data without it. -/
+    prepareQuery sends it, so the body is built from the request data without it,
+    unless the entity declares it as a field too. -/
 def routedArgNames (ctx : Value) : SIO (Array String) := do
   let mut names : Array String := #[]
   for kind in #["header", "cookie", "query"] do
-    for (name, _, _) in (← callArgs ctx kind) do names := names.push name
+    for (name, _, _) in (← callArgs ctx kind) do
+      unless (← fieldArg ctx name) do names := names.push name
   pure names
 
 def transformRequest (ctx : Value) : SIO Value := do
