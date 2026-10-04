@@ -25,7 +25,7 @@ main :: IO ()
 main = do
   c <- newCounters
 
-  raw <- readFile "../.sdk/test/test.json"
+  raw <- readUtf8 "../.sdk/test/test.json"
   alltests <- jsonRead raw
 
   TPipeline.tests c

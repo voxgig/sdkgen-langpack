@@ -281,6 +281,28 @@ describe('sdkgen-langpack', () => {
       'target has grown an entity layer and the contract note in sdkgen\'s ' +
       'AGENTS.md needs revisiting')
   })
+
+
+  // GHC's readFile decodes with the locale's encoding, so under a C or POSIX
+  // locale it cannot read the generated docs, and the README gate read them
+  // as absent and passed. CI runs with a UTF-8 locale, where nothing else
+  // would show a bare readFile coming back.
+  test('the haskell tests read files as UTF-8, not through the locale', () => {
+    const tests = Object.entries(generated.files)
+      .filter(([p]) => /^haskell\/test\/[^/]+\.hs$/.test(p))
+    ok(0 < tests.length, 'no haskell test sources generated')
+
+    const code = (src) => String(src).split('\n')
+      .filter((line) => !/^\s*--/.test(line)).join('\n')
+
+    deepStrictEqual(
+      tests.filter(([, src]) => /\breadFile\b/.test(code(src))).map(([p]) => p), [],
+      'a haskell test reads a file with the locale-dependent readFile; use readUtf8')
+
+    const util = tests.find(([p]) => p.endsWith('/Testutil.hs'))
+    ok(util && /hSetEncoding h utf8/.test(String(util[1])),
+      'Testutil.hs no longer decodes readUtf8 as UTF-8')
+  })
 })
 
 
