@@ -170,8 +170,29 @@ def headerPairs (headersV : Value) : SIO (Array (String × String)) := do
   | _ => pure ()
   pure headers
 
-/-- Decode the body as JSON when the server says so or it looks like JSON;
-    anything else (an HTML error page) stays text on the result. -/
+/-- Several CDNs refuse a library's own agent, so a request without one
+    carries the browser-shaped agent the other targets send. -/
+def defaultUserAgent : String := "Mozilla/5.0 (compatible; ProjectNameSDK/1.0)"
+
+/-- The pairs to send, with the default agent when the fetchdef names none,
+    recorded with its headers so an error can name it. -/
+def sentHeaders (fetchdef : Value) : SIO (Array (String × String)) := do
+  let headers ← headerPairs (← gp fetchdef "headers")
+  if headers.any (fun kv => kv.1.toLower == "user-agent") then return headers
+  let hv ← gp fetchdef "headers"
+  let hv ← if SdkUtility.isMapV hv then pure hv else do
+    let m ← emptyMap
+    SdkUtility.sp fetchdef "headers" m
+    pure m
+  SdkUtility.sp hv "user-agent" (.str defaultUserAgent)
+  pure (headers.push ("user-agent", defaultUserAgent))
+
+/-- A body that is neither blank nor one JSON value. -/
+def bodyUnreadable (body : String) : Bool :=
+  !(body.all Char.isWhitespace) && !(SdkJson.jsonValid body)
+
+/-- Decode a readable body: as JSON when the server says so or it looks like
+    JSON; a scalar sent as anything else stays text. -/
 def readBody (headers : Value) (body : String) : SIO Value := do
   let ct := (asStr (← gp headers "content-type")).toLower
   let t := body.trimAscii.toString
@@ -186,7 +207,7 @@ def readBody (headers : Value) (body : String) : SIO Value := do
 def liveFetcher : SdkFeature.Fetcher := fun ctx url fetchdef => do
   let method := asStr (← gp fetchdef "method")
   let bodyStr ← SdkUtility.bodyText (← gp ctx "point") (← gp fetchdef "body")
-  let headers ← headerPairs (← gp fetchdef "headers")
+  let headers ← sentHeaders fetchdef
   let timeout := match (← gp fetchdef "timeout") with | .num n => n | _ => 0.0
   let proxy ← gpS fetchdef "proxy"
   try
@@ -195,7 +216,7 @@ def liveFetcher : SdkFeature.Fetcher := fun ctx url fetchdef => do
     for (k, v) in r.headers do
       SdkUtility.sp hmap k (.str v)
     -- A body that is not JSON is marked, and kept as its text for the error.
-    let unreadable := !(r.body.all Char.isWhitespace) && !(SdkJson.jsonValid r.body)
+    let unreadable := bodyUnreadable r.body
     let bodyV ← if unreadable then pure (Value.str r.body) else readBody hmap r.body
     let resp ← newMap #[("status", .num r.status.toFloat), ("statusText", .str r.statusText),
                         ("body", bodyV), ("headers", hmap), ("unreadable", .bool unreadable)]

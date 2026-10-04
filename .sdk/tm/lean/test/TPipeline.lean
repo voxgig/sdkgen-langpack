@@ -6,6 +6,7 @@
 import VoxgigStruct
 import SdkJson
 import SdkUtility
+import SdkRuntime
 
 open VoxgigStruct
 
@@ -193,6 +194,24 @@ def main : IO UInt32 := do
           && !(SdkJson.jsonValid "not json at all") && !(SdkJson.jsonValid "[1, 2] x")
           && !(SdkJson.jsonValid "{\"a\" 1}") && !(SdkJson.jsonValid "nul"))
         "jsonValid: one whole JSON value, nothing truncated, misspelt or trailing")
+
+    (do
+      let bare ← newMap #[("method", .str "GET")]
+      let sent ← SdkRuntime.sentHeaders bare
+      let own ← newMap #[("headers", ← newMap #[("User-Agent", .str "Probe/1.0")])]
+      let mine ← SdkRuntime.sentHeaders own
+      check (SdkRuntime.defaultUserAgent == "Mozilla/5.0 (compatible; ProjectNameSDK/1.0)"
+          && sent == #[("user-agent", SdkRuntime.defaultUserAgent)]
+          && (← gpS (← gp bare "headers") "user-agent") == SdkRuntime.defaultUserAgent
+          && mine == #[("User-Agent", "Probe/1.0")]
+          && isNov (← gp (← gp own "headers") "user-agent"))
+        "sentHeaders: the default agent, recorded, unless the request names one")
+
+    (do
+      check (SdkRuntime.bodyUnreadable "<p>challenge</p>" && SdkRuntime.bodyUnreadable "{\"a\": "
+          && !(SdkRuntime.bodyUnreadable " \n ") && !(SdkRuntime.bodyUnreadable "")
+          && !(SdkRuntime.bodyUnreadable "[{\"id\": 1}]"))
+        "bodyUnreadable: a body that is neither blank nor one JSON value")
 
     (do
       let (c1, m1) ← unreadableErr 200.0 (some "application/json") "{\"a\": "

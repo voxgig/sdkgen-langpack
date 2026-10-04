@@ -5,6 +5,8 @@
 // success-path op never reaches. All utilities are reached through
 // `stdutil`, so this suite is API-agnostic. Port of ts test/pipeline.test.ts.
 
+import 'dart:io' show ContentType, HttpServer, InternetAddress;
+
 import 'harness.dart';
 
 import '../lib/ProjectNameSDK.dart';
@@ -16,6 +18,7 @@ import '../lib/Result.dart';
 import '../lib/Spec.dart';
 import '../lib/feature/base/BaseFeature.dart';
 import '../lib/utility/ErrUtility.dart';
+import '../lib/utility/FetcherUtility.dart' show defaultUserAgent, httpFetch;
 import '../lib/utility/Utility.dart';
 
 // Transport-shaped response with a re-readable body + lowercased headers.
@@ -911,6 +914,47 @@ void tests() {
       }, {}, {r'$body': 'hello'});
       ctx.op = Operation({'name': 'create', 'entity': 'x', 'input': 'data'});
       equal('hello', stdutil.prepareBody(ctx));
+    });
+  });
+
+  describe('fetcher:httpFetch', () {
+    test('marks a body that is not JSON and sends the default agent', (t) async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) {
+        final agent = req.headers.value('user-agent') ?? '';
+        if ('/json' == req.uri.path) {
+          req.response.headers.contentType = ContentType.json;
+          req.response.write('{"agent": "$agent"}');
+        } else if ('/page' == req.uri.path) {
+          req.response.headers.contentType = ContentType.html;
+          req.response.write('<p>$agent</p>');
+        }
+        req.response.close();
+      });
+      try {
+        final url = 'http://127.0.0.1:${server.port}';
+        equal('Mozilla/5.0 (compatible; ProjectNameSDK/1.0)', defaultUserAgent);
+
+        final sent = <String, dynamic>{};
+        final page = await httpFetch('$url/page', {'method': 'GET', 'headers': sent});
+        equal(true, page['unreadable']);
+        equal('<p>$defaultUserAgent</p>', page['body']);
+        equal(defaultUserAgent, sent['user-agent']);
+
+        final bare = <String, dynamic>{'method': 'GET'};
+        final blank = await httpFetch('$url/blank', bare);
+        equal(false, blank['unreadable']);
+        equal(null, blank['body']);
+        equal(defaultUserAgent, bare['headers']['user-agent']);
+
+        final own = <String, dynamic>{'User-Agent': 'Probe/1.0'};
+        final data = await httpFetch('$url/json', {'method': 'GET', 'headers': own});
+        equal(false, data['unreadable']);
+        equal('Probe/1.0', data['json']()['agent']);
+        equal(1, own.length);
+      } finally {
+        await server.close(force: true);
+      }
     });
   });
 }
