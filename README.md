@@ -49,14 +49,12 @@ A tier here is checked, not just declared: `test/parity.test.js` reads the
 `parity` map and verifies each claim against what the target's suite actually
 does.
 
-**A caveat that belongs with those two FULL tiers.** The shared corpus is
-materialised into each project as `.sdk/test/test.json`, so a real generated
-SDK does execute it — the tier is accurate for a consumer. What this repository
-cannot do is verify it: the corpus source lives in create-sdkgen and is not yet
-published as a consumable package. Until it is, the suite here covers
-generation, component type-checking and per-target behaviour, and the corpus
-runs where the SDK is generated. Do not read a green build here as a green
-corpus.
+**Where the corpus runs.** The shared corpus is materialised into each project
+as `.sdk/test/test.json`, so a real generated SDK executes it. The `sdks`
+workflow does the same here: it takes the corpus from the published
+`@voxgig/create-sdkgen`, generates the three SDKs, builds each and runs its
+suite. The `build` workflow covers generation, component type-checking and
+per-target behaviour on Node alone, so a green `build` is not a green corpus.
 
 ## Lean is deliberately different
 
@@ -167,6 +165,19 @@ or looked for, so the suite is green on a machine that could not build a single
 generated SDK. Read a green build as what it is: components that type-check and
 targets that generate. Whether you can compile the output is a question about
 your own machine, and `command -v` is the way to ask it.
+
+Where `dart`, `ghc` or `lean` is installed, the `sdks` workflow's two steps
+build and run that target's SDK. `CREATE_SDKGEN` names an unpacked
+`@voxgig/create-sdkgen` package, whose test data writer and corpus a scaffolded
+project carries:
+
+```bash
+CREATE_SDKGEN=/path/to/create-sdkgen npm run sdks -- generate /tmp/sdk
+npm run sdks -- run haskell /tmp/sdk   # or dart, or lean
+```
+
+`run` fails when a command fails, and when the suite prints no pass and fail
+counts or a count of no passes, since a suite that runs nothing exits cleanly.
 
 Validate the package itself with:
 

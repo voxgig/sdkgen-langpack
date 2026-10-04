@@ -33,7 +33,8 @@
     "repo-publish-quick": "npm run build && npm run test && npm run repo-tag && npm publish --registry https://registry.npmjs.org --access=public",
     "resset": "npm run reset",
     "check-cmp": "tsc -p tsconfig.json --noEmit",
-    "check-package": "voxgig-sdkgen package check ."
+    "check-package": "voxgig-sdkgen package check .",
+    "sdks": "node test/sdks.js"
   },
   "_peer_comment": [
     "A PACKAGED TARGET INHERITS SDKGEN'S PEERS AS ITS OWN. All three targets'",
