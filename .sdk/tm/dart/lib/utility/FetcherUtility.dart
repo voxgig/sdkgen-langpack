@@ -57,11 +57,18 @@ Future<dynamic> httpFetch(dynamic fullurl, dynamic fetchdef) async {
 
     final headers = vs.getprop(fetchdef, 'headers');
     if (headers is Map) {
+      var hasAgent = false;
       headers.forEach((k, v) {
         if (null != v) {
+          if ('user-agent' == k.toString().toLowerCase()) hasAgent = true;
           req.headers.set(k.toString(), v.toString());
         }
       });
+      // The client's own User-Agent is recorded with the headers the request
+      // sent.
+      if (!hasAgent && null != client.userAgent) {
+        headers['user-agent'] = client.userAgent;
+      }
     }
 
     final body = vs.getprop(fetchdef, 'body');
@@ -80,16 +87,17 @@ Future<dynamic> httpFetch(dynamic fullurl, dynamic fetchdef) async {
       hmap[name.toLowerCase()] = values.join(', ');
     });
 
-    dynamic jsonBody() {
-      if ('' == text) {
-        return null;
-      }
+    dynamic parsed;
+    var unreadable = false;
+    if ('' != text.trim()) {
       try {
-        return jsonDecode(text);
+        parsed = jsonDecode(text);
       } catch (_e) {
-        return null;
+        unreadable = true;
       }
     }
+
+    dynamic jsonBody() => parsed;
 
     return {
       'status': res.statusCode,
@@ -97,6 +105,7 @@ Future<dynamic> httpFetch(dynamic fullurl, dynamic fetchdef) async {
       'headers': hmap,
       'body': '' == text ? null : text,
       'json': jsonBody,
+      'unreadable': unreadable,
     };
   } finally {
     client.close(force: true);

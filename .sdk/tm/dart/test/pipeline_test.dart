@@ -244,6 +244,32 @@ void tests() {
       equal(false, res['ok']);
       equal('spec_method_allow', errcode(res['err']));
     });
+
+    test('direct reports a body the transport marks as not JSON', (t) async {
+      final sdk = ProjectNameSDK({
+        'base': 'http://nonjson.test',
+        'apikey': 'NONJSON-SECRET-7f2c',
+        'headers': {'user-agent': 'Probe/1.0'},
+        'system': {
+          'fetch': (dynamic url, dynamic fetchdef) => {
+                'status': 200,
+                'statusText': 'OK',
+                'headers': {'content-type': 'text/html'},
+                'body': '<html>key NONJSON-SECRET-7f2c ' + 'x' * 300 + '</html>',
+                'json': () => null,
+                'unreadable': true,
+              }
+        }
+      });
+      final res = await sdk.direct({'path': '/a'});
+      equal(false, res['ok']);
+      equal('response_content_type', errcode(res['err']));
+      final String msg = res['err'].message;
+      ok(msg.contains('expected JSON, got text/html (HTTP 200, '
+          'content-type text/html, user-agent Probe/1.0, body: <html>key '));
+      ok(!msg.contains('NONJSON-SECRET-7f2c'));
+      ok(msg.endsWith('...)'));
+    });
   });
 
   describe('pipeline:makeResponse', () {
@@ -294,6 +320,41 @@ void tests() {
       });
       await stdutil.makeResponse(ctx);
       ok(null != ctx.ctrl['explain']['result']);
+    });
+
+    test('a body marked as not JSON is named by its label', (t) async {
+      Future<dynamic> run(int status, String? type, String body) async {
+        final r = resp(status, null,
+            null == type ? null : <String, dynamic>{'content-type': type});
+        r['body'] = body;
+        r['unreadable'] = true;
+        final ctx = base({
+          'spec': {
+            'step': 's',
+            'headers': {'user-agent': 'Probe/1.0'}
+          },
+          'response': r,
+          'result': {'ok': false}
+        });
+        await stdutil.makeResponse(ctx);
+        return ctx.result.err;
+      }
+
+      final bad = await run(200, 'application/json', '{"a": ');
+      equal('response_json_invalid', bad.code);
+      ok(bad.message.contains('body is not valid JSON (HTTP 200, '
+          'content-type application/json, user-agent Probe/1.0, body: {"a":)'));
+      final untyped = await run(200, null, 'not json');
+      equal('response_json_invalid', untyped.code);
+      ok(untyped.message.contains('content-type none'));
+      final html = await run(200, 'text/html', '<p>\n  challenge </p>');
+      equal('response_content_type', html.code);
+      ok(html.message.contains('expected JSON, got text/html'));
+      ok(html.message.contains('body: <p> challenge </p>)'));
+      final failed = await run(503, 'text/html', '<p>down</p>');
+      equal('request_status', failed.code);
+      ok(failed.message.contains('request: 503: ERR (HTTP 503, '
+          'content-type text/html, user-agent Probe/1.0, body: <p>down</p>)'));
     });
 
     test('a body-parse exception is captured on result.err', (t) async {

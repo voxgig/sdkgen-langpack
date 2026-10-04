@@ -194,8 +194,11 @@ def liveFetcher : SdkFeature.Fetcher := fun ctx url fetchdef => do
     let hmap ← emptyMap
     for (k, v) in r.headers do
       SdkUtility.sp hmap k (.str v)
+    -- A body that is not JSON is marked, and kept as its text for the error.
+    let unreadable := !(r.body.all Char.isWhitespace) && !(SdkJson.jsonValid r.body)
+    let bodyV ← if unreadable then pure (Value.str r.body) else readBody hmap r.body
     let resp ← newMap #[("status", .num r.status.toFloat), ("statusText", .str r.statusText),
-                        ("body", ← readBody hmap r.body), ("headers", hmap)]
+                        ("body", bodyV), ("headers", hmap), ("unreadable", .bool unreadable)]
     pure (resp, none)
   catch e =>
     let resp ← newMap #[("status", .num (-1.0)), ("statusText", .str ""),

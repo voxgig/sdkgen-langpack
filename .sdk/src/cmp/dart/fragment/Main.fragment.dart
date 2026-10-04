@@ -10,6 +10,7 @@ import 'Spec.dart';
 // unused_import. Keep only the imports actually referenced in this file.
 import 'utility/ErrUtility.dart';
 import 'utility/PrepareMethodUtility.dart' show allowed;
+import 'utility/ResultBodyUtility.dart' show unreadableBody;
 // PREFIXED, and deliberately not re-exported. The runtime helper class is
 // named `Utility`, and so is the generated data class for an entity named
 // `utility` (ProjectNameTypes.dart) — exporting both from this library makes
@@ -241,6 +242,7 @@ class ProjectNameSDK {
           '0' == (null == contentLength ? null : contentLength.toString());
 
       dynamic json;
+      dynamic bodyErr;
       if (!noBody) {
         try {
           final jsonFn = fetched['json'];
@@ -252,13 +254,22 @@ class ProjectNameSDK {
           // throwing. data stays null; callers can inspect status/headers.
           json = null;
         }
+        if (true == fetched['unreadable']) {
+          final failed = status is num && status >= 200 && status < 300
+              ? null
+              : ctx.error('request_status',
+                  'request: $status: ${fetched['statusText'] ?? ''}');
+          bodyErr = unreadableBody(ctx, status, headers, fetched['body'],
+              fetchdef['headers'], failed);
+        }
       }
 
       return {
-        'ok': status is num && status >= 200 && status < 300,
+        'ok': null == bodyErr && status is num && status >= 200 && status < 300,
         'status': status,
         'headers': fetched['headers'],
         'data': json,
+        if (null != bodyErr) 'err': utility.clean(ctx, bodyErr),
       };
     } catch (err) {
       return {'ok': false, 'err': utility.clean(ctx, sdkerror(err, ctx))};
