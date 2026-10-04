@@ -9,7 +9,7 @@ import Data.IORef
 import Data.List (isInfixOf)
 import Data.Maybe (isNothing)
 
-import VoxgigStruct (Value (..), emptyMap, emptyList, mkList, size, ismap, isNoval, vint)
+import VoxgigStruct (Value (..), InjArg (INone), emptyMap, emptyList, mkList, size, ismap, isNoval, vint, listItems, transform)
 import SdkTypes
 import SdkHelpers
 import SdkRuntime
@@ -194,6 +194,27 @@ tests c = do
     out <- readIORef (cOut ctx); setp out "spec" boom
     (_, merr) <- makeSpecUtil ctx
     case merr of Just e -> errCodeIs e "boom"; Nothing -> pure False
+
+  runTest c "test_mock.item_envelope" $ do
+    cl <- client; ctx <- mkCtx cl "list"
+    mergeSpec <- jo [("`$MERGE`", VStr "`.badge`")]
+    restf <- ja [VStr "`$EACH`", VStr "body", mergeSpec]
+    tm <- jo [("res", restf)]; point <- jo [("transform", tm)]
+    writeIORef (cPoint ctx) point
+    r1 <- jo [("id", VStr "b1")]; r2 <- jo [("id", VStr "b2")]
+    out <- F.mockEnvelope ctx =<< ja [r1, r2]
+    wrapped <- mapM (\i -> getp i "badge" >>= \r -> getp r "id") =<< listItems out
+    back <- (\b -> transform INone b restf) =<< jo [("body", out)]
+    ids <- mapM (\r -> getp r "id") =<< listItems back
+    pure ([s | VStr s <- wrapped] == ["b1", "b2"] && [s | VStr s <- ids] == ["b1", "b2"])
+
+  runTest c "test_mock.body_envelope" $ do
+    cl <- client; ctx <- mkCtx cl "load"
+    tm <- jo [("res", VStr "`body.item`")]; point <- jo [("transform", tm)]
+    writeIORef (cPoint ctx) point
+    out <- F.mockEnvelope ctx =<< jo [("id", VStr "i1")]
+    i <- getp out "item" >>= \r -> getp r "id"
+    pure (case i of VStr "i1" -> True; _ -> False)
 
   runTest c "make_response.guard_no_spec" $ do
     cl <- client; ctx <- mkCtx cl "load"

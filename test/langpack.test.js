@@ -695,3 +695,22 @@ describe('argument routing in the templates', () => {
     })
   }
 })
+
+
+describe('the test mock in the templates', () => {
+  const TM = Path.join(PKG, '.sdk', 'tm')
+
+  // Where each mock wraps a listed record under the key its transform reads.
+  const WRAP = {
+    dart: ['dart/lib/feature/test/TestFeature.dart', '<String, dynamic>{itemkey: item}'],
+    haskell: ['haskell/src/SdkFeatures.hs', 'jo [(k, i)]'],
+    lean: ['lean/src/SdkRuntime.lean', 'newMap #[(key, item)]'],
+  }
+
+  for (const [lang, [rel, form]] of Object.entries(WRAP)) {
+    test(lang + ': the test mock wraps each listed record under its key', () => {
+      const src = Fs.readFileSync(Path.join(TM, rel), 'utf8')
+      ok(src.includes(form), lang + ': the test mock answers wrapped list items bare (' + rel + ')')
+    })
+  }
+})

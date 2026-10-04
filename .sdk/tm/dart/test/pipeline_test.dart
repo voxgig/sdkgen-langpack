@@ -17,6 +17,8 @@ import '../lib/Spec.dart';
 import '../lib/feature/base/BaseFeature.dart';
 import '../lib/utility/ErrUtility.dart';
 import '../lib/utility/Utility.dart';
+import '../lib/utility/voxgig_struct.dart' as vs;
+import '../lib/feature/test/TestFeature.dart';
 
 // Transport-shaped response with a re-readable body + lowercased headers.
 Map<String, dynamic> resp(int status, [dynamic data, Map<String, dynamic>? headers]) {
@@ -850,6 +852,15 @@ void tests() {
       }, {}, {r'$body': 'hello'});
       ctx.op = Operation({'name': 'create', 'entity': 'x', 'input': 'data'});
       equal('hello', stdutil.prepareBody(ctx));
+    });
+  });
+
+  describe('feature:test mock envelope', () {
+    test('a list whose items each wrap the record answers the wrappers', (t) {
+      final spec = [r'`$EACH`', 'body', {r'`$MERGE`': '`.badge`'}];
+      final out = mockEnvelope(spec, [{'id': 'b1'}, {'id': 'b2'}]);
+      deepEqual([{'badge': {'id': 'b1'}}, {'badge': {'id': 'b2'}}], out);
+      deepEqual([{'id': 'b1'}, {'id': 'b2'}], vs.transform({'body': out}, spec));
     });
   });
 }
