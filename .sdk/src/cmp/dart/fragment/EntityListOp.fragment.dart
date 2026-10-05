@@ -74,9 +74,15 @@
 
       return done(ctx);
     } catch (err) {
-      // #PreUnexpected-Hook
+      // What a hook throws here must not escape the cleaning below.
+      dynamic failure = err;
+      try {
+        // #PreUnexpected-Hook
+      } catch (hookerr) {
+        failure = hookerr;
+      }
 
-      final uerr = unexpected(ctx, err);
+      final uerr = unexpected(ctx, failure);
 
       if (null != uerr) {
         throw uerr;

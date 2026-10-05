@@ -281,6 +281,28 @@ describe('sdkgen-langpack', () => {
       'target has grown an entity layer and the contract note in sdkgen\'s ' +
       'AGENTS.md needs revisiting')
   })
+
+
+  // GHC's readFile decodes with the locale's encoding, so under a C or POSIX
+  // locale it cannot read the generated docs, and the README gate read them
+  // as absent and passed. CI runs with a UTF-8 locale, where nothing else
+  // would show a bare readFile coming back.
+  test('the haskell tests read files as UTF-8, not through the locale', () => {
+    const tests = Object.entries(generated.files)
+      .filter(([p]) => /^haskell\/test\/[^/]+\.hs$/.test(p))
+    ok(0 < tests.length, 'no haskell test sources generated')
+
+    const code = (src) => String(src).split('\n')
+      .filter((line) => !/^\s*--/.test(line)).join('\n')
+
+    deepStrictEqual(
+      tests.filter(([, src]) => /\breadFile\b/.test(code(src))).map(([p]) => p), [],
+      'a haskell test reads a file with the locale-dependent readFile; use readUtf8')
+
+    const util = tests.find(([p]) => p.endsWith('/Testutil.hs'))
+    ok(util && /hSetEncoding h utf8/.test(String(util[1])),
+      'Testutil.hs no longer decodes readUtf8 as UTF-8')
+  })
 })
 
 
@@ -633,4 +655,84 @@ describe('sdkgen-langpack: dart secrets', () => {
     // has the sources on disk and still must emit none of them.)
     offclean(plain, 'a model without the feature')
   })
+})
+
+
+// The request-shaping utilities route a header, cookie or query argument the
+// way sdkgen's bundled targets do (voxgig/sdkgen#327, #331, #28 here), checked
+// on the templates as sdkgen's pathquery.test.ts checks its own.
+describe('argument routing in the templates', () => {
+  const TM = Path.join(PKG, '.sdk', 'tm')
+
+  const ROUTING = {
+    dart: {
+      headers: ['dart/lib/utility/PrepareHeadersUtility.dart', 'dynamic prepareHeaders('],
+      query: ['dart/lib/utility/PrepareQueryUtility.dart', 'dynamic prepareQuery('],
+      body: ['dart/lib/utility/TransformRequestUtility.dart', 'dynamic transformRequest('],
+    },
+    haskell: {
+      headers: ['haskell/src/SdkRuntime.hs', 'prepareHeadersUtil :: '],
+      query: ['haskell/src/SdkRuntime.hs', 'prepareQueryUtil :: '],
+      body: ['haskell/src/SdkRuntime.hs', 'transformRequestUtil :: '],
+    },
+    lean: {
+      headers: ['lean/src/SdkUtility.lean', 'def prepareHeaders '],
+      query: ['lean/src/SdkUtility.lean', 'def prepareQuery '],
+      body: ['lean/src/SdkUtility.lean', 'def transformRequest '],
+    },
+  }
+
+  // The definition's body, as far as the next few definitions.
+  function body(lang, part) {
+    const [rel, def] = ROUTING[lang][part]
+    const src = Fs.readFileSync(Path.join(TM, rel), 'utf8')
+    const at = src.indexOf(def)
+    ok(-1 !== at, lang + ': no ' + part + ' definition in ' + rel)
+    return src.slice(at, at + 3000)
+  }
+
+  const calls = (kind) => new RegExp('callArgs\\W{1,4}ctx\\W{1,4}[\'"]' + kind + '[\'"]')
+
+  for (const lang of Object.keys(ROUTING)) {
+    test(lang + ': prepareHeaders sends the header and cookie arguments and the media headers', () => {
+      const src = body(lang, 'headers')
+      ok(calls('header').test(src), lang + ': prepareHeaders reads no header arguments')
+      ok(calls('cookie').test(src), lang + ': prepareHeaders reads no cookie arguments')
+      ok(/cookiePair/.test(src) && /cookieKeep/.test(src),
+        lang + ': prepareHeaders does not pair the cookies or read the cookie header')
+      ok(/mediaHeaders/.test(src), lang + ': prepareHeaders sets no media headers')
+    })
+
+    test(lang + ': prepareQuery keeps path, header and cookie arguments out, and sends a query argument under its orig', () => {
+      const src = body(lang, 'query')
+      for (const kind of ['params', 'header', 'cookie', 'query']) {
+        ok(new RegExp('[\'"]' + kind + '[\'"]').test(src), lang + ': prepareQuery never reads args.' + kind)
+      }
+      ok(/\borig\b/.test(src), lang + ': prepareQuery never maps a query argument to its orig')
+      ok(calls('query').test(src), lang + ': prepareQuery reads only the match')
+    })
+
+    test(lang + ': transformRequest builds the body without the routed arguments', () => {
+      ok(/routedArgNames/.test(body(lang, 'body')), lang + ': transformRequest keeps the routed arguments')
+    })
+  }
+})
+
+
+describe('the test mock in the templates', () => {
+  const TM = Path.join(PKG, '.sdk', 'tm')
+
+  // Where each mock wraps a listed record under the key its transform reads.
+  const WRAP = {
+    dart: ['dart/lib/feature/test/TestFeature.dart', '<String, dynamic>{itemkey: item}'],
+    haskell: ['haskell/src/SdkFeatures.hs', 'jo [(k, i)]'],
+    lean: ['lean/src/SdkRuntime.lean', 'newMap #[(key, item)]'],
+  }
+
+  for (const [lang, [rel, form]] of Object.entries(WRAP)) {
+    test(lang + ': the test mock wraps each listed record under its key', () => {
+      const src = Fs.readFileSync(Path.join(TM, rel), 'utf8')
+      ok(src.includes(form), lang + ': the test mock answers wrapped list items bare (' + rel + ')')
+    })
+  }
 })

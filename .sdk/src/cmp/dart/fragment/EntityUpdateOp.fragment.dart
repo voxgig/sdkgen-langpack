@@ -86,9 +86,15 @@
       // operations return ENTITIES".
       return (null != ctx.result && true == ctx.result.ok) ? this : out;
     } catch (err) {
-      // #PreUnexpected-Hook
+      // What a hook throws here must not escape the cleaning below.
+      dynamic failure = err;
+      try {
+        // #PreUnexpected-Hook
+      } catch (hookerr) {
+        failure = hookerr;
+      }
 
-      final uerr = unexpected(ctx, err);
+      final uerr = unexpected(ctx, failure);
 
       if (null != uerr) {
         throw uerr;
