@@ -384,7 +384,7 @@ def opnameOf (ctx : Value) : SIO String := do
 -- ---------------------------------------------------------------------------
 
 def allowDefaults : SIO Value :=
-  newMap #[("op", .str "create,update,load,list,remove,command,direct,graphql"),
+  newMap #[("op", .str "create,update,patch,load,list,remove,command,direct,graphql"),
            ("method", .str "GET,PUT,POST,PATCH,DELETE,OPTIONS")]
 
 def defaultOptions : SIO Value := do

@@ -76,6 +76,11 @@ function synthData(fields: any): any {
 }
 
 
+function patchField(e: any): string {
+  return Object.keys(e.fields || {}).find((k) => k !== 'id' && !k.endsWith('$')) || 'name'
+}
+
+
 const Test = cmp(async function Test(props: any) {
   const ctx$ = props.ctx$
   const target = props.target
@@ -85,11 +90,11 @@ const Test = cmp(async function Test(props: any) {
     .filter((e: any) => false !== e.active)
 
   let offline = ''
+  let patchDefs = ''
   each(entity, (e: any) => {
     const ns = e.name.charAt(0).toUpperCase() + e.name.slice(1)
     const Name = e.Name || (e.name.charAt(0).toUpperCase() + e.name.slice(1))
     const ops = e.op || {}
-    if (!ops.list && !ops.load) return
 
     let body = ''
 
@@ -133,6 +138,30 @@ const Test = cmp(async function Test(props: any) {
             match gone with
             | Value.map _ => fail s!"${e.name}.remove offline: still present"
             | _ => pass s!"${e.name}.remove offline (id={cid})"
+`
+    }
+
+    if (ops.create && ops.patch) {
+      const def = 'patchOffline' + ns
+      const field = patchField(e)
+      patchDefs += `/-- ${e.name}: a patch changes the field it sends, in the store. -/
+def ${def} (tclient seed : Value) : SIO Unit := do
+  let newmap ← SdkRuntime.gp (← SdkRuntime.gp seed "new") "${e.name}"
+  let nks ← keysof newmap
+  if nks.size > 0 then do
+    try
+      let created ← ${ns}.create tclient (← SdkRuntime.gp newmap nks[0]!) (← emptyMap)
+      let cid ← SdkRuntime.gpS created "id"
+      let m ← newMap #[("id", Value.str cid)]
+      let d ← newMap #[("id", Value.str cid), ("${field}", Value.str "PatchedMark")]
+      let patched ← ${ns}.patch tclient m d (← emptyMap)
+      check (SdkUtility.isMapV patched && (← SdkRuntime.gpS patched "id") == cid
+          && (← SdkRuntime.gpS patched "${field}") == "PatchedMark")
+        s!"${e.name}.patch offline (id={cid})"
+    catch err => fail s!"${e.name}.patch offline: {err}"
+
+`
+      body += `        ${def} tclient seed
 `
     }
 
@@ -520,7 +549,7 @@ def cleanSensitivity : SIO Unit := do
     check (plain != "" && explained == plain)
       s!"clean: with clean off, explain keeps the error ({explained})"
 
-def defaultBase : String := "http://localhost:8901"
+${patchDefs}def defaultBase : String := "http://localhost:8901"
 
 def main : IO UInt32 := do
   let liveBase ← IO.getEnv "SDK_TEST_BASE"

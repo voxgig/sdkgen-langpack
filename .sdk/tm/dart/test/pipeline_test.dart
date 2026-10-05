@@ -256,7 +256,7 @@ void tests() {
         final sdk = ProjectNameSDK.test({}, {'allow': allow});
         equal('GET,PUT,POST,PATCH,DELETE,OPTIONS',
             vs.getpath(sdk.options(), 'allow.method'));
-        equal('create,update,load,list,remove,command,direct,graphql',
+        equal('create,update,patch,load,list,remove,command,direct,graphql',
             vs.getpath(sdk.options(), 'allow.op'));
         equal('POST',
             (await sdk.prepare({'path': '/a', 'method': 'post'}))['method']);
@@ -269,7 +269,7 @@ void tests() {
       final sdk = ProjectNameSDK.test({}, {'allow': {}});
       equal('GET,PUT,POST,PATCH,DELETE,OPTIONS',
           vs.getpath(sdk.options(), 'allow.method'));
-      equal('create,update,load,list,remove,command,direct,graphql',
+      equal('create,update,patch,load,list,remove,command,direct,graphql',
           vs.getpath(sdk.options(), 'allow.op'));
       equal('spec_method_allow',
           errcode(await sdk.prepare({'path': '/a', 'method': 'HEAD'})));
@@ -289,7 +289,7 @@ void tests() {
             vs.getpath(opts, 'allow.method'));
         equal('load', vs.getpath(opts, 'allow.op'));
       }
-      equal('create,update,load,list,remove,command,direct,graphql',
+      equal('create,update,patch,load,list,remove,command,direct,graphql',
           vs.getpath(over('x', {'method': 'GET'}), 'allow.op'));
     });
 

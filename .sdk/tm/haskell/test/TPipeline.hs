@@ -74,7 +74,7 @@ allowLists cl = do
 
 defaultAllowLists :: (String, String)
 defaultAllowLists =
-  ("GET,PUT,POST,PATCH,DELETE,OPTIONS", "create,update,load,list,remove,command,direct,graphql")
+  ("GET,PUT,POST,PATCH,DELETE,OPTIONS", "create,update,patch,load,list,remove,command,direct,graphql")
 
 takesDefaultAllow :: Value -> IO Bool
 takesDefaultAllow sdkopts = do

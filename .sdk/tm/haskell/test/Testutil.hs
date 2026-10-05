@@ -7,10 +7,13 @@
 
 module Testutil where
 
-import Control.Exception (SomeException, evaluate, try)
+import Control.Exception (SomeException, evaluate, fromException, try)
 import Data.IORef
 import System.Exit (exitFailure)
 import System.IO (IOMode (ReadMode), hGetContents, hSetEncoding, utf8, withFile)
+
+import SdkHelpers (errCode, errMsg)
+import SdkTypes (SdkException (..))
 
 data Counters = Counters
   { npass    :: IORef Int
@@ -40,6 +43,14 @@ recordFail c msg = do modifyIORef' (nfail c) (+ 1); modifyIORef' (failures c) (+
 check :: Counters -> String -> Bool -> IO ()
 check c name ok = if ok then recordPass c else recordFail c name
 
+-- The first line of what an exception says. An SdkException's Show cannot read
+-- the error it carries, so its code and message stand in.
+failureText :: SomeException -> IO String
+failureText e = firstLine <$> case fromException e of
+  Just (SdkException v) -> do code <- errCode v; msg <- errMsg v; pure (code ++ ": " ++ msg)
+  Nothing -> pure (show e)
+  where firstLine s = case lines s of (l : _) -> l; [] -> s
+
 -- Run an IO Bool assertion; an exception (or False) is a failure.
 runTest :: Counters -> String -> IO Bool -> IO ()
 runTest c name act = do
@@ -47,8 +58,7 @@ runTest c name act = do
   case r of
     Right True -> recordPass c
     Right False -> recordFail c (name ++ " (assertion false)")
-    Left e -> recordFail c (name ++ " (exception: " ++ firstLine (show e) ++ ")")
-  where firstLine s = case lines s of (l : _) -> l; [] -> s
+    Left e -> do t <- failureText e; recordFail c (name ++ " (exception: " ++ t ++ ")")
 
 -- Run an IO action that raises on failure (used for imperative-style checks).
 runAction :: Counters -> String -> IO () -> IO ()
@@ -56,8 +66,7 @@ runAction c name act = do
   r <- try act :: IO (Either SomeException ())
   case r of
     Right () -> recordPass c
-    Left e -> recordFail c (name ++ " (exception: " ++ firstLine (show e) ++ ")")
-  where firstLine s = case lines s of (l : _) -> l; [] -> s
+    Left e -> do t <- failureText e; recordFail c (name ++ " (exception: " ++ t ++ ")")
 
 summary :: Counters -> IO ()
 summary c = do

@@ -203,41 +203,10 @@ describe('sdkgen-langpack', () => {
     ok(util && /hSetEncoding h utf8/.test(String(util[1])),
       'Testutil.hs no longer decodes readUtf8 as UTF-8')
   })
-})
 
 
-// A PATCH beside a PUT is a sixth operation, `patch`, which every target
-// generates as it does `update`: its own entry, under its own name.
-const PATCH_OP = `
-main: kit: entity: planet: op: patch: {
-  name: "patch"
-  points: [ {
-    g: { params: [
-      { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "p01" }
-    ] }
-    m: "PATCH", o: "/planet/{id}", s: [{ lit: "planet" }, { var: "id" }]
-    t: { req: "\`reqdata\`", res: "\`body\`" }
-  } ]
-}
-`
-
-
-describe('sdkgen-langpack: patch', () => {
-
-  let consumer
-  let generated
-
-  before(async () => {
-    consumer = stageConsumer({ recordLog: true })
-    await consumer.addPackage(PKG)
-    compile(consumer)
-    generated = await generateInto(consumer, { model: consumerModel(consumer.sdk, PATCH_OP) })
-  })
-
-  after(() => {
-    if (null != consumer) consumer.cleanup()
-  })
-
+  // A PATCH beside a PUT is a sixth operation, `patch`, which every target
+  // generates as it does `update`: its own entry, under its own name.
   test('every target generates the patch operation', () => {
     const file = (path) => {
       ok(null != generated.files[path], 'not generated: ' + path)
@@ -247,6 +216,12 @@ describe('sdkgen-langpack: patch', () => {
     const dart = file('dart/lib/entity/PlanetEntity.dart')
     ok(/Future<dynamic> patch\(\[dynamic reqdata, dynamic ctrl\]\)/.test(dart) &&
       /'opname': 'patch'/.test(dart), 'dart: no patch method')
+
+    // sdkgen's opTypeName names the request type; before the floor's release
+    // it fell back to Match for a patch.
+    const types = file('dart/lib/DemoTypes.dart')
+    ok(/^class PlanetPatchData \{/m.test(types) && !/PlanetPatchMatch/.test(types),
+      'dart: the patch request type is not named PlanetPatchData')
 
     ok(file('lean/src/SdkClient.lean').includes(
       'def patch (c m d co : Value) : SIO Value := SdkRuntime.opPatch c "planet" m d co'),
