@@ -1001,11 +1001,49 @@ netsimFeature = do
 -- test feature (in-memory mock transport + optional net simulation)
 -- ------------------------------------------------------------------
 
+-- The key a list's response transform
+-- ["`$EACH`", "body", {"`$MERGE`": "`.<key>`"}] reads each item's record
+-- under.
+itemEnvelopeKey :: Value -> IO (Maybe String)
+itemEnvelopeKey restf = do
+  spec <- listItems restf
+  case spec of
+    [VStr "`$EACH`", VStr "body", m] -> do
+      merge <- getp m "`$MERGE`"
+      pure $ case merge of
+        VStr s | length s > 3, take 2 s == "`.", last s == '`' ->
+          let key = take (length s - 3) (drop 2 s)
+          in if any (`elem` ".`$") key then Nothing else Just key
+        _ -> Nothing
+    _ -> pure Nothing
+
+-- THE MOCK HAS TO AGREE WITH THE MODEL. A point carrying
+-- `transform.res: `body.item`` describes an API that answers {"item": {...}},
+-- and a list read by the transform above answers items of {"<key>": {...}}.
+-- Returning the bare payload gives the response transform nothing to read.
+-- Like the dart and lean mocks, a string transform is exactly `body.<key>`.
+mockEnvelope :: Context -> Value -> IO Value
+mockEnvelope fctx dat
+  | isNullish dat = pure dat
+  | otherwise = do
+      point <- readIORef (cPoint fctx)
+      tm <- getp point "transform"
+      restf <- getp tm "res"
+      key <- itemEnvelopeKey restf
+      case (key, dat, restf) of
+        (Just k, VList _, _) -> do { its <- listItems dat; ja =<< mapM (\i -> jo [(k, i)]) its }
+        (_, _, VStr s)
+          | length s > 7, take 6 s == "`body.", last s == '`'
+          , let inner = take (length s - 7) (drop 6 s)
+          , not (null inner), '.' `notElem` inner -> jo [(inner, dat)]
+        _ -> pure dat
+
 testFeature :: IO Feature
 testFeature = do
   (active, fopts) <- featureBase
-  let respondM status dat extra = do
-        out <- jo [("status", vint status), ("statusText", VStr "OK"), ("json", jsonThunk dat), ("body", VStr "not-used")]
+  let respondM fctx status dat extra = do
+        payload <- mockEnvelope fctx dat
+        out <- jo [("status", vint status), ("statusText", VStr "OK"), ("json", jsonThunk payload), ("body", VStr "not-used")]
         case extra of { Just e@(VMap _) -> do { ks <- keysof e; forM_ ks $ \k -> do { v <- getp e k; setp out k v } }; _ -> pure () }
         pure (out, Nothing)
       buildArgs fctx op args = do
@@ -1058,13 +1096,13 @@ testFeature = do
           "load" -> do
             rm <- readIORef (cReqmatch fctx); m <- resolveMatch fctx rm
             args <- buildArgs fctx op m; found <- select entmap args; ent <- getelem found (VNum 0)
-            if isNullish ent then respondM 404 VNoval . Just =<< jo [("statusText", VStr "Not found")]
-            else do delp ent "$KEY"; c <- clone ent; respondM 200 c Nothing
+            if isNullish ent then respondM fctx 404 VNoval . Just =<< jo [("statusText", VStr "Not found")]
+            else do delp ent "$KEY"; c <- clone ent; respondM fctx 200 c Nothing
           "list" -> do
             rm <- readIORef (cReqmatch fctx)
             args <- buildArgs fctx op rm; found <- select entmap args
-            if isNullish found then respondM 404 VNoval . Just =<< jo [("statusText", VStr "Not found")]
-            else do { case found of { VList _ -> do { its <- listItems found; forM_ its (\i -> delp i "$KEY") }; _ -> pure () }; c <- clone found; respondM 200 c Nothing }
+            if isNullish found then respondM fctx 404 VNoval . Just =<< jo [("statusText", VStr "Not found")]
+            else do { case found of { VList _ -> do { its <- listItems found; forM_ its (\i -> delp i "$KEY") }; _ -> pure () }; c <- clone found; respondM fctx 200 c Nothing }
           opn | opn `elem` ["update", "patch"] -> do
             rd <- readIORef (cReqdata fctx)
             um0 <- emptyMap
@@ -1073,15 +1111,15 @@ testFeature = do
             um <- if umSz > 0 then pure um0 else do em <- emptyMap; resolveMatch fctx em
             args <- buildArgs fctx op um; found <- select entmap args; ent0 <- getelem found (VNum 0)
             ent <- if isNullish ent0 then entFallback entmap else pure ent0
-            if isNullish ent then respondM 404 VNoval . Just =<< jo [("statusText", VStr "Not found")]
+            if isNullish ent then respondM fctx 404 VNoval . Just =<< jo [("statusText", VStr "Not found")]
             else do
               case ent of { VMap _ -> case rd of { VMap _ -> do { ks <- keysof rd; forM_ ks (\k -> do { v <- getp rd k; setp ent k v }) }; _ -> pure () }; _ -> pure () }
-              delp ent "$KEY"; c <- clone ent; respondM 200 c Nothing
+              delp ent "$KEY"; c <- clone ent; respondM fctx 200 c Nothing
           "remove" -> do
             rm <- readIORef (cReqmatch fctx); m <- resolveMatch fctx rm
             args <- buildArgs fctx op m; found <- select entmap args; ent <- getelem found (VNum 0)
             case ent of VMap _ -> do { eid <- getp ent "id"; () <$ delprop entmap eid }; _ -> pure ()
-            respondM 200 VNoval Nothing
+            respondM fctx 200 VNoval Nothing
           "create" -> do
             rd <- readIORef (cReqdata fctx)
             _ <- buildArgs fctx op rd
@@ -1089,9 +1127,9 @@ testFeature = do
             eid <- if isNullish eidV then VStr <$> randId16 else pure eidV
             ent <- clone rd
             case ent of
-              VMap _ -> do { setp ent "id" eid; case eid of { VStr s -> setp entmap s ent; _ -> pure () }; delp ent "$KEY"; c <- clone ent; respondM 200 c Nothing }
-              _ -> respondM 200 ent Nothing
-          _ -> respondM 404 VNoval . Just =<< jo [("statusText", VStr "Unknown operation")]
+              VMap _ -> do { setp ent "id" eid; case eid of { VStr s -> setp entmap s ent; _ -> pure () }; delp ent "$KEY"; c <- clone ent; respondM fctx 200 c Nothing }
+              _ -> respondM fctx 200 ent Nothing
+          _ -> respondM fctx 404 VNoval . Just =<< jo [("statusText", VStr "Unknown operation")]
       makeNetsim net inner = do
         netcalls <- newIORef (0 :: Int)
         let pickLat = do
@@ -1298,7 +1336,18 @@ rawRequest client fetchargs = do
                   let noBody = status == 204 || status == 304 || cl == "0"
                   -- A body that does not parse leaves data unset; the call still reports its status.
                   jsonData <- if noBody then pure VNoval else do jf <- getp fetched "json"; case jf of VFunc _ -> orNoval (callJson jf); _ -> pure VNoval
-                  jo [("ok", VBool (status >= 200 && status < 300)), ("status", vint status), ("headers", headers), ("data", jsonData)]
+                  unr <- getp fetched "unreadable"
+                  case (noBody, unr) of
+                    (False, VBool True) -> do
+                      stt <- getStrD fetched "statusText" ""
+                      failed <- if status >= 200 && status < 300 then pure VNoval
+                        else mkErr "request_status" ("request: " ++ show status ++ ": " ++ stt)
+                      body <- getp fetched "body"
+                      sent <- getp fetchdef "headers"
+                      e <- unreadableBody ctx status headers body sent failed
+                      ev <- cleanUtil ctx =<< errToValue e
+                      jo [("ok", VBool False), ("status", vint status), ("headers", headers), ("data", jsonData), ("err", ev)]
+                    _ -> jo [("ok", VBool (status >= 200 && status < 300)), ("status", vint status), ("headers", headers), ("data", jsonData)]
                 _ -> do e <- mkErr "direct_invalid" "invalid response type"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]
       case attempt of
         Right out -> pure out

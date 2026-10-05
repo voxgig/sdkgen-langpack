@@ -170,8 +170,29 @@ def headerPairs (headersV : Value) : SIO (Array (String × String)) := do
   | _ => pure ()
   pure headers
 
-/-- Decode the body as JSON when the server says so or it looks like JSON;
-    anything else (an HTML error page) stays text on the result. -/
+/-- Several CDNs refuse a library's own agent, so a request without one
+    carries the browser-shaped agent the other targets send. -/
+def defaultUserAgent : String := "Mozilla/5.0 (compatible; ProjectNameSDK/1.0)"
+
+/-- The pairs to send, with the default agent when the fetchdef names none,
+    recorded with its headers so an error can name it. -/
+def sentHeaders (fetchdef : Value) : SIO (Array (String × String)) := do
+  let headers ← headerPairs (← gp fetchdef "headers")
+  if headers.any (fun kv => kv.1.toLower == "user-agent") then return headers
+  let hv ← gp fetchdef "headers"
+  let hv ← if SdkUtility.isMapV hv then pure hv else do
+    let m ← emptyMap
+    SdkUtility.sp fetchdef "headers" m
+    pure m
+  SdkUtility.sp hv "user-agent" (.str defaultUserAgent)
+  pure (headers.push ("user-agent", defaultUserAgent))
+
+/-- A body that is neither blank nor one JSON value. -/
+def bodyUnreadable (body : String) : Bool :=
+  !(body.all Char.isWhitespace) && !(SdkJson.jsonValid body)
+
+/-- Decode a readable body: as JSON when the server says so or it looks like
+    JSON; a scalar sent as anything else stays text. -/
 def readBody (headers : Value) (body : String) : SIO Value := do
   let ct := (asStr (← gp headers "content-type")).toLower
   let t := body.trimAscii.toString
@@ -186,7 +207,7 @@ def readBody (headers : Value) (body : String) : SIO Value := do
 def liveFetcher : SdkFeature.Fetcher := fun ctx url fetchdef => do
   let method := asStr (← gp fetchdef "method")
   let bodyStr ← SdkUtility.bodyText (← gp ctx "point") (← gp fetchdef "body")
-  let headers ← headerPairs (← gp fetchdef "headers")
+  let headers ← sentHeaders fetchdef
   let timeout := match (← gp fetchdef "timeout") with | .num n => n | _ => 0.0
   let proxy ← gpS fetchdef "proxy"
   try
@@ -194,8 +215,11 @@ def liveFetcher : SdkFeature.Fetcher := fun ctx url fetchdef => do
     let hmap ← emptyMap
     for (k, v) in r.headers do
       SdkUtility.sp hmap k (.str v)
+    -- A body that is not JSON is marked, and kept as its text for the error.
+    let unreadable := bodyUnreadable r.body
+    let bodyV ← if unreadable then pure (Value.str r.body) else readBody hmap r.body
     let resp ← newMap #[("status", .num r.status.toFloat), ("statusText", .str r.statusText),
-                        ("body", ← readBody hmap r.body), ("headers", hmap)]
+                        ("body", bodyV), ("headers", hmap), ("unreadable", .bool unreadable)]
     pure (resp, none)
   catch e =>
     let resp ← newMap #[("status", .num (-1.0)), ("statusText", .str ""),
@@ -269,6 +293,19 @@ def mockOp (client : Value) (entityName opName : String)
     | _ => emptyMap
   | _ => emptyMap
 
+/-- The key a list's response transform
+    ["`$EACH`", "body", {"`$MERGE`": "`.<key>`"}] reads each item's record
+    under; empty for any other transform. -/
+def itemEnvelopeKey (restf : Value) : SIO String := do
+  let spec ← listItemsOf restf
+  if spec.size != 3 || asStr spec[0]! != "`$EACH`" || asStr spec[1]! != "body" then pure ""
+  else
+    let merge := asStr (← gp spec[2]! "`$MERGE`")
+    if merge.startsWith "`." && merge.endsWith "`" && merge.length > 3 then
+      let key := ((merge.drop 2).dropEnd 1).toString
+      if key.any (fun c => c == '.' || c == '`' || c == '$') then pure "" else pure key
+    else pure ""
+
 /-- THE MOCK HAS TO AGREE WITH THE MODEL. A point carrying
     `transform.res: `body.item`` describes an API that answers {"item": {...}}
     and the response transform unwraps that key on the way back. Returning the
@@ -277,14 +314,20 @@ def mockOp (client : Value) (entityName opName : String)
 def mockEnvelope (ctx : Value) (data : Value) : SIO Value := do
   if isNv data then pure data else do
     let tm ← gp (← gp ctx "point") "transform"
-    let spec := asStr (← gp tm "res")
-    -- Exactly `body.<key>`; a deeper path is not an envelope this mock can
-    -- synthesise, so it is left alone rather than guessed at.
-    if spec.startsWith "`body." && spec.endsWith "`" && spec.length > 7 then
-      let inner := ((spec.drop 6).dropEnd 1).toString
-      if inner.isEmpty || inner.contains '.' then pure data
-      else newMap #[(inner, data)]
-    else pure data
+    let restf ← gp tm "res"
+    let key ← itemEnvelopeKey restf
+    if !key.isEmpty && (match data with | .list _ => true | _ => false) then do
+      let items ← listItemsOf data
+      newList (← items.mapM fun item => newMap #[(key, item)])
+    else do
+      let spec := asStr restf
+      -- Exactly `body.<key>`; a deeper path is not an envelope this mock can
+      -- synthesise, so it is left alone rather than guessed at.
+      if spec.startsWith "`body." && spec.endsWith "`" && spec.length > 7 then
+        let inner := ((spec.drop 6).dropEnd 1).toString
+        if inner.isEmpty || inner.contains '.' then pure data
+        else newMap #[(inner, data)]
+      else pure data
 
 /-- The base transport in test mode: answer from the seeded store. -/
 def testFetcher : SdkFeature.Fetcher := fun ctx _url _fetchdef => do

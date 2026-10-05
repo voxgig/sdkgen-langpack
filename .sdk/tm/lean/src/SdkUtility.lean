@@ -383,18 +383,34 @@ def opnameOf (ctx : Value) : SIO String := do
 -- makeOptions / makeContext / operator / makeError / done
 -- ---------------------------------------------------------------------------
 
+def allowDefaults : SIO Value :=
+  newMap #[("op", .str "create,update,load,list,remove,command,direct,graphql"),
+           ("method", .str "GET,PUT,POST,PATCH,DELETE,OPTIONS")]
+
 def defaultOptions : SIO Value := do
   let hdr ← newMap #[("content-type", .str "application/json")]
   let ent ← emptyMap
-  -- `allow.op` carries the ts optspec's own default, because makePoint
-  -- enforces it; the other optspec slots are not defaulted here, so nothing
-  -- below is a value a caller could mistake for an enforced one.
-  let allow ← newMap #[("op", .str "create,update,load,list,remove,command,direct,graphql")]
+  -- `allow.op` and `allow.method` carry the ts optspec's own defaults,
+  -- because makePoint and makeSpec enforce them; the other optspec slots are
+  -- not defaulted here, so nothing below is a value a caller could mistake
+  -- for an enforced one.
   newMap #[("base", .str "http://localhost:8000"), ("prefix", .str ""),
            ("suffix", .str ""), ("headers", hdr), ("entity", ent),
-           ("allow", allow), ("clean", ← cleanOptSpec)]
+           ("allow", ← allowDefaults), ("clean", ← cleanOptSpec)]
 
-/-- Defaults <- config.options <- options, then every entity gets an alias map. -/
+/-- A nullish or missing `allow`, `allow.op` or `allow.method` takes the default,
+    as validate fills it in the other targets: the raw gate in `allowRefuses`
+    would refuse a null and let an undefined one allow everything. -/
+def fillAllowDefaults (opts : Value) : SIO Unit := do
+  let defaults ← allowDefaults
+  let allow ← lookupRaw opts (.str "allow")
+  if isNullish allow then sp opts "allow" defaults
+  else if isMapV allow then
+    for k in (← keysof defaults) do
+      if isNullish (← lookupRaw allow (.str k)) then sp allow k (← gp defaults k)
+
+/-- Defaults <- config.options <- options, then a nullish or missing allow list
+    takes its default and every entity gets an alias map. -/
 def makeOptions (config options : Value) : SIO Value := do
   let base ← defaultOptions
   let copts ← asMap (← gp config "options")
@@ -412,6 +428,7 @@ def makeOptions (config options : Value) : SIO Value := do
     cleanAddCfg cleancfg (.str v)
   let parts ← newList #[base, copts, uopts]
   let out ← merge parts
+  fillAllowDefaults out
   let ent ← gpMap out "entity"
   for k in (← keysof ent) do
     let e ← gp ent k
@@ -791,12 +808,24 @@ def omitKeys (v : Value) (names : Array String) : SIO Value := do
       pure c
   | _ => pure v
 
+def fieldArg (ctx : Value) (name : String) : SIO Bool := do
+  let point ← gp ctx "point"
+  for kind in #["header", "cookie", "query"] do
+    for ad in (← argDefs point kind) do
+      if (← gpS ad "name") == name then
+        match (← gp ad "field") with
+        | .bool true => return true
+        | _ => pure ()
+  pure false
+
 /-- A header, cookie or query argument travels where prepareHeaders or
-    prepareQuery sends it, so the body is built from the request data without it. -/
+    prepareQuery sends it, so the body is built from the request data without it,
+    unless the entity declares it as a field too. -/
 def routedArgNames (ctx : Value) : SIO (Array String) := do
   let mut names : Array String := #[]
   for kind in #["header", "cookie", "query"] do
-    for (name, _, _) in (← callArgs ctx kind) do names := names.push name
+    for (name, _, _) in (← callArgs ctx kind) do
+      unless (← fieldArg ctx name) do names := names.push name
   pure names
 
 def transformRequest (ctx : Value) : SIO Value := do
@@ -892,6 +921,21 @@ private def hasSub (hay needle : String) : Bool :=
 /-- Whether a comma-separated allow option names the item: whole names, any case. -/
 def allowListHas (names item : String) : Bool :=
   item != "" && (names.splitOn ",").any (fun name => name.trim.toUpper == item.toUpper)
+
+/-- Whether `options.allow.<key>` refuses the item. A string refuses what it does
+not name, an empty one included, as the ts reference's `allowed` does, and any
+other value refuses everything, a null or a non-map `allow` too; read raw, as gp
+reads a null as absent. Only an ABSENT `allow` or key allows, and only a
+hand-built context has one: makeOptions fills a nullish or missing list. -/
+def allowRefuses (options : Value) (key item : String) : SIO Bool := do
+  match (← lookupRaw options (.str "allow")) with
+  | .noval => pure false
+  | allow@(.map _) =>
+    match (← lookupRaw allow (.str key)) with
+    | .noval => pure false
+    | .str s => pure !(allowListHas s item)
+    | _ => pure true
+  | _ => pure true
 
 /-- Map a GraphQL error to the same error codes the HTTP path produces, so a
 caller handles auth or rate limiting identically on both transports. Servers
@@ -1034,13 +1078,78 @@ def resultHeaders (ctx : Value) : SIO Unit := do
     sp resultV "headers" out
   | _ => pure ()
 
+/-- A header's value, whatever the case of its name. -/
+def headerText (headers : Value) (name : String) : SIO String := do
+  match headers with
+  | .map _ =>
+    for k in (← keysof headers) do
+      if k.toLower == name then return (← jsString (← gp headers k))
+    pure ""
+  | _ => pure ""
+
+def cleanText (ctx : Value) (s : String) : SIO String := do
+  match (← clean ctx (.str s)) with
+  | .str c => pure c
+  | _ => pure s
+
+/-- Whitespace runs as one space, trimmed. -/
+def flattenSpace (s : String) : String := Id.run do
+  let mut out := ""
+  let mut space := false
+  for c in s.toList do
+    if c.isWhitespace then
+      space := !out.isEmpty
+    else
+      if space then
+        out := out.push ' '
+        space := false
+      out := out.push c
+  return out
+
+/-- Cleaned whole: a secret the bound would split could leave its prefix. -/
+def bodyPreview (ctx : Value) (text : Value) : SIO String := do
+  let flat ← cleanText ctx (flattenSpace (← jsString text))
+  let cs := flat.toList
+  pure (if cs.length > 160 then String.ofList (cs.take 160) ++ "..." else flat)
+
+/-- A body that is not JSON. An HTTP failure keeps its own error, with the
+    response described; otherwise the code tells a wrong content type from
+    malformed JSON. -/
+def unreadableBody (ctx : Value) (status : Float) (headers text sent failed : Value) :
+    SIO Value := do
+  let ctype ← headerText headers "content-type"
+  let agent ← cleanText ctx (← headerText sent "user-agent")
+  let preview ← match text with
+    | .noval => pure ""
+    | .null => pure ""
+    | _ => do pure (", body: " ++ (← bodyPreview ctx text))
+  let detail := "HTTP " ++ numToString status ++ ", content-type " ++
+    (if ctype == "" then "none" else ctype) ++ ", user-agent " ++
+    (if agent == "" then "transport default" else agent) ++ preview
+  if (← isErrV failed) then
+    let m ← gpS failed "message"
+    sp failed "message" (.str (m ++ " (" ++ detail ++ ")"))
+    pure failed
+  else if ctype == "" || (ctype.toLower.splitOn "json").length > 1 then
+    mkErr "response_json_invalid" ("response: body is not valid JSON (" ++ detail ++ ")")
+  else
+    mkErr "response_content_type" ("response: expected JSON, got " ++ ctype ++ " (" ++ detail ++ ")")
+
 def resultBody (ctx : Value) : SIO Unit := do
   let responseV ← gp ctx "response"
   let resultV ← gp ctx "result"
   match responseV, resultV with
   | .map _, .map _ => do
     let body ← gp responseV "body"
-    if !(isNov body) then sp resultV "body" body
+    if truthy (← gp responseV "unreadable") then
+      let specV ← gp ctx "spec"
+      let sent ← match specV with
+        | .map _ => gp specV "headers"
+        | _ => pure .noval
+      let e ← unreadableBody ctx (jsNumber (← gp resultV "status")) (← gp resultV "headers")
+        body sent (← gp resultV "err")
+      sp resultV "err" e
+    else if !(isNov body) then sp resultV "body" body
   | _, _ => pure ()
 
 -- ---------------------------------------------------------------------------
@@ -1061,7 +1170,13 @@ def makeSpec (ctx : Value) : SIO (Value × Option Value) := do
                       ("suffix", .str suffix), ("parts", parts),
                       ("alias", aliasm), ("step", .str "start")]
   sp ctx "spec" spec
-  sp spec "method" (.str (← prepareMethod ctx))
+  let method ← prepareMethod ctx
+  sp spec "method" (.str method)
+  if (← allowRefuses options "method" method) then
+    let allowm ← gp (← gp options "allow") "method"
+    let e ← mkErr "spec_method_allow"
+      s!"Method \"{method}\" not allowed by SDK option allow.method value: \"{vs allowm}\""
+    return (.noval, some e)
   sp spec "path" (.str (← preparePath ctx))
   sp spec "params" (← prepareParams ctx)
   sp spec "query" (← prepareQuery ctx)
@@ -1166,15 +1281,10 @@ def makePoint (ctx : Value) : SIO Value := do
   let op ← gp ctx "op"
   let opname ← gpS op "name"
   -- Whole names over the comma list, in any case, as the ts and go references
-  -- match. An absent value or an empty string allows everything: lean's
-  -- makeOptions has no optspec, so a hand-built context legitimately carries
-  -- no `allow`. A value that is not a string allows nothing.
-  let allowv ← gp (← gp (← gp ctx "options") "allow") "op"
-  let refused := match allowv with
-    | .noval => false
-    | .str s => s != "" && !(allowListHas s opname)
-    | _ => true
-  if refused then
+  -- match.
+  let options ← gp ctx "options"
+  if (← allowRefuses options "op" opname) then
+    let allowv ← gp (← gp options "allow") "op"
     return (← mkErr "point_op_allow"
       s!"Operation \"{opname}\" not allowed by SDK option allow.op value: \"{vs allowv}\"")
   let input0 ← gpS op "input"

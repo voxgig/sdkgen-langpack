@@ -49,14 +49,12 @@ A tier here is checked, not just declared: `test/parity.test.js` reads the
 `parity` map and verifies each claim against what the target's suite actually
 does.
 
-**A caveat that belongs with those two FULL tiers.** The shared corpus is
-materialised into each project as `.sdk/test/test.json`, so a real generated
-SDK does execute it — the tier is accurate for a consumer. What this repository
-cannot do is verify it: the corpus source lives in create-sdkgen and is not yet
-published as a consumable package. Until it is, the suite here covers
-generation, component type-checking and per-target behaviour, and the corpus
-runs where the SDK is generated. Do not read a green build here as a green
-corpus.
+**Where the corpus runs.** The shared corpus is materialised into each project
+as `.sdk/test/test.json`, so a real generated SDK executes it. The `sdks`
+workflow does the same here: it takes the corpus from the published
+`@voxgig/create-sdkgen`, generates the three SDKs, builds each and runs its
+suite. The `build` workflow covers generation, component type-checking and
+per-target behaviour on Node alone, so a green `build` is not a green corpus.
 
 ## Lean is deliberately different
 
@@ -84,7 +82,9 @@ matching reference utility skips it.
 Constructing a client resolves the options through `makeOptions`, so what
 the API model declares in `config.options` is in force from the first
 operation: its `headers`, `prefix` and `suffix`, and `base` where the model
-names none. `allow.op` is defaulted there too, and `makePoint` enforces it.
+names none. `allow.op` and `allow.method` are defaulted there too, a list that
+is null, undefined or missing taking the default as it does in the other
+targets, and `makePoint` and `makeSpec` enforce them.
 
 The transport is `curl -i`: every prepared header is sent, and the response
 status, headers and body come back for the result and for the features that
@@ -167,6 +167,38 @@ or looked for, so the suite is green on a machine that could not build a single
 generated SDK. Read a green build as what it is: components that type-check and
 targets that generate. Whether you can compile the output is a question about
 your own machine, and `command -v` is the way to ask it.
+
+Where `dart`, `ghc` or `lean` is installed, the `sdks` workflow's commands
+build and run that target's SDK. `CREATE_SDKGEN` names an unpacked
+`@voxgig/create-sdkgen` package, whose test data writer and corpus a scaffolded
+project carries:
+
+```bash
+CREATE_SDKGEN=/path/to/create-sdkgen npm run sdks -- generate /tmp/sdk
+npm run sdks -- run haskell /tmp/sdk   # or dart, or lean
+```
+
+`run` fails when a command fails, and when the suite prints no pass and fail
+counts or a count of no passes, since a suite that runs nothing exits cleanly.
+It reports the toolchain it ran under.
+
+A lean SDK pins its release in the generated `lean-toolchain`, and `run`
+builds it under that release and no other, read from the SDK root it is given.
+The release is looked for unpacked under `LEAN_TOOLCHAINS`, a directory that
+`install` fills from the Lean release archives, and otherwise the `lean` on
+PATH serves, refused when it reports another version. `elan` honours the pin by
+itself, so with it on PATH nothing more is needed:
+
+```bash
+LEAN_TOOLCHAINS=/tmp/lean-toolchains npm run sdks -- install lean /tmp/sdk
+LEAN_TOOLCHAINS=/tmp/lean-toolchains npm run sdks -- run lean /tmp/sdk
+```
+
+When a pull request's suite fails, the workflow generates the base branch's
+SDKs and runs `compare`, which installs and runs the base branch's SDK under
+the release that SDK pins, then names the toolchain each side ran under in its
+verdict. A base branch release that cannot be installed gives no verdict
+rather than a wrong one.
 
 Validate the package itself with:
 

@@ -7,15 +7,25 @@
 
 module Testutil where
 
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, evaluate, try)
 import Data.IORef
 import System.Exit (exitFailure)
+import System.IO (IOMode (ReadMode), hGetContents, hSetEncoding, utf8, withFile)
 
 data Counters = Counters
   { npass    :: IORef Int
   , nfail    :: IORef Int
   , failures :: IORef [String]
   }
+
+-- A file's text decoded as UTF-8: readFile decodes with the locale's
+-- encoding, which cannot read the generated docs under a C or POSIX locale.
+readUtf8 :: FilePath -> IO String
+readUtf8 path = withFile path ReadMode $ \h -> do
+  hSetEncoding h utf8
+  s <- hGetContents h
+  _ <- evaluate (length s)
+  pure s
 
 newCounters :: IO Counters
 newCounters = Counters <$> newIORef 0 <*> newIORef 0 <*> newIORef []

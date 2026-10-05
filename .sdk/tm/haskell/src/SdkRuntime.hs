@@ -1096,11 +1096,22 @@ transformRequestUtil ctx = do
   omitKeys out ["$action"]
 
 -- A header, cookie or query argument travels where prepareHeaders or
--- prepareQuery sends it, so the body is built from the request data without it.
+-- prepareQuery sends it, so the body is built from the request data without it,
+-- unless the entity declares it as a field too.
 routedArgNames :: Context -> IO [String]
 routedArgNames ctx = do
   args <- mapM (callArgs ctx) ["header", "cookie", "query"]
-  pure [name | (name, _, _) <- concat args]
+  fields <- fieldArgNames ctx
+  pure [name | (name, _, _) <- concat args, name `notElem` fields]
+
+fieldArgNames :: Context -> IO [String]
+fieldArgNames ctx = do
+  point <- readIORef (cPoint ctx)
+  defs <- concat <$> mapM (argDefs point) ["header", "cookie", "query"]
+  fmap concat $ mapM (\ad -> do
+    name <- getStrD ad "name" ""
+    field <- getp ad "field"
+    pure [name | isTrueV field]) defs
 
 omitKeys :: Value -> [String] -> IO Value
 omitKeys v names = case v of
@@ -1186,7 +1197,65 @@ resultBodyUtil ctx = do
       when (isCallable jsn && not (isNoval body)) $ do
         d <- callJson jsn
         setp resultV "body" d
+      unr <- getp responseV "unreadable"
+      case unr of
+        VBool True -> do
+          specV <- readIORef (cSpec ctx)
+          sent <- case specV of VMap _ -> getp specV "headers"; _ -> pure VNoval
+          st <- getp resultV "status"
+          hs <- getp resultV "headers"
+          prev <- getp resultV "err"
+          e <- unreadableBody ctx (toInt st) hs body sent prev
+          setp resultV "err" e
+        _ -> pure ()
     _ -> pure ()
+
+previewLength :: Int
+previewLength = 160
+
+-- A body that is not JSON. An HTTP failure keeps its own error, with the
+-- response described; otherwise the code tells a wrong content type from
+-- malformed JSON.
+unreadableBody :: Context -> Int -> Value -> Value -> Value -> Value -> IO Value
+unreadableBody ctx status headers text sent failed = do
+  ctype <- headerText headers "content-type"
+  agent <- headerText sent "user-agent" >>= cleanText ctx
+  preview <- case text of
+    VNoval -> pure ""
+    VNull -> pure ""
+    _ -> (", body: " ++) <$> bodyPreview ctx text
+  let detail = "HTTP " ++ show status ++ ", content-type " ++ (if null ctype then "none" else ctype)
+        ++ ", user-agent " ++ (if null agent then "transport default" else agent) ++ preview
+  isE <- isErr failed
+  if isE
+    then do
+      m <- errMsg failed
+      setp failed "message" (VStr (m ++ " (" ++ detail ++ ")"))
+      pure failed
+    else if null ctype || "json" `isInfixOf` lowerS ctype
+      then mkErr "response_json_invalid" ("response: body is not valid JSON (" ++ detail ++ ")")
+      else mkErr "response_content_type" ("response: expected JSON, got " ++ ctype ++ " (" ++ detail ++ ")")
+
+headerText :: Value -> String -> IO String
+headerText headers name = case headers of
+  VMap _ -> do
+    ks <- keysof headers
+    case filter (\k -> lowerS k == name) ks of
+      (k : _) -> getp headers k >>= stringify
+      [] -> pure ""
+  _ -> pure ""
+
+cleanText :: Context -> String -> IO String
+cleanText ctx s = do
+  v <- cleanUtil ctx (VStr s)
+  pure (case v of VStr c -> c; _ -> s)
+
+-- Cleaned whole: a secret the bound would split could leave its prefix.
+bodyPreview :: Context -> Value -> IO String
+bodyPreview ctx text = do
+  raw <- stringify text
+  flat <- cleanText ctx (unwords (words raw))
+  pure (if length flat > previewLength then take previewLength flat ++ "..." else flat)
 
 resultHeadersUtil :: Context -> IO ()
 resultHeadersUtil ctx = do

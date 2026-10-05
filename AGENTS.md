@@ -24,7 +24,9 @@ components and generates a staged consumer project, all on Node alone — so it
 runs green with no `dart`, no `lake` and no `ghc` anywhere on the machine. A
 green build is not a compiled Dart, Haskell or Lean SDK, and whether you can
 produce one is a question about your environment that only your environment
-answers.
+answers. The `sdks` workflow is the check that compiles them, and its
+commands, in the README's Developing section, run it wherever the toolchain is
+present.
 
 The same asymmetry applies to paths. `vendor/routes.json` gives each vendored
 library a `local` sibling-checkout path; those are one layout offered as a
