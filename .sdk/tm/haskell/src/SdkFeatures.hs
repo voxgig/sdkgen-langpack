@@ -1336,7 +1336,18 @@ rawRequest client fetchargs = do
                   let noBody = status == 204 || status == 304 || cl == "0"
                   -- A body that does not parse leaves data unset; the call still reports its status.
                   jsonData <- if noBody then pure VNoval else do jf <- getp fetched "json"; case jf of VFunc _ -> orNoval (callJson jf); _ -> pure VNoval
-                  jo [("ok", VBool (status >= 200 && status < 300)), ("status", vint status), ("headers", headers), ("data", jsonData)]
+                  unr <- getp fetched "unreadable"
+                  case (noBody, unr) of
+                    (False, VBool True) -> do
+                      stt <- getStrD fetched "statusText" ""
+                      failed <- if status >= 200 && status < 300 then pure VNoval
+                        else mkErr "request_status" ("request: " ++ show status ++ ": " ++ stt)
+                      body <- getp fetched "body"
+                      sent <- getp fetchdef "headers"
+                      e <- unreadableBody ctx status headers body sent failed
+                      ev <- cleanUtil ctx =<< errToValue e
+                      jo [("ok", VBool False), ("status", vint status), ("headers", headers), ("data", jsonData), ("err", ev)]
+                    _ -> jo [("ok", VBool (status >= 200 && status < 300)), ("status", vint status), ("headers", headers), ("data", jsonData)]
                 _ -> do e <- mkErr "direct_invalid" "invalid response type"; ev <- errToValue e; jo [("ok", VBool False), ("err", ev)]
       case attempt of
         Right out -> pure out

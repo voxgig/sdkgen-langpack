@@ -239,8 +239,11 @@ newResponse m = do
   jv <- getp m "json"
   let jsn = case jv of VFunc _ -> jv; _ -> VNoval
   body <- getp m "body"
+  -- Set by a transport that could not read a non-blank body as JSON.
+  unr <- getp m "unreadable"
+  let unreadable = case unr of VBool True -> True; _ -> False
   jo [ ("status", vint status), ("statusText", VStr st), ("headers", headers)
-     , ("json", jsn), ("body", body), ("err", VNoval) ]
+     , ("json", jsn), ("body", body), ("err", VNoval), ("unreadable", VBool unreadable) ]
 
 newResult :: Value -> IO Value
 newResult m = do

@@ -1045,13 +1045,78 @@ def resultHeaders (ctx : Value) : SIO Unit := do
     sp resultV "headers" out
   | _ => pure ()
 
+/-- A header's value, whatever the case of its name. -/
+def headerText (headers : Value) (name : String) : SIO String := do
+  match headers with
+  | .map _ =>
+    for k in (← keysof headers) do
+      if k.toLower == name then return (← jsString (← gp headers k))
+    pure ""
+  | _ => pure ""
+
+def cleanText (ctx : Value) (s : String) : SIO String := do
+  match (← clean ctx (.str s)) with
+  | .str c => pure c
+  | _ => pure s
+
+/-- Whitespace runs as one space, trimmed. -/
+def flattenSpace (s : String) : String := Id.run do
+  let mut out := ""
+  let mut space := false
+  for c in s.toList do
+    if c.isWhitespace then
+      space := !out.isEmpty
+    else
+      if space then
+        out := out.push ' '
+        space := false
+      out := out.push c
+  return out
+
+/-- Cleaned whole: a secret the bound would split could leave its prefix. -/
+def bodyPreview (ctx : Value) (text : Value) : SIO String := do
+  let flat ← cleanText ctx (flattenSpace (← jsString text))
+  let cs := flat.toList
+  pure (if cs.length > 160 then String.ofList (cs.take 160) ++ "..." else flat)
+
+/-- A body that is not JSON. An HTTP failure keeps its own error, with the
+    response described; otherwise the code tells a wrong content type from
+    malformed JSON. -/
+def unreadableBody (ctx : Value) (status : Float) (headers text sent failed : Value) :
+    SIO Value := do
+  let ctype ← headerText headers "content-type"
+  let agent ← cleanText ctx (← headerText sent "user-agent")
+  let preview ← match text with
+    | .noval => pure ""
+    | .null => pure ""
+    | _ => do pure (", body: " ++ (← bodyPreview ctx text))
+  let detail := "HTTP " ++ numToString status ++ ", content-type " ++
+    (if ctype == "" then "none" else ctype) ++ ", user-agent " ++
+    (if agent == "" then "transport default" else agent) ++ preview
+  if (← isErrV failed) then
+    let m ← gpS failed "message"
+    sp failed "message" (.str (m ++ " (" ++ detail ++ ")"))
+    pure failed
+  else if ctype == "" || (ctype.toLower.splitOn "json").length > 1 then
+    mkErr "response_json_invalid" ("response: body is not valid JSON (" ++ detail ++ ")")
+  else
+    mkErr "response_content_type" ("response: expected JSON, got " ++ ctype ++ " (" ++ detail ++ ")")
+
 def resultBody (ctx : Value) : SIO Unit := do
   let responseV ← gp ctx "response"
   let resultV ← gp ctx "result"
   match responseV, resultV with
   | .map _, .map _ => do
     let body ← gp responseV "body"
-    if !(isNov body) then sp resultV "body" body
+    if truthy (← gp responseV "unreadable") then
+      let specV ← gp ctx "spec"
+      let sent ← match specV with
+        | .map _ => gp specV "headers"
+        | _ => pure .noval
+      let e ← unreadableBody ctx (jsNumber (← gp resultV "status")) (← gp resultV "headers")
+        body sent (← gp resultV "err")
+      sp resultV "err" e
+    else if !(isNov body) then sp resultV "body" body
   | _, _ => pure ()
 
 -- ---------------------------------------------------------------------------
