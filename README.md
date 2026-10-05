@@ -82,7 +82,9 @@ matching reference utility skips it.
 Constructing a client resolves the options through `makeOptions`, so what
 the API model declares in `config.options` is in force from the first
 operation: its `headers`, `prefix` and `suffix`, and `base` where the model
-names none. `allow.op` is defaulted there too, and `makePoint` enforces it.
+names none. `allow.op` and `allow.method` are defaulted there too, a list that
+is null, undefined or missing taking the default as it does in the other
+targets, and `makePoint` and `makeSpec` enforce them.
 
 The transport is `curl -i`: every prepared header is sent, and the response
 status, headers and body come back for the result and for the features that

@@ -15,6 +15,7 @@ import SdkHelpers
 import SdkRuntime
 import qualified SdkFeatures as F
 import qualified SdkClient as C
+import SdkConfig (makeConfig, makeFeature)
 import Testutil
 
 client :: IO Client
@@ -48,6 +49,39 @@ namedFeature nm opts = do
 
 errCodeIs :: Value -> String -> IO Bool
 errCodeIs e code = do c <- errCode e; pure (c == code)
+
+prepareAs :: Client -> String -> IO (Either SdkException Value)
+prepareAs cl m = do
+  fa <- jo [("path", VStr "/a"), ("method", VStr m)]
+  try (F.prepare cl fa)
+
+-- Whether the client prepares a POST and refuses a HEAD with spec_method_allow.
+postSentHeadRefused :: Client -> IO Bool
+postSentHeadRefused cl = do
+  sent <- prepareAs cl "post" >>= either (const (pure False))
+    (\fd -> (== "POST") . vstring <$> getp fd "method")
+  refused <- prepareAs cl "HEAD" >>= either
+    (\(SdkException e) -> errCodeIs e "spec_method_allow") (const (pure False))
+  pure (sent && refused)
+
+-- The allow.method and allow.op lists the client resolved.
+allowLists :: Client -> IO (String, String)
+allowLists cl = do
+  opts <- readIORef (clOptions cl)
+  am <- getpathS opts "allow.method"
+  ao <- getpathS opts "allow.op"
+  pure (vstring am, vstring ao)
+
+defaultAllowLists :: (String, String)
+defaultAllowLists =
+  ("GET,PUT,POST,PATCH,DELETE,OPTIONS", "create,update,load,list,remove,command,direct,graphql")
+
+takesDefaultAllow :: Value -> IO Bool
+takesDefaultAllow sdkopts = do
+  cl <- C.testSdk VNoval sdkopts
+  lists <- allowLists cl
+  ok <- postSentHeadRefused cl
+  pure (lists == defaultAllowLists && ok)
 
 tests :: Counters -> IO ()
 tests c = do
@@ -138,6 +172,43 @@ tests c = do
     post <- refused =<< prep "POST"
     pu <- refused =<< prep "PU"
     pure (sent && post && pu)
+
+  runTest c "prepare.empty_allow_method_refuses" $ do
+    am <- jo [("method", VStr "")]; sdkopts <- jo [("allow", am)]
+    cl <- C.testSdk VNoval sdkopts
+    fa <- jo [("path", VStr "/a"), ("method", VStr "get")]
+    r <- try (F.prepare cl fa) :: IO (Either SdkException Value)
+    case r of
+      Left (SdkException e) -> errCodeIs e "spec_method_allow"
+      Right _ -> pure False
+
+  runTest c "prepare.null_allow_takes_default" $ do
+    nm <- jo [("method", VNull)]; no <- jo [("op", VNull)]
+    shapes <- sequence [jo [("allow", nm)], jo [("allow", no)], jo [("allow", VNull)]]
+    and <$> mapM takesDefaultAllow shapes
+
+  runTest c "prepare.undefined_allow_takes_default" $ do
+    nm <- jo [("method", VNoval)]; no <- jo [("op", VNoval)]
+    shapes <- sequence [jo [("allow", nm)], jo [("allow", no)], jo [("allow", VNoval)]]
+    and <$> mapM takesDefaultAllow shapes
+
+  -- The caller's allow map replaces a config allow that is null or not a map.
+  runTest c "prepare.omitted_allow_key_takes_default" $ do
+    let over cfgallow allow = do
+          cfg <- makeConfig
+          cfgopts <- getp cfg "options"
+          setp cfgopts "allow" cfgallow
+          sdkopts <- jo [("allow", allow)]
+          F.sdkTest cfg makeFeature VNoval sdkopts
+        opOnly cfgallow = do
+          cl <- over cfgallow =<< jo [("op", VStr "load")]
+          lists <- allowLists cl
+          ok <- postSentHeadRefused cl
+          pure (lists == (fst defaultAllowLists, "load") && ok)
+    viaStr <- opOnly (VStr "x")
+    viaNull <- opOnly VNull
+    methodOnly <- allowLists =<< over (VStr "x") =<< jo [("method", VStr "GET")]
+    pure (viaStr && viaNull && methodOnly == ("GET", snd defaultAllowLists))
 
   runTest c "direct.allow_names_whole_ops" $ do
     ao <- jo [("op", VStr "indirect,reload")]; sdkopts <- jo [("allow", ao)]

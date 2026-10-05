@@ -382,18 +382,34 @@ def opnameOf (ctx : Value) : SIO String := do
 -- makeOptions / makeContext / operator / makeError / done
 -- ---------------------------------------------------------------------------
 
+def allowDefaults : SIO Value :=
+  newMap #[("op", .str "create,update,load,list,remove,command,direct,graphql"),
+           ("method", .str "GET,PUT,POST,PATCH,DELETE,OPTIONS")]
+
 def defaultOptions : SIO Value := do
   let hdr ← newMap #[("content-type", .str "application/json")]
   let ent ← emptyMap
-  -- `allow.op` carries the ts optspec's own default, because makePoint
-  -- enforces it; the other optspec slots are not defaulted here, so nothing
-  -- below is a value a caller could mistake for an enforced one.
-  let allow ← newMap #[("op", .str "create,update,load,list,remove,command,direct,graphql")]
+  -- `allow.op` and `allow.method` carry the ts optspec's own defaults,
+  -- because makePoint and makeSpec enforce them; the other optspec slots are
+  -- not defaulted here, so nothing below is a value a caller could mistake
+  -- for an enforced one.
   newMap #[("base", .str "http://localhost:8000"), ("prefix", .str ""),
            ("suffix", .str ""), ("headers", hdr), ("entity", ent),
-           ("allow", allow), ("clean", ← cleanOptSpec)]
+           ("allow", ← allowDefaults), ("clean", ← cleanOptSpec)]
 
-/-- Defaults <- config.options <- options, then every entity gets an alias map. -/
+/-- A nullish or missing `allow`, `allow.op` or `allow.method` takes the default,
+    as validate fills it in the other targets: the raw gate in `allowRefuses`
+    would refuse a null and let an undefined one allow everything. -/
+def fillAllowDefaults (opts : Value) : SIO Unit := do
+  let defaults ← allowDefaults
+  let allow ← lookupRaw opts (.str "allow")
+  if isNullish allow then sp opts "allow" defaults
+  else if isMapV allow then
+    for k in (← keysof defaults) do
+      if isNullish (← lookupRaw allow (.str k)) then sp allow k (← gp defaults k)
+
+/-- Defaults <- config.options <- options, then a nullish or missing allow list
+    takes its default and every entity gets an alias map. -/
 def makeOptions (config options : Value) : SIO Value := do
   let base ← defaultOptions
   let copts ← asMap (← gp config "options")
@@ -411,6 +427,7 @@ def makeOptions (config options : Value) : SIO Value := do
     cleanAddCfg cleancfg (.str v)
   let parts ← newList #[base, copts, uopts]
   let out ← merge parts
+  fillAllowDefaults out
   let ent ← gpMap out "entity"
   for k in (← keysof ent) do
     let e ← gp ent k
@@ -904,6 +921,21 @@ private def hasSub (hay needle : String) : Bool :=
 def allowListHas (names item : String) : Bool :=
   item != "" && (names.splitOn ",").any (fun name => name.trim.toUpper == item.toUpper)
 
+/-- Whether `options.allow.<key>` refuses the item. A string refuses what it does
+not name, an empty one included, as the ts reference's `allowed` does, and any
+other value refuses everything, a null or a non-map `allow` too; read raw, as gp
+reads a null as absent. Only an ABSENT `allow` or key allows, and only a
+hand-built context has one: makeOptions fills a nullish or missing list. -/
+def allowRefuses (options : Value) (key item : String) : SIO Bool := do
+  match (← lookupRaw options (.str "allow")) with
+  | .noval => pure false
+  | allow@(.map _) =>
+    match (← lookupRaw allow (.str key)) with
+    | .noval => pure false
+    | .str s => pure !(allowListHas s item)
+    | _ => pure true
+  | _ => pure true
+
 /-- Map a GraphQL error to the same error codes the HTTP path produces, so a
 caller handles auth or rate limiting identically on both transports. Servers
 put the machine-readable code in `extensions.code`; Linear-style APIs use
@@ -1137,7 +1169,13 @@ def makeSpec (ctx : Value) : SIO (Value × Option Value) := do
                       ("suffix", .str suffix), ("parts", parts),
                       ("alias", aliasm), ("step", .str "start")]
   sp ctx "spec" spec
-  sp spec "method" (.str (← prepareMethod ctx))
+  let method ← prepareMethod ctx
+  sp spec "method" (.str method)
+  if (← allowRefuses options "method" method) then
+    let allowm ← gp (← gp options "allow") "method"
+    let e ← mkErr "spec_method_allow"
+      s!"Method \"{method}\" not allowed by SDK option allow.method value: \"{vs allowm}\""
+    return (.noval, some e)
   sp spec "path" (.str (← preparePath ctx))
   sp spec "params" (← prepareParams ctx)
   sp spec "query" (← prepareQuery ctx)
@@ -1242,15 +1280,10 @@ def makePoint (ctx : Value) : SIO Value := do
   let op ← gp ctx "op"
   let opname ← gpS op "name"
   -- Whole names over the comma list, in any case, as the ts and go references
-  -- match. An absent value or an empty string allows everything: lean's
-  -- makeOptions has no optspec, so a hand-built context legitimately carries
-  -- no `allow`. A value that is not a string allows nothing.
-  let allowv ← gp (← gp (← gp ctx "options") "allow") "op"
-  let refused := match allowv with
-    | .noval => false
-    | .str s => s != "" && !(allowListHas s opname)
-    | _ => true
-  if refused then
+  -- match.
+  let options ← gp ctx "options"
+  if (← allowRefuses options "op" opname) then
+    let allowv ← gp (← gp options "allow") "op"
     return (← mkErr "point_op_allow"
       s!"Operation \"{opname}\" not allowed by SDK option allow.op value: \"{vs allowv}\"")
   let input0 ← gpS op "input"
