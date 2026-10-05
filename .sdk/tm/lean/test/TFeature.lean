@@ -305,6 +305,32 @@ def allowEmptyCases : SIO Unit := do
   check (hasSub smsg "not allowed by SDK option allow" && scalls == 0)
     s!"pipeline: an allow that is not a map refuses a load ({smsg})"
 
+/-- A model whose one point is a HEAD, which the default allow.method list does
+    not name, with `cfgOpts` spliced into its config.options. -/
+def headConfig (cfgOpts : String) : String :=
+  r#"{"main": {"name": "Pipe"}, "options": {"base": "http://api.test""# ++ cfgOpts ++
+  r#"}, "entity": {"beacon": {"name": "beacon", "op": {"load": {"name": "load",
+    "points": [{"kind": "http", "method": "HEAD", "parts": ["beacon"],
+      "transform": {"req": "`reqdata`", "res": "`body`"}, "args": {}, "select": {}}]}}}}}"#
+
+/-- The thrown message and the transport calls of a load of the HEAD point. -/
+def headLoad (opts : Value) (cfgOpts : String) : SIO (String × Nat) := do
+  let w ← mkWire
+  let c ← SdkRuntime.mkClientWith opts (headConfig cfgOpts)
+    (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+  pure (← thrown (SdkRuntime.opLoad c "beacon" (← emptyMap) (← emptyMap)), ← w.calls.get)
+
+def headRefused (r : String × Nat) : Bool :=
+  hasSub r.1 "Method \"HEAD\" not allowed by SDK option allow.method" && r.2 == 0
+
+/-- The allow.method and allow.op lists makeOptions resolves. -/
+def allowResolved (config opts : Value) : SIO (String × String) := do
+  let allow ← gp (← SdkUtility.makeOptions config opts) "allow"
+  pure (← gpS allow "method", ← gpS allow "op")
+
+def allowDefaultLists : String × String :=
+  ("GET,PUT,POST,PATCH,DELETE,OPTIONS", "create,update,load,list,remove,command,direct,graphql")
+
 /-- A null allow list takes the default, as validate refills one in the other
     targets, so a client built with one sends its request. -/
 def allowNullCases : SIO Unit := do
@@ -324,13 +350,47 @@ def allowNullCases : SIO Unit := do
   let (amsg, acalls) ← sentBy "{\"allow\":null}" create
   check (amsg == "" && acalls == 1) s!"pipeline: a null allow sends a create ({amsg})"
   let resolved (json : String) : SIO (String × String) := do
-    let allow ← gp (← SdkUtility.makeOptions (← emptyMap) (← SdkJson.jsonRead json)) "allow"
-    pure (← gpS allow "method", ← gpS allow "op")
-  let defaults := ("GET,PUT,POST,PATCH,DELETE,OPTIONS",
-    "create,update,load,list,remove,command,direct,graphql")
-  check ((← resolved "{\"allow\":{\"method\":null,\"op\":null}}") == defaults
-      && (← resolved "{\"allow\":null}") == defaults)
+    allowResolved (← emptyMap) (← SdkJson.jsonRead json)
+  check ((← resolved "{\"allow\":{\"method\":null,\"op\":null}}") == allowDefaultLists
+      && (← resolved "{\"allow\":null}") == allowDefaultLists)
     "makeOptions: a null allow, allow.op or allow.method takes the default"
+
+/-- An undefined allow list takes the default as a null one does, so a client
+    built with one still refuses a method the default list does not name. -/
+def allowNovalCases : SIO Unit := do
+  let named ← headLoad (← newMap #[("allow", ← newMap #[("method", .str "head")])]) ""
+  check (named.1 == "" && named.2 == 1)
+    s!"pipeline: an allow.method naming HEAD sends it ({named.1})"
+  let m ← headLoad (← newMap #[("allow", ← newMap #[("method", .noval)])]) ""
+  check (headRefused m) s!"pipeline: an undefined allow.method refuses a HEAD ({m.1})"
+  let a ← headLoad (← newMap #[("allow", .noval)]) ""
+  check (headRefused a) s!"pipeline: an undefined allow refuses a HEAD ({a.1})"
+  let keys ← newMap #[("method", .noval), ("op", .noval)]
+  check ((← allowResolved (← emptyMap) (← newMap #[("allow", keys)])) == allowDefaultLists
+      && (← allowResolved (← emptyMap) (← newMap #[("allow", .noval)])) == allowDefaultLists)
+    "makeOptions: an undefined allow, allow.op or allow.method takes the default"
+
+/-- Over a config.options `allow` that is null or not a map, the caller's `allow`
+    map is taken whole, and a key it omits still takes the default. -/
+def allowOmittedKeyCases : SIO Unit := do
+  -- Fresh per client: the default is filled into the caller's own map.
+  let opOnly : SIO Value := do newMap #[("allow", ← newMap #[("op", .str "load")])]
+  let s ← headLoad (← opOnly) r#", "allow": "x""#
+  check (headRefused s)
+    s!"pipeline: a caller's allow without method refuses a HEAD over a config allow \"x\" ({s.1})"
+  let n ← headLoad (← opOnly) r#", "allow": null"#
+  check (headRefused n)
+    s!"pipeline: a caller's allow without method refuses a HEAD over a null config allow ({n.1})"
+  let config ← newMap #[("options", ← newMap #[("allow", .str "x")])]
+  let got ← allowResolved config (← newMap #[("allow", ← newMap #[("method", .str "GET")])])
+  check (got == ("GET", allowDefaultLists.2))
+    s!"makeOptions: an allow.op the caller's allow omits takes the default ({got.2})"
+
+/-- One call from `main`, which is at the compiler's heartbeat limit. -/
+def allowDefaultCases : SIO Unit := do
+  allowNullCases
+  allowNovalCases
+  allowOmittedKeyCases
 
 def main : IO UInt32 := do
   let sctx ← mkCtx
@@ -480,7 +540,7 @@ def main : IO UInt32 := do
     -- pipeline: options.allow.method gates the request's method, as ts and go do
     allowMethodCases
     allowEmptyCases
-    allowNullCases
+    allowDefaultCases
 
     -- pipeline: a feature's query param (paging, at PreRequest) survives makeSpec
     (do

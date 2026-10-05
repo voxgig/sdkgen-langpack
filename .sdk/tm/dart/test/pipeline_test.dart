@@ -259,6 +259,34 @@ void tests() {
       }
     });
 
+    test('a list the allow option omits takes the default', (t) async {
+      final sdk = ProjectNameSDK.test({}, {'allow': {}});
+      equal('GET,PUT,POST,PATCH,DELETE,OPTIONS',
+          vs.getpath(sdk.options(), 'allow.method'));
+      equal('create,update,load,list,remove,command,direct,graphql',
+          vs.getpath(sdk.options(), 'allow.op'));
+      equal('spec_method_allow',
+          errcode(await sdk.prepare({'path': '/a', 'method': 'HEAD'})));
+
+      // The caller's allow replaces a config allow that is null or not a map.
+      dynamic over(dynamic cfgallow, dynamic allow) =>
+          stdutil.makeOptions(stdutil.makeContext({
+            'utility': stdutil,
+            'options': {'allow': allow},
+            'config': {
+              'options': {'allow': cfgallow}
+            },
+          }));
+      for (final cfgallow in <dynamic>['x', null]) {
+        final opts = over(cfgallow, {'op': 'load'});
+        equal('GET,PUT,POST,PATCH,DELETE,OPTIONS',
+            vs.getpath(opts, 'allow.method'));
+        equal('load', vs.getpath(opts, 'allow.op'));
+      }
+      equal('create,update,load,list,remove,command,direct,graphql',
+          vs.getpath(over('x', {'method': 'GET'}), 'allow.op'));
+    });
+
     test('direct is refused by a list that names only indirect', (t) async {
       final sdk = ProjectNameSDK.test({}, {
         'allow': {'op': 'indirect,reload'}
