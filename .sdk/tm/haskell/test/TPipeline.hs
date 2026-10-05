@@ -139,6 +139,15 @@ tests c = do
     pu <- refused =<< prep "PU"
     pure (sent && post && pu)
 
+  runTest c "prepare.empty_allow_method_refuses" $ do
+    am <- jo [("method", VStr "")]; sdkopts <- jo [("allow", am)]
+    cl <- C.testSdk VNoval sdkopts
+    fa <- jo [("path", VStr "/a"), ("method", VStr "get")]
+    r <- try (F.prepare cl fa) :: IO (Either SdkException Value)
+    case r of
+      Left (SdkException e) -> errCodeIs e "spec_method_allow"
+      Right _ -> pure False
+
   runTest c "direct.allow_names_whole_ops" $ do
     ao <- jo [("op", VStr "indirect,reload")]; sdkopts <- jo [("allow", ao)]
     cl <- C.testSdk VNoval sdkopts

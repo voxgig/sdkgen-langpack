@@ -226,6 +226,15 @@ void tests() {
           errcode(await sdk.prepare({'path': '/a', 'method': 'PU'})));
     });
 
+    test('prepare refuses every method under an empty allow.method',
+        (t) async {
+      final sdk = ProjectNameSDK.test({}, {
+        'allow': {'method': ''}
+      });
+      equal('spec_method_allow',
+          errcode(await sdk.prepare({'path': '/a', 'method': 'get'})));
+    });
+
     test('direct is refused by a list that names only indirect', (t) async {
       final sdk = ProjectNameSDK.test({}, {
         'allow': {'op': 'indirect,reload'}

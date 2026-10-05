@@ -49,6 +49,35 @@ def queryArgs : SIO Value := do
            ("header", ← defs #[("x_trace", "X-Trace"), ("trace", "trace")]),
            ("cookie", ← defs #[("session_id", "SESSIONID"), ("lang", "lang")])]
 
+/-- The allow gates on an empty, null or non-map option, and on none at all.
+    A definition of its own, as the compiler limits `main`. -/
+def allowEdgeCases : SIO Unit := do
+  let point ← newMap #[("method", .str "GET"), ("parts", ← newList #[.str "a"])]
+  let opCode (options : Value) : SIO String := do
+    let op ← newMap #[("name", .str "load"), ("points", ← newList #[point])]
+    gpS (← SdkUtility.makePoint (← newMap #[("op", op), ("options", options)])) "code"
+  let specCode (options : Value) : SIO String := do
+    let ctx ← newMap #[("options", options), ("point", point), ("opname", .str "load")]
+    match (← SdkUtility.makeSpec ctx) with
+    | (_, some e) => gpS e "code"
+    | (_, none) => pure ""
+  let allowing (key : String) (v : Value) : SIO Value := do
+    newMap #[("allow", ← newMap #[(key, v)])]
+  let scalar ← newMap #[("allow", .str "load,GET")]
+  let bare ← emptyMap
+  let other ← allowing "other" (.str "x")
+  check ((← opCode (← allowing "op" (.str ""))) == "point_op_allow"
+      && (← opCode (← allowing "op" .null)) == "point_op_allow"
+      && (← opCode scalar) == "point_op_allow")
+    "makePoint: an empty, null or non-map allow.op refuses every operation"
+  check ((← specCode (← allowing "method" (.str ""))) == "spec_method_allow"
+      && (← specCode (← allowing "method" .null)) == "spec_method_allow"
+      && (← specCode scalar) == "spec_method_allow")
+    "makeSpec: an empty, null or non-map allow.method refuses every method"
+  check ((← opCode bare) == "" && (← opCode other) == ""
+      && (← specCode bare) == "" && (← specCode other) == "")
+    "makePoint, makeSpec: a hand-built context with no allow option allows"
+
 def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
@@ -66,6 +95,8 @@ def main : IO UInt32 := do
       let listed ← attempt (← newList #[.str "load"])
       check ((← gpS numbered "code") == "point_op_allow" && (← gpS listed "code") == "point_op_allow")
         "makePoint: an allow.op that is not a string allows nothing")
+
+    allowEdgeCases
 
     (do
       let hdefs ← defs #[("idempotency_key", "Idempotency-Key"), ("page_size", "Page-Size")]

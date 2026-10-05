@@ -277,6 +277,28 @@ def allowMethodCases : SIO Unit := do
     check (hasSub msg "not allowed by SDK option allow.method" && (← w.calls.get) == 0)
       s!"pipeline: an allow.method that is not a string allows nothing ({msg})")
 
+/-- An empty allow list names nothing and an `allow` that is not a map names
+    nothing either, so a client built with either sends no request. -/
+def allowEmptyCases : SIO Unit := do
+  let refusedBy (allow : Value) (act : Value → SIO Value) : SIO (String × Nat) := do
+    let w ← mkWire
+    let c ← SdkRuntime.mkClientWith (← newMap #[("allow", allow)]) pipeConfig
+      (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+    pure (← thrown (act c), ← w.calls.get)
+  let create := fun (c : Value) => do
+    SdkRuntime.opCreate c "widget" (← newMap #[("title", .str "T")]) (← emptyMap)
+  let load := fun (c : Value) => do
+    SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "i1")]) (← emptyMap)
+  let (mmsg, mcalls) ← refusedBy (← newMap #[("method", .str "")]) create
+  check (hasSub mmsg "not allowed by SDK option allow.method" && mcalls == 0)
+    s!"pipeline: an empty allow.method refuses a create ({mmsg})"
+  let (omsg, ocalls) ← refusedBy (← newMap #[("op", .str "")]) load
+  check (hasSub omsg "not allowed by SDK option allow.op" && ocalls == 0)
+    s!"pipeline: an empty allow.op refuses a load ({omsg})"
+  let (smsg, scalls) ← refusedBy (.str "load,GET") load
+  check (hasSub smsg "not allowed by SDK option allow" && scalls == 0)
+    s!"pipeline: an allow that is not a map refuses a load ({smsg})"
+
 def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
@@ -424,6 +446,7 @@ def main : IO UInt32 := do
 
     -- pipeline: options.allow.method gates the request's method, as ts and go do
     allowMethodCases
+    allowEmptyCases
 
     -- pipeline: a feature's query param (paging, at PreRequest) survives makeSpec
     (do

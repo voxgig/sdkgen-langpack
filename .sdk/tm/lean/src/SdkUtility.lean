@@ -894,14 +894,20 @@ private def hasSub (hay needle : String) : Bool :=
 def allowListHas (names item : String) : Bool :=
   item != "" && (names.splitOn ",").any (fun name => name.trim.toUpper == item.toUpper)
 
-/-- Whether an allow option refuses the item. An absent value or an empty string
-allows everything: lean's makeOptions has no optspec, so a hand-built context
-legitimately carries no `allow`. A value that is not a string allows nothing. -/
-def allowRefuses (allowv : Value) (item : String) : Bool :=
-  match allowv with
-  | .noval => false
-  | .str s => s != "" && !(allowListHas s item)
-  | _ => true
+/-- Whether `options.allow.<key>` refuses the item. A string refuses what it does
+not name, an empty one included, as the ts reference's `allowed` does, and any
+other value refuses everything, a non-map `allow` too. Only an ABSENT `allow` or
+key allows, as lean's makeOptions has no optspec: a hand-built context carries
+none. Read raw, so a stored null is a value rather than an absence. -/
+def allowRefuses (options : Value) (key item : String) : SIO Bool := do
+  match (← lookupRaw options (.str "allow")) with
+  | .noval => pure false
+  | allow@(.map _) =>
+    match (← lookupRaw allow (.str key)) with
+    | .noval => pure false
+    | .str s => pure !(allowListHas s item)
+    | _ => pure true
+  | _ => pure true
 
 /-- Map a GraphQL error to the same error codes the HTTP path produces, so a
 caller handles auth or rate limiting identically on both transports. Servers
@@ -1073,8 +1079,8 @@ def makeSpec (ctx : Value) : SIO (Value × Option Value) := do
   sp ctx "spec" spec
   let method ← prepareMethod ctx
   sp spec "method" (.str method)
-  let allowm ← gp (← gp options "allow") "method"
-  if allowRefuses allowm method then
+  if (← allowRefuses options "method" method) then
+    let allowm ← gp (← gp options "allow") "method"
     let e ← mkErr "spec_method_allow"
       s!"Method \"{method}\" not allowed by SDK option allow.method value: \"{vs allowm}\""
     return (.noval, some e)
@@ -1183,8 +1189,9 @@ def makePoint (ctx : Value) : SIO Value := do
   let opname ← gpS op "name"
   -- Whole names over the comma list, in any case, as the ts and go references
   -- match.
-  let allowv ← gp (← gp (← gp ctx "options") "allow") "op"
-  if allowRefuses allowv opname then
+  let options ← gp ctx "options"
+  if (← allowRefuses options "op" opname) then
+    let allowv ← gp (← gp options "allow") "op"
     return (← mkErr "point_op_allow"
       s!"Operation \"{opname}\" not allowed by SDK option allow.op value: \"{vs allowv}\"")
   let input0 ← gpS op "input"
