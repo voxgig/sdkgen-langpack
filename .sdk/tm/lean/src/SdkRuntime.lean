@@ -293,6 +293,19 @@ def mockOp (client : Value) (entityName opName : String)
     | _ => emptyMap
   | _ => emptyMap
 
+/-- The key a list's response transform
+    ["`$EACH`", "body", {"`$MERGE`": "`.<key>`"}] reads each item's record
+    under; empty for any other transform. -/
+def itemEnvelopeKey (restf : Value) : SIO String := do
+  let spec ← listItemsOf restf
+  if spec.size != 3 || asStr spec[0]! != "`$EACH`" || asStr spec[1]! != "body" then pure ""
+  else
+    let merge := asStr (← gp spec[2]! "`$MERGE`")
+    if merge.startsWith "`." && merge.endsWith "`" && merge.length > 3 then
+      let key := ((merge.drop 2).dropEnd 1).toString
+      if key.any (fun c => c == '.' || c == '`' || c == '$') then pure "" else pure key
+    else pure ""
+
 /-- THE MOCK HAS TO AGREE WITH THE MODEL. A point carrying
     `transform.res: `body.item`` describes an API that answers {"item": {...}}
     and the response transform unwraps that key on the way back. Returning the
@@ -301,14 +314,20 @@ def mockOp (client : Value) (entityName opName : String)
 def mockEnvelope (ctx : Value) (data : Value) : SIO Value := do
   if isNv data then pure data else do
     let tm ← gp (← gp ctx "point") "transform"
-    let spec := asStr (← gp tm "res")
-    -- Exactly `body.<key>`; a deeper path is not an envelope this mock can
-    -- synthesise, so it is left alone rather than guessed at.
-    if spec.startsWith "`body." && spec.endsWith "`" && spec.length > 7 then
-      let inner := ((spec.drop 6).dropEnd 1).toString
-      if inner.isEmpty || inner.contains '.' then pure data
-      else newMap #[(inner, data)]
-    else pure data
+    let restf ← gp tm "res"
+    let key ← itemEnvelopeKey restf
+    if !key.isEmpty && (match data with | .list _ => true | _ => false) then do
+      let items ← listItemsOf data
+      newList (← items.mapM fun item => newMap #[(key, item)])
+    else do
+      let spec := asStr restf
+      -- Exactly `body.<key>`; a deeper path is not an envelope this mock can
+      -- synthesise, so it is left alone rather than guessed at.
+      if spec.startsWith "`body." && spec.endsWith "`" && spec.length > 7 then
+        let inner := ((spec.drop 6).dropEnd 1).toString
+        if inner.isEmpty || inner.contains '.' then pure data
+        else newMap #[(inner, data)]
+      else pure data
 
 /-- The base transport in test mode: answer from the seeded store. -/
 def testFetcher : SdkFeature.Fetcher := fun ctx _url _fetchdef => do

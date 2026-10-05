@@ -281,6 +281,28 @@ describe('sdkgen-langpack', () => {
       'target has grown an entity layer and the contract note in sdkgen\'s ' +
       'AGENTS.md needs revisiting')
   })
+
+
+  // GHC's readFile decodes with the locale's encoding, so under a C or POSIX
+  // locale it cannot read the generated docs, and the README gate read them
+  // as absent and passed. CI runs with a UTF-8 locale, where nothing else
+  // would show a bare readFile coming back.
+  test('the haskell tests read files as UTF-8, not through the locale', () => {
+    const tests = Object.entries(generated.files)
+      .filter(([p]) => /^haskell\/test\/[^/]+\.hs$/.test(p))
+    ok(0 < tests.length, 'no haskell test sources generated')
+
+    const code = (src) => String(src).split('\n')
+      .filter((line) => !/^\s*--/.test(line)).join('\n')
+
+    deepStrictEqual(
+      tests.filter(([, src]) => /\breadFile\b/.test(code(src))).map(([p]) => p), [],
+      'a haskell test reads a file with the locale-dependent readFile; use readUtf8')
+
+    const util = tests.find(([p]) => p.endsWith('/Testutil.hs'))
+    ok(util && /hSetEncoding h utf8/.test(String(util[1])),
+      'Testutil.hs no longer decodes readUtf8 as UTF-8')
+  })
 })
 
 
@@ -692,6 +714,25 @@ describe('argument routing in the templates', () => {
 
     test(lang + ': transformRequest builds the body without the routed arguments', () => {
       ok(/routedArgNames/.test(body(lang, 'body')), lang + ': transformRequest keeps the routed arguments')
+    })
+  }
+})
+
+
+describe('the test mock in the templates', () => {
+  const TM = Path.join(PKG, '.sdk', 'tm')
+
+  // Where each mock wraps a listed record under the key its transform reads.
+  const WRAP = {
+    dart: ['dart/lib/feature/test/TestFeature.dart', '<String, dynamic>{itemkey: item}'],
+    haskell: ['haskell/src/SdkFeatures.hs', 'jo [(k, i)]'],
+    lean: ['lean/src/SdkRuntime.lean', 'newMap #[(key, item)]'],
+  }
+
+  for (const [lang, [rel, form]] of Object.entries(WRAP)) {
+    test(lang + ': the test mock wraps each listed record under its key', () => {
+      const src = Fs.readFileSync(Path.join(TM, rel), 'utf8')
+      ok(src.includes(form), lang + ': the test mock answers wrapped list items bare (' + rel + ')')
     })
   }
 })

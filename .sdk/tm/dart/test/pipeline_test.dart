@@ -20,6 +20,8 @@ import '../lib/feature/base/BaseFeature.dart';
 import '../lib/utility/ErrUtility.dart';
 import '../lib/utility/FetcherUtility.dart' show defaultUserAgent, httpFetch;
 import '../lib/utility/Utility.dart';
+import '../lib/utility/voxgig_struct.dart' as vs;
+import '../lib/feature/test/TestFeature.dart';
 
 // Transport-shaped response with a re-readable body + lowercased headers.
 Map<String, dynamic> resp(int status, [dynamic data, Map<String, dynamic>? headers]) {
@@ -908,6 +910,23 @@ void tests() {
               {'x_trace': 't1', 'session_id': 's1', 'page_size': 2, 'title': 'T', r'$action': 'a'})));
     });
 
+    test('an argument the entity declares as a field stays in the body', (t) {
+      for (final kind in ['header', 'cookie', 'query']) {
+        final point = <String, dynamic>{
+          'transform': {'req': '`reqdata`'},
+          'args': {
+            kind: [
+              {'name': 'locale', 'orig': 'Locale', 'field': true},
+              {'name': 'session_id', 'orig': 'SESSIONID'},
+            ],
+          },
+        };
+        deepEqual({'name': 'n', 'locale': 'en'},
+            stdutil.transformRequest(
+                hctx(point, {}, {'name': 'n', 'locale': 'en', 'session_id': 's1'})));
+      }
+    });
+
     test('a raw request body is sent as given', (t) {
       final ctx = hctx(<String, dynamic>{
         'body': {'kind': 'raw', 'media': 'text/plain'},
@@ -955,6 +974,15 @@ void tests() {
       } finally {
         await server.close(force: true);
       }
+    });
+  });
+
+  describe('feature:test mock envelope', () {
+    test('a list whose items each wrap the record answers the wrappers', (t) {
+      final spec = [r'`$EACH`', 'body', {r'`$MERGE`': '`.badge`'}];
+      final out = mockEnvelope(spec, [{'id': 'b1'}, {'id': 'b2'}]);
+      deepEqual([{'badge': {'id': 'b1'}}, {'badge': {'id': 'b2'}}], out);
+      deepEqual([{'id': 'b1'}, {'id': 'b2'}], vs.transform({'body': out}, spec));
     });
   });
 }
