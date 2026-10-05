@@ -60,6 +60,9 @@
     "operation. Not the oldest that might work: a floor nobody tests is the",
     "shape of haskell's old >=3.5.0, which accepted versions where a target's",
     "components would install and then die at generation on a missing export.",
+    "The apidef floor follows that release's own peer, @voxgig/apidef",
+    ">=8.23.0: no older apidef installs beside it, so the two floors move",
+    "together or the floor lane cannot pin them.",
     "",
     "The build workflow's `floor` lane is what keeps that sentence true. It",
     "reads these two ranges out of peerDependencies and downgrades to them",
@@ -74,13 +77,13 @@
     "reads .aontu models, the only extension aontu reads from 0.73 on."
   ],
   "peerDependencies": {
-    "@voxgig/apidef": ">=8.17.0",
+    "@voxgig/apidef": ">=8.23.0",
     "@voxgig/sdkgen": ">=4.34.1",
     "@voxgig/struct": ">=0.2"
   },
   "devDependencies": {
     "@types/node": ">=24",
-    "@voxgig/apidef": ">=8.17.0",
+    "@voxgig/apidef": ">=8.23.0",
     "@voxgig/sdkgen": ">=4.34.1",
     "@voxgig/struct": ">=0.2",
     "aontu": ">=0.75.0",

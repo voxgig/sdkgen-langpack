@@ -121,23 +121,19 @@ const Test = cmp(async function Test(props: any) {
 
     if (ops.create && ops.load && ops.remove) {
       body += `        -- create -> load back -> remove, all in the store
-        let newmap ← SdkRuntime.gp (← SdkRuntime.gp seed "new") "${e.name}"
-        let nks ← keysof newmap
-        if nks.size > 0 then do
-          let payload ← SdkRuntime.gp newmap nks[0]!
-          let created ← ${ns}.create tclient payload (← emptyMap)
-          let cid ← SdkRuntime.gpS created "id"
-          if cid == "" then fail "${e.name}.create offline returned no id" else do
-            let m2 ← newMap #[("id", Value.str cid)]
-            let back ← ${ns}.load tclient m2 (← emptyMap)
-            if (← SdkRuntime.gpS back "id") == cid then
-              pass s!"${e.name}.create/load offline (id={cid})"
-            else fail s!"${e.name}.create/load offline mismatch"
-            let _ ← ${ns}.remove tclient m2 (← emptyMap)
-            let gone ← ${ns}.load tclient m2 (← emptyMap)
-            match gone with
-            | Value.map _ => fail s!"${e.name}.remove offline: still present"
-            | _ => pass s!"${e.name}.remove offline (id={cid})"
+        let created ← ${ns}.create tclient (← newRefData seed "${e.name}") (← emptyMap)
+        let cid ← SdkRuntime.gpS created "id"
+        if cid == "" then fail "${e.name}.create offline returned no id" else do
+          let m2 ← newMap #[("id", Value.str cid)]
+          let back ← ${ns}.load tclient m2 (← emptyMap)
+          if (← SdkRuntime.gpS back "id") == cid then
+            pass s!"${e.name}.create/load offline (id={cid})"
+          else fail s!"${e.name}.create/load offline mismatch"
+          let _ ← ${ns}.remove tclient m2 (← emptyMap)
+          let gone ← ${ns}.load tclient m2 (← emptyMap)
+          match gone with
+          | Value.map _ => fail s!"${e.name}.remove offline: still present"
+          | _ => pass s!"${e.name}.remove offline (id={cid})"
 `
     }
 
@@ -146,19 +142,16 @@ const Test = cmp(async function Test(props: any) {
       const field = patchField(e)
       patchDefs += `/-- ${e.name}: a patch changes the field it sends, in the store. -/
 def ${def} (tclient seed : Value) : SIO Unit := do
-  let newmap ← SdkRuntime.gp (← SdkRuntime.gp seed "new") "${e.name}"
-  let nks ← keysof newmap
-  if nks.size > 0 then do
-    try
-      let created ← ${ns}.create tclient (← SdkRuntime.gp newmap nks[0]!) (← emptyMap)
-      let cid ← SdkRuntime.gpS created "id"
-      let m ← newMap #[("id", Value.str cid)]
-      let d ← newMap #[("id", Value.str cid), ("${field}", Value.str "PatchedMark")]
-      let patched ← ${ns}.patch tclient m d (← emptyMap)
-      check (SdkUtility.isMapV patched && (← SdkRuntime.gpS patched "id") == cid
-          && (← SdkRuntime.gpS patched "${field}") == "PatchedMark")
-        s!"${e.name}.patch offline (id={cid})"
-    catch err => fail s!"${e.name}.patch offline: {err}"
+  try
+    let created ← ${ns}.create tclient (← newRefData seed "${e.name}") (← emptyMap)
+    let cid ← SdkRuntime.gpS created "id"
+    let m ← newMap #[("id", Value.str cid)]
+    let d ← newMap #[("id", Value.str cid), ("${field}", Value.str "PatchedMark")]
+    let patched ← ${ns}.patch tclient m d (← emptyMap)
+    check (SdkUtility.isMapV patched && (← SdkRuntime.gpS patched "id") == cid
+        && (← SdkRuntime.gpS patched "${field}") == "PatchedMark")
+      s!"${e.name}.patch offline (id={cid})"
+  catch err => fail s!"${e.name}.patch offline: {err}"
 
 `
       body += `        ${def} tclient seed
@@ -548,6 +541,15 @@ def cleanSensitivity : SIO Unit := do
     let explained ← SdkRuntime.gpS (← SdkRuntime.gp ectrl "err") "message"
     check (plain != "" && explained == plain)
       s!"clean: with clean off, explain keeps the error ({explained})"
+
+/-- The first new record the seed holds for an entity, or an empty map when it
+    holds none, so a check that creates from it still runs. -/
+def newRefData (seed : Value) (entName : String) : SIO Value := do
+  let newEnts ← SdkRuntime.gp (← SdkRuntime.gp seed "new") entName
+  let refs ← keysof newEnts
+  match refs[0]? with
+  | some ref => do clone (← SdkRuntime.gp newEnts ref)
+  | none => emptyMap
 
 ${patchDefs}def defaultBase : String := "http://localhost:8901"
 

@@ -230,6 +230,54 @@ describe('sdkgen-langpack', () => {
     ok(file('haskell/REFERENCE.md').includes('ePatch ent data ctrl :: IO Entity'),
       'haskell: the reference does not document ePatch')
   })
+
+
+  // A fixture need not hold a `new` record for every entity: one a project
+  // wrote, or an older scaffold's, may not. haskell's newRefData and dart's
+  // patch test then create from an empty map, and lean must too, or its
+  // offline create and patch checks print nothing and the tally just shrinks.
+  test('lean creates from an empty map when the fixture holds no new record', async () => {
+    // A remove beside the create, so the create/load/remove check is emitted
+    // as well as the patch check.
+    const remove = `
+main: kit: entity: planet: op: remove: {
+  name: "remove"
+  points: [ {
+    g: { params: [
+      { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "p01" }
+    ] }
+    m: "DELETE", o: "/planet/{id}", s: [{ lit: "planet" }, { var: "id" }]
+    t: { req: "\`reqdata\`", res: "\`body\`" }
+  } ]
+}
+`
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, remove),
+    })
+    const runner = files['lean/test/Runner.lean']
+    ok(null != runner, 'lean: no test/Runner.lean generated')
+    const lines = String(runner).split('\n')
+
+    const creates = lines.filter((l) => /\bPlanet\.create tclient\b/.test(l))
+    strictEqual(creates.length, 2,
+      'lean: expected the create/load/remove and the patch checks each to create:\n' +
+      creates.join('\n'))
+    for (const line of creates) {
+      ok(line.includes('(← newRefData seed "planet")'),
+        'lean: an offline check creates only from a new record the fixture holds: ' +
+        line.trim())
+    }
+
+    // The seed's new records are read in that one place, which falls back.
+    const at = lines.findIndex((l) => l.startsWith('def newRefData '))
+    ok(-1 < at, 'lean: test/Runner.lean defines no newRefData')
+    const helper = lines.slice(at, lines.indexOf('', at))
+    const reads = lines.filter((l) => l.includes('"new"'))
+    ok(1 === reads.length && helper.includes(reads[0]),
+      'lean: the seed\'s new records are not read once, in newRefData:\n' + reads.join('\n'))
+    ok(helper.includes('  | none => emptyMap'),
+      'lean: newRefData gives no empty map for a seed without a new record')
+  })
 })
 
 
