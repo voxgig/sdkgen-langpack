@@ -6,10 +6,10 @@ module TPipeline (tests) where
 
 import Control.Exception (try)
 import Data.IORef
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, isSuffixOf)
 import Data.Maybe (isNothing)
 
-import VoxgigStruct (Value (..), emptyMap, emptyList, mkList, size, ismap, isNoval, vint)
+import VoxgigStruct (Value (..), InjArg (INone), emptyMap, emptyList, mkList, size, ismap, isNoval, vint, listItems, transform)
 import SdkTypes
 import SdkHelpers
 import SdkRuntime
@@ -157,6 +157,27 @@ tests c = do
     errv <- getp res "err"
     pure (not (isTrueV okv) && "not allowed by SDK option allow.op" `isInfixOf` vstring errv)
 
+  runTest c "direct.reports_unreadable_body" $ do
+    let page = "<html>key NONJSON-SECRET-7f2c " ++ replicate 300 'x' ++ "</html>"
+        fetchFn = VFunc (\_ _ _ _ -> do
+          hm <- jo [("content-type", VStr "text/html")]
+          jo [ ("status", VNum 200), ("statusText", VStr "OK"), ("headers", hm)
+             , ("body", VStr page), ("json", jsonThunk VNoval), ("unreadable", VBool True) ])
+    sys <- jo [("fetch", fetchFn)]
+    hs <- jo [("user-agent", VStr "Probe/1.0")]
+    opts <- jo [ ("base", VStr "http://nonjson.test"), ("apikey", VStr "NONJSON-SECRET-7f2c")
+               , ("headers", hs), ("system", sys) ]
+    cl <- C.newSdk opts
+    fa <- jo [("path", VStr "/a")]
+    res <- F.direct cl fa
+    okv <- getp res "ok"
+    errv <- getp res "err"
+    code <- getp errv "code"; msg <- getp errv "message"
+    let m = vstring msg
+    pure (not (isTrueV okv) && vstring code == "response_content_type"
+          && "expected JSON, got text/html (HTTP 200, content-type text/html, user-agent Probe/1.0, body: <html>key " `isInfixOf` m
+          && not ("NONJSON-SECRET-7f2c" `isInfixOf` m) && "...)" `isSuffixOf` m)
+
   runTest c "make_point.rejects_no_endpoints" $ do
     cl <- client; ctx <- mkCtx cl "load"
     (_, merr) <- makePointUtil ctx
@@ -204,6 +225,27 @@ tests c = do
     (_, merr) <- makeSpecUtil ctx
     case merr of Just e -> errCodeIs e "boom"; Nothing -> pure False
 
+  runTest c "test_mock.item_envelope" $ do
+    cl <- client; ctx <- mkCtx cl "list"
+    mergeSpec <- jo [("`$MERGE`", VStr "`.badge`")]
+    restf <- ja [VStr "`$EACH`", VStr "body", mergeSpec]
+    tm <- jo [("res", restf)]; point <- jo [("transform", tm)]
+    writeIORef (cPoint ctx) point
+    r1 <- jo [("id", VStr "b1")]; r2 <- jo [("id", VStr "b2")]
+    out <- F.mockEnvelope ctx =<< ja [r1, r2]
+    wrapped <- mapM (\i -> getp i "badge" >>= \r -> getp r "id") =<< listItems out
+    back <- (\b -> transform INone b restf) =<< jo [("body", out)]
+    ids <- mapM (\r -> getp r "id") =<< listItems back
+    pure ([s | VStr s <- wrapped] == ["b1", "b2"] && [s | VStr s <- ids] == ["b1", "b2"])
+
+  runTest c "test_mock.body_envelope" $ do
+    cl <- client; ctx <- mkCtx cl "load"
+    tm <- jo [("res", VStr "`body.item`")]; point <- jo [("transform", tm)]
+    writeIORef (cPoint ctx) point
+    out <- F.mockEnvelope ctx =<< jo [("id", VStr "i1")]
+    i <- getp out "item" >>= \r -> getp r "id"
+    pure (case i of VStr "i1" -> True; _ -> False)
+
   runTest c "make_response.guard_no_spec" $ do
     cl <- client; ctx <- mkCtx cl "load"
     writeIORef (cSpec ctx) VNoval
@@ -244,6 +286,44 @@ tests c = do
     _ <- makeResponseUtil ctx
     ctrlV <- readIORef (cCtrl ctx); exv <- getp ctrlV "explain"; resv <- getp exv "result"
     pure (ismap resv)
+
+  -- A body the transport marks as not JSON is named by its label.
+  let unreadableErr status ctype body = do
+        cl <- client; ctx <- mkCtx cl "load"
+        sp <- fullSpec
+        sh <- getp sp "headers"; setp sh "user-agent" (VStr "Probe/1.0")
+        writeIORef (cSpec ctx) sp
+        hm <- emptyMap
+        mapM_ (\t -> setp hm "content-type" (VStr t)) ctype
+        r <- newResponse =<< jo [ ("status", vint status), ("statusText", VStr (if status < 400 then "OK" else "ERR"))
+                                 , ("headers", hm), ("json", jsonThunk VNoval), ("body", VStr body)
+                                 , ("unreadable", VBool True) ]
+        writeIORef (cResponse ctx) r
+        res <- newResult =<< emptyMap; writeIORef (cResult ctx) res
+        _ <- makeResponseUtil ctx
+        rv <- readIORef (cResult ctx)
+        e <- getp rv "err"
+        code <- errCode e; msg <- errMsg e
+        pure (code, msg)
+
+  runTest c "make_response.unreadable_json_label" $ do
+    (code, msg) <- unreadableErr 200 (Just "application/json") "{\"a\": "
+    pure (code == "response_json_invalid"
+          && "body is not valid JSON (HTTP 200, content-type application/json, user-agent Probe/1.0, body: {\"a\":)" `isInfixOf` msg)
+
+  runTest c "make_response.unreadable_no_label" $ do
+    (code, msg) <- unreadableErr 200 Nothing "not json"
+    pure (code == "response_json_invalid" && "content-type none" `isInfixOf` msg)
+
+  runTest c "make_response.unreadable_other_label" $ do
+    (code, msg) <- unreadableErr 200 (Just "text/html") "<p>\n  challenge </p>"
+    pure (code == "response_content_type" && "expected JSON, got text/html" `isInfixOf` msg
+          && "body: <p> challenge </p>)" `isInfixOf` msg)
+
+  runTest c "make_response.unreadable_http_failure" $ do
+    (code, msg) <- unreadableErr 503 (Just "text/html") "<p>down</p>"
+    pure (code == "request_status"
+          && "request: 503: ERR (HTTP 503, content-type text/html, user-agent Probe/1.0, body: <p>down</p>)" `isInfixOf` msg)
 
   runTest c "make_result.guard_no_result" $ do
     cl <- client; ctx <- mkCtx cl "load"

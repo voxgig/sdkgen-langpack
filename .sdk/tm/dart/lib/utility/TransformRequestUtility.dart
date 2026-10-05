@@ -33,12 +33,17 @@ dynamic transformRequest(dynamic ctx) {
 dynamic stripAction(dynamic reqdata) => omit(reqdata, [r'$action']);
 
 // A header, cookie or query argument travels where prepareHeaders or
-// prepareQuery sends it, so the body is built from the request data without it.
+// prepareQuery sends it, so the body is built from the request data without it,
+// unless the entity declares it as a field too.
 List<dynamic> routedArgNames(dynamic ctx) => [
       ...callArgs(ctx, 'header'),
       ...callArgs(ctx, 'cookie'),
       ...callArgs(ctx, 'query'),
-    ].map((arg) => arg['name']).toList();
+    ].map((arg) => arg['name']).where((name) => !fieldArg(ctx, name)).toList();
+
+bool fieldArg(dynamic ctx, dynamic name) => ['header', 'cookie', 'query'].any(
+    (kind) => argList(ctx.point, kind).any((arg) =>
+        name == vs.getprop(arg, 'name') && true == vs.getprop(arg, 'field')));
 
 dynamic omit(dynamic reqdata, List<dynamic> names) {
   if (reqdata is! Map) return reqdata;

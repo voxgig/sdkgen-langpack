@@ -5,6 +5,8 @@
 // success-path op never reaches. All utilities are reached through
 // `stdutil`, so this suite is API-agnostic. Port of ts test/pipeline.test.ts.
 
+import 'dart:io' show ContentType, HttpServer, InternetAddress;
+
 import 'harness.dart';
 
 import '../lib/ProjectNameSDK.dart';
@@ -16,7 +18,10 @@ import '../lib/Result.dart';
 import '../lib/Spec.dart';
 import '../lib/feature/base/BaseFeature.dart';
 import '../lib/utility/ErrUtility.dart';
+import '../lib/utility/FetcherUtility.dart' show defaultUserAgent, httpFetch;
 import '../lib/utility/Utility.dart';
+import '../lib/utility/voxgig_struct.dart' as vs;
+import '../lib/feature/test/TestFeature.dart';
 
 // Transport-shaped response with a re-readable body + lowercased headers.
 Map<String, dynamic> resp(int status, [dynamic data, Map<String, dynamic>? headers]) {
@@ -253,6 +258,32 @@ void tests() {
       equal(false, res['ok']);
       equal('spec_method_allow', errcode(res['err']));
     });
+
+    test('direct reports a body the transport marks as not JSON', (t) async {
+      final sdk = ProjectNameSDK({
+        'base': 'http://nonjson.test',
+        'apikey': 'NONJSON-SECRET-7f2c',
+        'headers': {'user-agent': 'Probe/1.0'},
+        'system': {
+          'fetch': (dynamic url, dynamic fetchdef) => {
+                'status': 200,
+                'statusText': 'OK',
+                'headers': {'content-type': 'text/html'},
+                'body': '<html>key NONJSON-SECRET-7f2c ' + 'x' * 300 + '</html>',
+                'json': () => null,
+                'unreadable': true,
+              }
+        }
+      });
+      final res = await sdk.direct({'path': '/a'});
+      equal(false, res['ok']);
+      equal('response_content_type', errcode(res['err']));
+      final String msg = res['err'].message;
+      ok(msg.contains('expected JSON, got text/html (HTTP 200, '
+          'content-type text/html, user-agent Probe/1.0, body: <html>key '));
+      ok(!msg.contains('NONJSON-SECRET-7f2c'));
+      ok(msg.endsWith('...)'));
+    });
   });
 
   describe('pipeline:makeResponse', () {
@@ -303,6 +334,41 @@ void tests() {
       });
       await stdutil.makeResponse(ctx);
       ok(null != ctx.ctrl['explain']['result']);
+    });
+
+    test('a body marked as not JSON is named by its label', (t) async {
+      Future<dynamic> run(int status, String? type, String body) async {
+        final r = resp(status, null,
+            null == type ? null : <String, dynamic>{'content-type': type});
+        r['body'] = body;
+        r['unreadable'] = true;
+        final ctx = base({
+          'spec': {
+            'step': 's',
+            'headers': {'user-agent': 'Probe/1.0'}
+          },
+          'response': r,
+          'result': {'ok': false}
+        });
+        await stdutil.makeResponse(ctx);
+        return ctx.result.err;
+      }
+
+      final bad = await run(200, 'application/json', '{"a": ');
+      equal('response_json_invalid', bad.code);
+      ok(bad.message.contains('body is not valid JSON (HTTP 200, '
+          'content-type application/json, user-agent Probe/1.0, body: {"a":)'));
+      final untyped = await run(200, null, 'not json');
+      equal('response_json_invalid', untyped.code);
+      ok(untyped.message.contains('content-type none'));
+      final html = await run(200, 'text/html', '<p>\n  challenge </p>');
+      equal('response_content_type', html.code);
+      ok(html.message.contains('expected JSON, got text/html'));
+      ok(html.message.contains('body: <p> challenge </p>)'));
+      final failed = await run(503, 'text/html', '<p>down</p>');
+      equal('request_status', failed.code);
+      ok(failed.message.contains('request: 503: ERR (HTTP 503, '
+          'content-type text/html, user-agent Probe/1.0, body: <p>down</p>)'));
     });
 
     test('a body-parse exception is captured on result.err', (t) async {
@@ -853,12 +919,79 @@ void tests() {
               {'x_trace': 't1', 'session_id': 's1', 'page_size': 2, 'title': 'T', r'$action': 'a'})));
     });
 
+    test('an argument the entity declares as a field stays in the body', (t) {
+      for (final kind in ['header', 'cookie', 'query']) {
+        final point = <String, dynamic>{
+          'transform': {'req': '`reqdata`'},
+          'args': {
+            kind: [
+              {'name': 'locale', 'orig': 'Locale', 'field': true},
+              {'name': 'session_id', 'orig': 'SESSIONID'},
+            ],
+          },
+        };
+        deepEqual({'name': 'n', 'locale': 'en'},
+            stdutil.transformRequest(
+                hctx(point, {}, {'name': 'n', 'locale': 'en', 'session_id': 's1'})));
+      }
+    });
+
     test('a raw request body is sent as given', (t) {
       final ctx = hctx(<String, dynamic>{
         'body': {'kind': 'raw', 'media': 'text/plain'},
       }, {}, {r'$body': 'hello'});
       ctx.op = Operation({'name': 'create', 'entity': 'x', 'input': 'data'});
       equal('hello', stdutil.prepareBody(ctx));
+    });
+  });
+
+  describe('fetcher:httpFetch', () {
+    test('marks a body that is not JSON and sends the default agent', (t) async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) {
+        final agent = req.headers.value('user-agent') ?? '';
+        if ('/json' == req.uri.path) {
+          req.response.headers.contentType = ContentType.json;
+          req.response.write('{"agent": "$agent"}');
+        } else if ('/page' == req.uri.path) {
+          req.response.headers.contentType = ContentType.html;
+          req.response.write('<p>$agent</p>');
+        }
+        req.response.close();
+      });
+      try {
+        final url = 'http://127.0.0.1:${server.port}';
+        equal('Mozilla/5.0 (compatible; ProjectNameSDK/1.0)', defaultUserAgent);
+
+        final sent = <String, dynamic>{};
+        final page = await httpFetch('$url/page', {'method': 'GET', 'headers': sent});
+        equal(true, page['unreadable']);
+        equal('<p>$defaultUserAgent</p>', page['body']);
+        equal(defaultUserAgent, sent['user-agent']);
+
+        final bare = <String, dynamic>{'method': 'GET'};
+        final blank = await httpFetch('$url/blank', bare);
+        equal(false, blank['unreadable']);
+        equal(null, blank['body']);
+        equal(defaultUserAgent, bare['headers']['user-agent']);
+
+        final own = <String, dynamic>{'User-Agent': 'Probe/1.0'};
+        final data = await httpFetch('$url/json', {'method': 'GET', 'headers': own});
+        equal(false, data['unreadable']);
+        equal('Probe/1.0', data['json']()['agent']);
+        equal(1, own.length);
+      } finally {
+        await server.close(force: true);
+      }
+    });
+  });
+
+  describe('feature:test mock envelope', () {
+    test('a list whose items each wrap the record answers the wrappers', (t) {
+      final spec = [r'`$EACH`', 'body', {r'`$MERGE`': '`.badge`'}];
+      final out = mockEnvelope(spec, [{'id': 'b1'}, {'id': 'b2'}]);
+      deepEqual([{'badge': {'id': 'b1'}}, {'badge': {'id': 'b2'}}], out);
+      deepEqual([{'id': 'b1'}, {'id': 'b2'}], vs.transform({'body': out}, spec));
     });
   });
 }

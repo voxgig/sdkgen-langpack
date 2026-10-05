@@ -155,6 +155,12 @@ def pipeConfig : String := r#"{
                     "vars": [{"name": "id", "from": "id"}]},
         "transform": {"req": "`reqdata`", "res": "`body.data.thing`"},
         "args": {}, "select": {}}]}
+    }},
+    "badge": {"name": "badge", "op": {
+      "list": {"name": "list", "points": [{"kind": "http", "method": "GET",
+        "parts": ["badge"], "transform": {"req": "`reqdata`",
+          "res": ["`$EACH`", "body", {"`$MERGE`": "`.badge`"}]},
+        "args": {}, "select": {}}]}
     }}
   }
 }"#
@@ -471,6 +477,18 @@ def main : IO UInt32 := do
         "pipeline: the path param is substituted, not queried"
       check ((← gpS got "title") == "T")
         "pipeline: the point's response transform unwraps the envelope")
+
+    -- pipeline: the test mock wraps each listed record under the key the
+    -- list's response transform reads it from
+    (do
+      let badge (id title : String) : SIO Value := newMap #[("id", .str id), ("title", .str title)]
+      let badges ← newMap #[("b1", ← badge "b1" "one"), ("b2", ← badge "b2" "two")]
+      let seed ← newMap #[("existing", ← newMap #[("badge", badges)])]
+      let c ← SdkRuntime.mkTestClientV (← emptyMap) pipeConfig seed
+      let got ← SdkRuntime.opList c "badge" (← emptyMap) (← emptyMap)
+      let titles ← (← listItemsOf got).mapM fun r => gpS r "title"
+      check (titles.qsort (· < ·) == #["one", "two"])
+        s!"pipeline: a list reads the record each of its items wraps ({titles})")
 
     -- pipeline: a data op carries the request body
     (do

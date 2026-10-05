@@ -22,110 +22,10 @@ const { ok, strictEqual, deepStrictEqual } = require('node:assert')
 
 const Fs = require('node:fs')
 const Path = require('node:path')
-const { execFileSync } = require('node:child_process')
-
-const { Aontu } = require('aontu')
 
 const { stageConsumer, generateInto } = require('@voxgig/sdkgen/testkit')
 
-
-const PKG = Path.resolve(__dirname, '..')
-
-// Run the same npm build against the components installed in the consumer.
-function compile(consumer) {
-  const config = Path.join(consumer.root, 'tsconfig.json')
-  const outdir = Path.join(consumer.sdk, 'dist', 'cmp')
-  Fs.copyFileSync(Path.join(PKG, 'tsconfig.json'), config)
-  execFileSync(process.execPath, [process.env.npm_execpath,
-    'run', 'build', '--', '--project', config, '--outDir', outdir,
-  ], { cwd: PKG, stdio: 'inherit' })
-  Fs.cpSync(Path.join(consumer.sdk, 'src', 'cmp'), outdir, {
-    recursive: true,
-    filter: (path) => !path.endsWith('.ts') && Path.basename(path) !== 'fragment',
-  })
-}
-
-// The targets this package provides, read from the manifest rather than
-// restated. A target added to the pack without a line here would otherwise
-// join with no coverage at all — the silently-absent shape.
-const TARGETS = require('../sdkgen-package.json').provides.target
-
-
-// The API every target is generated from. Small, but carrying the shapes that
-// have historically broken generation: a required and an optional field, an
-// entity with an id binding, more than one operation, and a flow (several
-// targets' test emitters read one and throw without it).
-const API = `
-main: kit: info: { title: 'Demo', version: '1.0.0', auth: false }
-main: kit: config: headers: { 'content-type': 'application/json' }
-
-main: kit: entity: planet: {
-  alias: field: {}
-  name: "planet"
-  id: { field: "id", name: "id" }
-  field: {
-    id:     { name: "id",     kind: "field", type: "\`$STRING\`", required: true }
-    title:  { name: "title",  kind: "field", type: "\`$STRING\`", required: true }
-    radius: { name: "radius", kind: "field", type: "\`$NUMBER\`" }
-  }
-  fields: {
-    "id": { h: 'Id', n: "id",     r: true,  t: "\`$STRING\`" }
-    "radius": { h: 'Radius', n: "radius", r: false, t: "\`$NUMBER\`" }
-    "title": { h: 'Title', n: "title",  r: true,  t: "\`$STRING\`" }
-  }
-  op: {
-    list: {
-      name: "list"
-      points: [ {
-        g: {}, m: "GET", o: "/planet", s: [{ lit: "planet" }]
-        t: { req: "\`reqdata\`", res: "\`body\`" }
-      } ]
-    }
-    load: {
-      name: "load"
-      points: [ {
-        g: { params: [
-          { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "p01" }
-        ] }
-        m: "GET", o: "/planet/{id}", s: [{ lit: "planet" }, { var: "id" }]
-        t: { req: "\`reqdata\`", res: "\`body\`" }
-      } ]
-    }
-  }
-}
-
-main: kit: flow: BasicPlanetFlow: {
-  entity: "planet", kind: "basic", name: "BasicPlanetFlow"
-  step: [
-    { o: "list" }
-    { o: "load", i: {
-        ref: "planet_ref01", srcdatavar: "planet_ref01_data", suffix: "_dt0" } }
-  ]
-}
-`
-
-
-function consumerModel(sdk, extra) {
-  const src = [
-    '@"@voxgig/apidef/model/apidef.aontu"',
-    '@"@voxgig/sdkgen/model/sdkgen.aontu"',
-    '@"target/target-index.aontu"',
-    '@"feature/feature-index.aontu"',
-    "name: 'demo'",
-    API,
-    extra || '',
-  ].join('\n')
-
-  const path = Path.join(sdk, 'model', 'generate-test.aontu')
-  Fs.writeFileSync(path, src)
-
-  const errs = []
-  const model = new Aontu().generate(src, { path, errs })
-  strictEqual(errs.length, 0,
-    'model did not compile: ' + errs.map((e) => e.msg).join(' | '))
-
-  return model
-}
+const { PKG, TARGETS, compile, consumerModel } = require('./stage')
 
 
 describe('sdkgen-langpack', () => {
@@ -280,6 +180,28 @@ describe('sdkgen-langpack', () => {
       'lean generated an entity source file — if that is deliberate, this ' +
       'target has grown an entity layer and the contract note in sdkgen\'s ' +
       'AGENTS.md needs revisiting')
+  })
+
+
+  // GHC's readFile decodes with the locale's encoding, so under a C or POSIX
+  // locale it cannot read the generated docs, and the README gate read them
+  // as absent and passed. CI runs with a UTF-8 locale, where nothing else
+  // would show a bare readFile coming back.
+  test('the haskell tests read files as UTF-8, not through the locale', () => {
+    const tests = Object.entries(generated.files)
+      .filter(([p]) => /^haskell\/test\/[^/]+\.hs$/.test(p))
+    ok(0 < tests.length, 'no haskell test sources generated')
+
+    const code = (src) => String(src).split('\n')
+      .filter((line) => !/^\s*--/.test(line)).join('\n')
+
+    deepStrictEqual(
+      tests.filter(([, src]) => /\breadFile\b/.test(code(src))).map(([p]) => p), [],
+      'a haskell test reads a file with the locale-dependent readFile; use readUtf8')
+
+    const util = tests.find(([p]) => p.endsWith('/Testutil.hs'))
+    ok(util && /hSetEncoding h utf8/.test(String(util[1])),
+      'Testutil.hs no longer decodes readUtf8 as UTF-8')
   })
 })
 
@@ -692,6 +614,25 @@ describe('argument routing in the templates', () => {
 
     test(lang + ': transformRequest builds the body without the routed arguments', () => {
       ok(/routedArgNames/.test(body(lang, 'body')), lang + ': transformRequest keeps the routed arguments')
+    })
+  }
+})
+
+
+describe('the test mock in the templates', () => {
+  const TM = Path.join(PKG, '.sdk', 'tm')
+
+  // Where each mock wraps a listed record under the key its transform reads.
+  const WRAP = {
+    dart: ['dart/lib/feature/test/TestFeature.dart', '<String, dynamic>{itemkey: item}'],
+    haskell: ['haskell/src/SdkFeatures.hs', 'jo [(k, i)]'],
+    lean: ['lean/src/SdkRuntime.lean', 'newMap #[(key, item)]'],
+  }
+
+  for (const [lang, [rel, form]] of Object.entries(WRAP)) {
+    test(lang + ': the test mock wraps each listed record under its key', () => {
+      const src = Fs.readFileSync(Path.join(TM, rel), 'utf8')
+      ok(src.includes(form), lang + ': the test mock answers wrapped list items bare (' + rel + ')')
     })
   }
 })
