@@ -1096,11 +1096,22 @@ transformRequestUtil ctx = do
   omitKeys out ["$action"]
 
 -- A header, cookie or query argument travels where prepareHeaders or
--- prepareQuery sends it, so the body is built from the request data without it.
+-- prepareQuery sends it, so the body is built from the request data without it,
+-- unless the entity declares it as a field too.
 routedArgNames :: Context -> IO [String]
 routedArgNames ctx = do
   args <- mapM (callArgs ctx) ["header", "cookie", "query"]
-  pure [name | (name, _, _) <- concat args]
+  fields <- fieldArgNames ctx
+  pure [name | (name, _, _) <- concat args, name `notElem` fields]
+
+fieldArgNames :: Context -> IO [String]
+fieldArgNames ctx = do
+  point <- readIORef (cPoint ctx)
+  defs <- concat <$> mapM (argDefs point) ["header", "cookie", "query"]
+  fmap concat $ mapM (\ad -> do
+    name <- getStrD ad "name" ""
+    field <- getp ad "field"
+    pure [name | isTrueV field]) defs
 
 omitKeys :: Value -> [String] -> IO Value
 omitKeys v names = case v of
