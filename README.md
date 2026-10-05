@@ -166,7 +166,7 @@ generated SDK. Read a green build as what it is: components that type-check and
 targets that generate. Whether you can compile the output is a question about
 your own machine, and `command -v` is the way to ask it.
 
-Where `dart`, `ghc` or `lean` is installed, the `sdks` workflow's two steps
+Where `dart`, `ghc` or `lean` is installed, the `sdks` workflow's commands
 build and run that target's SDK. `CREATE_SDKGEN` names an unpacked
 `@voxgig/create-sdkgen` package, whose test data writer and corpus a scaffolded
 project carries:
@@ -178,6 +178,25 @@ npm run sdks -- run haskell /tmp/sdk   # or dart, or lean
 
 `run` fails when a command fails, and when the suite prints no pass and fail
 counts or a count of no passes, since a suite that runs nothing exits cleanly.
+It reports the toolchain it ran under.
+
+A lean SDK pins its release in the generated `lean-toolchain`, and `run`
+builds it under that release and no other, read from the SDK root it is given.
+The release is looked for unpacked under `LEAN_TOOLCHAINS`, a directory that
+`install` fills from the Lean release archives, and otherwise the `lean` on
+PATH serves, refused when it reports another version. `elan` honours the pin by
+itself, so with it on PATH nothing more is needed:
+
+```bash
+LEAN_TOOLCHAINS=/tmp/lean-toolchains npm run sdks -- install lean /tmp/sdk
+LEAN_TOOLCHAINS=/tmp/lean-toolchains npm run sdks -- run lean /tmp/sdk
+```
+
+When a pull request's suite fails, the workflow generates the base branch's
+SDKs and runs `compare`, which installs and runs the base branch's SDK under
+the release that SDK pins, then names the toolchain each side ran under in its
+verdict. A base branch release that cannot be installed gives no verdict
+rather than a wrong one.
 
 Validate the package itself with:
 

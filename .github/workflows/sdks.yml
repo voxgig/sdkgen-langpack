@@ -84,29 +84,22 @@ jobs:
           fi
           ghc --version
 
-      # The toolchain the generated lean-toolchain names, not a copy of it.
+      # The release the generated lean-toolchain pins, unpacked where `run`
+      # selects it from.
       - name: Install lean
         if: ${{ matrix.target == 'lean' }}
         run: |
           set -euo pipefail
-          TOOLCHAIN="$(cat "$RUNNER_TEMP/sdk/lean/lean-toolchain")"
-          V="${TOOLCHAIN#leanprover/lean4:v}"
-          case "$V" in
-            [0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "::error::unexpected lean-toolchain '$TOOLCHAIN'"; exit 1 ;;
-          esac
-          cd "$RUNNER_TEMP"
-          curl -fsSL -o lean.zip "https://releases.lean-lang.org/lean4/v$V/lean-$V-linux.zip"
-          unzip -q lean.zip
-          echo "$RUNNER_TEMP/lean-$V-linux/bin" >> "$GITHUB_PATH"
-          "lean-$V-linux/bin/lean" --version
+          echo "LEAN_TOOLCHAINS=$RUNNER_TEMP/lean-toolchains" >> "$GITHUB_ENV"
+          LEAN_TOOLCHAINS="$RUNNER_TEMP/lean-toolchains" npm run sdks -- install lean "$RUNNER_TEMP/sdk"
 
       - name: Build and run the ${{ matrix.target }} suite
         id: suite
         run: npm run sdks -- run ${{ matrix.target }} "$RUNNER_TEMP/sdk"
 
       # Tells a failure this change brings from one the base branch has too:
-      # the same steps, with the base branch's targets and manifest.
+      # the same steps, with the base branch's targets and manifest, each SDK
+      # under the toolchain it pins, and a verdict naming both.
       - name: Run the base branch's ${{ matrix.target }} SDK
         if: ${{ failure() && steps.suite.outcome == 'failure' && github.event_name == 'pull_request' }}
         env:
@@ -117,9 +110,8 @@ jobs:
           git fetch --no-tags --depth=1 origin "$BASE"
           rm -rf .sdk
           git checkout FETCH_HEAD -- .sdk sdkgen-package.json
-          if npm run sdks -- generate "$RUNNER_TEMP/base" &&
-             npm run sdks -- run "$TARGET" "$RUNNER_TEMP/base"; then
-            echo "::error::the $TARGET SDK passes on $BASE, so this change breaks it"
+          if npm run sdks -- generate "$RUNNER_TEMP/base"; then
+            npm run sdks -- compare "$TARGET" "$RUNNER_TEMP/sdk" "$RUNNER_TEMP/base" "$BASE"
           else
-            echo "::warning::the $TARGET SDK fails on $BASE as well"
+            echo "::warning::the $TARGET SDK fails on $BASE as well: $BASE does not generate it"
           fi
