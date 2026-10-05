@@ -240,6 +240,25 @@ void tests() {
           errcode(await sdk.prepare({'path': '/a', 'method': 'get'})));
     });
 
+    test('a null allow, allow.op or allow.method takes the default',
+        (t) async {
+      for (final allow in <dynamic>[
+        {'method': null},
+        {'op': null},
+        null
+      ]) {
+        final sdk = ProjectNameSDK.test({}, {'allow': allow});
+        equal('GET,PUT,POST,PATCH,DELETE,OPTIONS',
+            vs.getpath(sdk.options(), 'allow.method'));
+        equal('create,update,load,list,remove,command,direct,graphql',
+            vs.getpath(sdk.options(), 'allow.op'));
+        equal('POST',
+            (await sdk.prepare({'path': '/a', 'method': 'post'}))['method']);
+        equal('spec_method_allow',
+            errcode(await sdk.prepare({'path': '/a', 'method': 'HEAD'})));
+      }
+    });
+
     test('direct is refused by a list that names only indirect', (t) async {
       final sdk = ProjectNameSDK.test({}, {
         'allow': {'op': 'indirect,reload'}

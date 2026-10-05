@@ -148,6 +148,26 @@ tests c = do
       Left (SdkException e) -> errCodeIs e "spec_method_allow"
       Right _ -> pure False
 
+  runTest c "prepare.null_allow_takes_default" $ do
+    let prep cl m = do
+          fa <- jo [("path", VStr "/a"), ("method", VStr m)]
+          try (F.prepare cl fa) :: IO (Either SdkException Value)
+        takesDefault sdkopts = do
+          cl <- C.testSdk VNoval sdkopts
+          opts <- readIORef (clOptions cl)
+          am <- getpathS opts "allow.method"
+          ao <- getpathS opts "allow.op"
+          sent <- prep cl "post" >>= either (const (pure False))
+            (\fd -> (== "POST") . vstring <$> getp fd "method")
+          refused <- prep cl "HEAD" >>= either
+            (\(SdkException e) -> errCodeIs e "spec_method_allow") (const (pure False))
+          pure (vstring am == "GET,PUT,POST,PATCH,DELETE,OPTIONS"
+            && vstring ao == "create,update,load,list,remove,command,direct,graphql"
+            && sent && refused)
+    nm <- jo [("method", VNull)]; no <- jo [("op", VNull)]
+    shapes <- sequence [jo [("allow", nm)], jo [("allow", no)], jo [("allow", VNull)]]
+    and <$> mapM takesDefault shapes
+
   runTest c "direct.allow_names_whole_ops" $ do
     ao <- jo [("op", VStr "indirect,reload")]; sdkopts <- jo [("allow", ao)]
     cl <- C.testSdk VNoval sdkopts

@@ -382,6 +382,10 @@ def opnameOf (ctx : Value) : SIO String := do
 -- makeOptions / makeContext / operator / makeError / done
 -- ---------------------------------------------------------------------------
 
+def allowDefaults : SIO Value :=
+  newMap #[("op", .str "create,update,load,list,remove,command,direct,graphql"),
+           ("method", .str "GET,PUT,POST,PATCH,DELETE,OPTIONS")]
+
 def defaultOptions : SIO Value := do
   let hdr ← newMap #[("content-type", .str "application/json")]
   let ent ← emptyMap
@@ -389,13 +393,23 @@ def defaultOptions : SIO Value := do
   -- because makePoint and makeSpec enforce them; the other optspec slots are
   -- not defaulted here, so nothing below is a value a caller could mistake
   -- for an enforced one.
-  let allow ← newMap #[("op", .str "create,update,load,list,remove,command,direct,graphql"),
-                       ("method", .str "GET,PUT,POST,PATCH,DELETE,OPTIONS")]
   newMap #[("base", .str "http://localhost:8000"), ("prefix", .str ""),
            ("suffix", .str ""), ("headers", hdr), ("entity", ent),
-           ("allow", allow), ("clean", ← cleanOptSpec)]
+           ("allow", ← allowDefaults), ("clean", ← cleanOptSpec)]
 
-/-- Defaults <- config.options <- options, then every entity gets an alias map. -/
+/-- A stored null at `allow`, `allow.op` or `allow.method` takes the default, as
+    validate gives it in the other targets; `allowRefuses` would refuse it. -/
+def refillAllowNulls (opts : Value) : SIO Unit := do
+  let defaults ← allowDefaults
+  match (← lookupRaw opts (.str "allow")) with
+  | .null => sp opts "allow" defaults
+  | allow@(.map _) =>
+    for k in (← keysof defaults) do
+      if (← lookupRaw allow (.str k)) == .null then sp allow k (← gp defaults k)
+  | _ => pure ()
+
+/-- Defaults <- config.options <- options, then a null allow list takes its
+    default and every entity gets an alias map. -/
 def makeOptions (config options : Value) : SIO Value := do
   let base ← defaultOptions
   let copts ← asMap (← gp config "options")
@@ -413,6 +427,7 @@ def makeOptions (config options : Value) : SIO Value := do
     cleanAddCfg cleancfg (.str v)
   let parts ← newList #[base, copts, uopts]
   let out ← merge parts
+  refillAllowNulls out
   let ent ← gpMap out "entity"
   for k in (← keysof ent) do
     let e ← gp ent k
@@ -908,9 +923,9 @@ def allowListHas (names item : String) : Bool :=
 
 /-- Whether `options.allow.<key>` refuses the item. A string refuses what it does
 not name, an empty one included, as the ts reference's `allowed` does, and any
-other value refuses everything, a non-map `allow` too. Only an ABSENT `allow` or
-key allows, as lean's makeOptions has no optspec: a hand-built context carries
-none. Read raw, so a stored null is a value rather than an absence. -/
+other value refuses everything, a null or a non-map `allow` too; read raw, as gp
+reads a null as absent. Only an ABSENT `allow` or key allows: makeOptions gives
+a client both lists, refilling a null one, so only a hand-built context lacks one. -/
 def allowRefuses (options : Value) (key item : String) : SIO Bool := do
   match (← lookupRaw options (.str "allow")) with
   | .noval => pure false

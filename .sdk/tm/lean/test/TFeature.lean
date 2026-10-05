@@ -305,6 +305,33 @@ def allowEmptyCases : SIO Unit := do
   check (hasSub smsg "not allowed by SDK option allow" && scalls == 0)
     s!"pipeline: an allow that is not a map refuses a load ({smsg})"
 
+/-- A null allow list takes the default, as validate refills one in the other
+    targets, so a client built with one sends its request. -/
+def allowNullCases : SIO Unit := do
+  let sentBy (json : String) (act : Value → SIO Value) : SIO (String × Nat) := do
+    let w ← mkWire
+    let c ← SdkRuntime.mkClientWith (← SdkJson.jsonRead json) pipeConfig
+      (recording w (do answer 200.0 "OK" (← emptyMap) #[]))
+    pure (← thrown (act c), ← w.calls.get)
+  let create := fun (c : Value) => do
+    SdkRuntime.opCreate c "widget" (← newMap #[("title", .str "T")]) (← emptyMap)
+  let load := fun (c : Value) => do
+    SdkRuntime.opLoad c "widget" (← newMap #[("id", .str "i1")]) (← emptyMap)
+  let (mmsg, mcalls) ← sentBy "{\"allow\":{\"method\":null}}" create
+  check (mmsg == "" && mcalls == 1) s!"pipeline: a null allow.method sends a create ({mmsg})"
+  let (omsg, ocalls) ← sentBy "{\"allow\":{\"op\":null}}" load
+  check (omsg == "" && ocalls == 1) s!"pipeline: a null allow.op sends a load ({omsg})"
+  let (amsg, acalls) ← sentBy "{\"allow\":null}" create
+  check (amsg == "" && acalls == 1) s!"pipeline: a null allow sends a create ({amsg})"
+  let resolved (json : String) : SIO (String × String) := do
+    let allow ← gp (← SdkUtility.makeOptions (← emptyMap) (← SdkJson.jsonRead json)) "allow"
+    pure (← gpS allow "method", ← gpS allow "op")
+  let defaults := ("GET,PUT,POST,PATCH,DELETE,OPTIONS",
+    "create,update,load,list,remove,command,direct,graphql")
+  check ((← resolved "{\"allow\":{\"method\":null,\"op\":null}}") == defaults
+      && (← resolved "{\"allow\":null}") == defaults)
+    "makeOptions: a null allow, allow.op or allow.method takes the default"
+
 def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
@@ -453,6 +480,7 @@ def main : IO UInt32 := do
     -- pipeline: options.allow.method gates the request's method, as ts and go do
     allowMethodCases
     allowEmptyCases
+    allowNullCases
 
     -- pipeline: a feature's query param (paging, at PreRequest) survives makeSpec
     (do
