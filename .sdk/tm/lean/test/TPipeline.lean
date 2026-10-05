@@ -4,7 +4,9 @@
    point, and a routed argument stays out of the body. -/
 
 import VoxgigStruct
+import SdkJson
 import SdkUtility
+import SdkRuntime
 
 open VoxgigStruct
 
@@ -25,6 +27,25 @@ def check (cond : Bool) (msg : String) : SIO Unit := do
 def gp := SdkUtility.gp
 def gpS := SdkUtility.gpS
 def isNov := SdkUtility.isNov
+
+def has (s sub : String) : Bool := (s.splitOn sub).length > 1
+
+/-- The error a response the transport marked as not JSON leaves on the result,
+    as its code and message. -/
+def unreadableErr (status : Float) (ctype : Option String) (body : String) :
+    SIO (String × String) := do
+  let hs ← newMap (match ctype with | some t => #[("content-type", Value.str t)] | none => #[])
+  let response ← newMap #[("status", .num status),
+    ("statusText", .str (if status < 400.0 then "OK" else "ERR")), ("headers", hs),
+    ("body", .str body), ("unreadable", .bool true)]
+  let spec ← newMap #[("headers", ← newMap #[("user-agent", .str "Probe/1.0")])]
+  let ctx ← newMap #[("response", response), ("result", ← newMap #[("ok", .bool false)]),
+                     ("spec", spec)]
+  SdkUtility.resultBasic ctx
+  SdkUtility.resultHeaders ctx
+  SdkUtility.resultBody ctx
+  let e ← gp (← gp ctx "result") "err"
+  pure (← gpS e "code", ← gpS e "message")
 
 /-- A ctx whose options send the given default headers, with the given point,
     match and data. -/
@@ -48,6 +69,20 @@ def queryArgs : SIO Value := do
            ("query", ← defs #[("page_size", "pageSize"), ("lang", "lang"), ("trace", "trace")]),
            ("header", ← defs #[("x_trace", "X-Trace"), ("trace", "trace")]),
            ("cookie", ← defs #[("session_id", "SESSIONID"), ("lang", "lang")])]
+
+/-- A header, cookie or query argument the entity declares as a field stays in
+    the body, beside an unmarked one that leaves it. -/
+def fieldArgCase : SIO Unit := do
+  let tr ← newMap #[("req", .str "`reqdata`")]
+  let mut kept := true
+  for kind in #["header", "cookie", "query"] do
+    let locale ← newMap #[("name", .str "locale"), ("orig", .str "Locale"), ("field", .bool true)]
+    let args ← newMap #[(kind, ← newList #[locale, ← argDef ("session_id", "SESSIONID")])]
+    let ctx ← argCtx #[] #[("args", args), ("transform", tr)] #[]
+      #[("name", .str "n"), ("locale", .str "en"), ("session_id", .str "s1")]
+    let b ← SdkUtility.transformRequest ctx
+    kept := kept && (← keysof b) == #["locale", "name"] && (← gpS b "locale") == "en"
+  check kept "transformRequest: an argument the entity declares as a field stays in the body"
 
 def main : IO UInt32 := do
   let sctx ← mkCtx
@@ -148,6 +183,8 @@ def main : IO UInt32 := do
       check ((← keysof b) == #["title"] && (← gpS b "title") == "T")
         "transformRequest: a routed argument is left out of the body")
 
+    fieldArgCase
+
     (do
       let body ← newMap #[("kind", .str "raw"), ("media", .str "text/plain")]
       let ctx ← argCtx #[] #[("body", body)] #[] #[("$body", .str "hello")]
@@ -166,6 +203,48 @@ def main : IO UInt32 := do
       check ((← SdkUtility.bodyText json node) == some (← jsonify node)
           && (← SdkUtility.bodyText json .noval) == none)
         "bodyText: a node is JSON and no body is none")
+
+    (do
+      check (SdkJson.jsonValid "[{\"id\":\"x01\",\"n\":-1.5e3,\"ok\":true,\"no\":null}]"
+          && SdkJson.jsonValid " {} " && !(SdkJson.jsonValid "{\"id\": \"x01\", \"title\": ")
+          && !(SdkJson.jsonValid "not json at all") && !(SdkJson.jsonValid "[1, 2] x")
+          && !(SdkJson.jsonValid "{\"a\" 1}") && !(SdkJson.jsonValid "nul"))
+        "jsonValid: one whole JSON value, nothing truncated, misspelt or trailing")
+
+    (do
+      let bare ← newMap #[("method", .str "GET")]
+      let sent ← SdkRuntime.sentHeaders bare
+      let own ← newMap #[("headers", ← newMap #[("User-Agent", .str "Probe/1.0")])]
+      let mine ← SdkRuntime.sentHeaders own
+      check (SdkRuntime.defaultUserAgent == "Mozilla/5.0 (compatible; ProjectNameSDK/1.0)"
+          && sent == #[("user-agent", SdkRuntime.defaultUserAgent)]
+          && (← gpS (← gp bare "headers") "user-agent") == SdkRuntime.defaultUserAgent
+          && mine == #[("User-Agent", "Probe/1.0")]
+          && isNov (← gp (← gp own "headers") "user-agent"))
+        "sentHeaders: the default agent, recorded, unless the request names one")
+
+    (do
+      check (SdkRuntime.bodyUnreadable "<p>challenge</p>" && SdkRuntime.bodyUnreadable "{\"a\": "
+          && !(SdkRuntime.bodyUnreadable " \n ") && !(SdkRuntime.bodyUnreadable "")
+          && !(SdkRuntime.bodyUnreadable "[{\"id\": 1}]"))
+        "bodyUnreadable: a body that is neither blank nor one JSON value")
+
+    (do
+      let (c1, m1) ← unreadableErr 200.0 (some "application/json") "{\"a\": "
+      check (c1 == "response_json_invalid" && has m1 ("body is not valid JSON (HTTP 200, " ++
+          "content-type application/json, user-agent Probe/1.0, body: {\"a\":)"))
+        "resultBody: a body labelled as JSON that does not parse"
+      let (c2, m2) ← unreadableErr 200.0 none "not json"
+      check (c2 == "response_json_invalid" && has m2 "content-type none")
+        "resultBody: an unlabelled body that is not JSON"
+      let (c3, m3) ← unreadableErr 200.0 (some "text/html") ("<p>\n  challenge </p>" ++ "".pushn 'x' 300)
+      check (c3 == "response_content_type" && has m3 "expected JSON, got text/html"
+          && has m3 "body: <p> challenge </p>xxx" && m3.endsWith "...)")
+        "resultBody: a body labelled as something else, its preview bounded"
+      let (c4, m4) ← unreadableErr 503.0 (some "text/html") "<p>down</p>"
+      check (c4 == "request_status" && has m4 ("request: 503: ERR (HTTP 503, content-type " ++
+          "text/html, user-agent Probe/1.0, body: <p>down</p>)"))
+        "resultBody: an HTTP failure keeps its error, the body described")
 
   go.run sctx
   let p ← npass.get

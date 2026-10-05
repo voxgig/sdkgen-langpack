@@ -556,6 +556,20 @@ tests c alltests = do
     t <- getp b "title"
     pure (ks == ["title"] && vstring t == "T")
 
+  runTest c "primary.transform_request_keeps_field_arguments" $ do
+    tr <- jo [("req", VStr "`reqdata`")]
+    kept <- mapM (\kind -> do
+      locale <- jo [("name", VStr "locale"), ("orig", VStr "Locale"), ("field", VBool True)]
+      session <- argDef ("session_id", "SESSIONID")
+      args <- jo . (\defs -> [(kind, defs)]) =<< ja [locale, session]
+      ctx <- argCtx "create" [] [("args", args), ("transform", tr)] []
+        [("name", VStr "n"), ("locale", VStr "en"), ("session_id", VStr "s1")]
+      b <- transformRequestUtil ctx
+      ks <- keysof b
+      l <- getp b "locale"
+      pure (ks == ["locale", "name"] && vstring l == "en")) ["header", "cookie", "query"]
+    pure (and kept)
+
   runTest c "primary.prepare_body_raw" $ do
     body <- jo [("kind", VStr "raw"), ("media", VStr "text/plain")]
     ctx <- argCtx "create" [] [("body", body)] [] [("$body", VStr "hello")]
