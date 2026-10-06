@@ -127,7 +127,7 @@ groups' files trimmed from the tree, the secrets suite registered, and a
 `model/feature/secrets.aontu` in `@voxgig/sdkgen` carries the `path` lists and
 the `def: dart:` and `def: lean:` maps; packs consume core feature models
 rather than copying them. Those entries ship from 4.10.0 on;
-`engines.sdkgen` here requires `>=4.25.0`, comfortably past that. Against an
+`engines.sdkgen` here requires `>=4.34.1`, comfortably past that. Against an
 sdkgen older than 4.10.0 the feature emits no plugin definitions at all, and
 each target's secrets test says so by name.
 

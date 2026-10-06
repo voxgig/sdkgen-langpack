@@ -51,6 +51,11 @@ const OP_SIGNATURES: Record<string, { sig: string, returns: string, desc: string
     returns: 'the updated entity data',
     desc: 'Update an existing entity. The data must include the entity `id`. Returns the updated entity data and throws on error.',
   },
+  patch: {
+    sig: 'patch(reqdata, [ctrl]) -> Future<dynamic>',
+    returns: 'the patched entity data',
+    desc: 'Change part of an existing entity: only the fields given are sent. The data must include the entity `id`. Returns the patched entity data and throws on error.',
+  },
   remove: {
     sig: 'remove(reqmatch, [ctrl]) -> Future<dynamic>',
     returns: 'the removed entity data',
@@ -216,7 +221,7 @@ final ${eVar} = client.${ent.Name}();
         // Field operations breakdown
         const hasFieldOps = fields.some((f: any) => f.op && Object.keys(f.op).length > 0)
         if (hasFieldOps) {
-          const opcols = ['load', 'list', 'create', 'update', 'remove']
+          const opcols = ['load', 'list', 'create', 'update', 'patch', 'remove']
             .filter((op: string) => opnames.includes(op) && ent.op[op]?.active !== false)
           Content(`### Field Usage by Operation
 
@@ -298,8 +303,8 @@ final result = await client.${ent.Name}().create({
 
 `)
           }
-          else if ('update' === opname) {
-            const updateItems = opRequestShape(ent, 'update').items
+          else if ('update' === opname || 'patch' === opname) {
+            const updateItems = opRequestShape(ent, opname).items
               .filter((it: any) => !it.optional || it.name === idF)
               .sort((a: any, b: any) =>
                 (a.name === idF ? 0 : 1) - (b.name === idF ? 0 : 1))
@@ -307,8 +312,8 @@ final result = await client.${ent.Name}().create({
               `  '${it.name}': ${dartLit(it.type,
                 it.name === idF ? ent.name + '_id' : it.name)},\n`).join('')
             Content(`\`\`\`dart
-final result = await client.${ent.Name}().update({
-${updateLines}  // Fields to update
+final result = await client.${ent.Name}().${opname}({
+${updateLines}  // ${'patch' === opname ? 'Only the fields to change' : 'Fields to update'}
 });
 \`\`\`
 

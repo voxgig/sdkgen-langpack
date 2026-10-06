@@ -1103,7 +1103,7 @@ testFeature = do
             args <- buildArgs fctx op rm; found <- select entmap args
             if isNullish found then respondM fctx 404 VNoval . Just =<< jo [("statusText", VStr "Not found")]
             else do { case found of { VList _ -> do { its <- listItems found; forM_ its (\i -> delp i "$KEY") }; _ -> pure () }; c <- clone found; respondM fctx 200 c Nothing }
-          "update" -> do
+          opn | opn `elem` ["update", "patch"] -> do
             rd <- readIORef (cReqdata fctx)
             um0 <- emptyMap
             case rd of VMap _ -> do { i <- getp rd "id"; case i of VNoval -> pure (); v -> setp um0 "id" v }; _ -> pure ()
@@ -1515,6 +1515,7 @@ makeEntity client name entopts = do
               _ -> pure []
         , eCreate = \rd ctrl -> mkOp "create" "data" rd ctrl postCreate >> pure ent
         , eUpdate = \rd ctrl -> mkOp "update" "data" rd ctrl postUpdate >> pure ent
+        , ePatch = \rd ctrl -> mkOp "patch" "data" rd ctrl postUpdate >> pure ent
         , eRemove = \rm ctrl -> do
             _ <- mkOp "remove" "match" rm ctrl postRemove
             -- A removed entity keeps its data but is no longer a live record.

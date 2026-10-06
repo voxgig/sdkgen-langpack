@@ -113,6 +113,11 @@ def fieldArgCase : SIO Unit := do
     kept := kept && (← keysof b) == #["locale", "name"] && (← gpS b "locale") == "en"
   check kept "transformRequest: an argument the entity declares as a field stays in the body"
 
+def patchInputCase : SIO Unit := do
+  check (SdkUtility.opInputOf "patch" == "data" && SdkUtility.opInputOf "update" == "data"
+      && SdkUtility.opInputOf "load" == "match")
+    "opInputOf: a patch, like an update, takes the request data as its input"
+
 def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
@@ -276,6 +281,8 @@ def main : IO UInt32 := do
       check (c4 == "request_status" && has m4 ("request: 503: ERR (HTTP 503, content-type " ++
           "text/html, user-agent Probe/1.0, body: <p>down</p>)"))
         "resultBody: an HTTP failure keeps its error, the body described")
+
+    patchInputCase
 
   go.run sctx
   let p ← npass.get

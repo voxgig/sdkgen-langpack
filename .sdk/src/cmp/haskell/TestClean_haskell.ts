@@ -38,7 +38,7 @@ const TestClean = cmp(function TestClean(props: any) {
     .forEach((ent: any) => {
       const fn = hsVarName(ent.name)
       const ops = Object.keys(ent.op || {})
-        .filter((op) => ['list', 'load', 'create', 'update', 'remove'].includes(op))
+        .filter((op) => ['list', 'load', 'create', 'update', 'patch', 'remove'].includes(op))
         .sort((a, b) => (rank[a] ?? 2) - (rank[b] ?? 2))
       for (const op of ops) {
         const call = 'list' === op

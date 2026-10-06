@@ -74,7 +74,7 @@ allowLists cl = do
 
 defaultAllowLists :: (String, String)
 defaultAllowLists =
-  ("GET,PUT,POST,PATCH,DELETE,OPTIONS", "create,update,load,list,remove,command,direct,graphql")
+  ("GET,PUT,POST,PATCH,DELETE,OPTIONS", "create,update,patch,load,list,remove,command,direct,graphql")
 
 takesDefaultAllow :: Value -> IO Bool
 takesDefaultAllow sdkopts = do
@@ -145,6 +145,11 @@ tests c = do
     named <- attempt "list,\n LOAD"
     isRefused <- case refused of Just e -> errCodeIs e "point_op_allow"; Nothing -> pure False
     pure (isRefused && isNothing named)
+
+  runTest c "make_context.patch_takes_data" $ do
+    cl <- client
+    ins <- mapM (\name -> do ctx <- mkCtx cl name; opInput <$> readIORef (cOp ctx)) ["patch", "update", "load"]
+    pure (ins == ["data", "data", "match"])
 
   runTest c "make_spec.allow_names_whole_methods" $ do
     cl <- client; ctx <- mkCtx cl "update"

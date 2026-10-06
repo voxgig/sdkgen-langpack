@@ -134,7 +134,7 @@ class TestFeature extends BaseFeature {
           final out = vs.clone(found);
           return respond(fctx, 200, out);
         }
-      } else if ('update' == op.name) {
+      } else if ('update' == op.name || 'patch' == op.name) {
         final args = self.buildArgs(fctx, op, fctx.reqdata);
         final found = vs.select(entmap, args);
         final ent = vs.getelem(found, 0);

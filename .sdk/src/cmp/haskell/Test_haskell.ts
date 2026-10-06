@@ -38,6 +38,7 @@ const Test = cmp(function Test(props: any) {
         const hasList = ops.includes('list')
         const hasLoad = ops.includes('load')
         const hasUpdate = ops.includes('update')
+        const hasPatch = ops.includes('patch')
         const hasRemove = ops.includes('remove')
 
         let updField = 'name'
@@ -127,7 +128,28 @@ ${basicFn} c = do
     updated <- eUpdate ent upd ctrl2
     ud <- eDataGet updated
     uv <- getp ud "${updField}"
-    pure (ismap ud && vstring uv == "UpdatedMark")
+    um <- readIORef (eMatch updated)
+    umid <- getp um "id"
+    pure (ismap ud && vstring uv == "UpdatedMark" && vstring umid == vstring cid)
+`
+        }
+        if (hasCreate && hasPatch) {
+          defs += `  runTest c "${e.name}.patch" $ do
+    sdk <- C.testSdk opts VNoval
+    ent <- C.${fn} sdk VNoval
+    d <- newRefData fixture "${e.name}"
+    ctrl <- emptyMap
+    created <- eCreate ent d ctrl
+    cd <- eDataGet created
+    cid <- getp cd "id"
+    pat <- jo [("id", cid), ("${updField}", VStr "PatchedMark")]
+    ctrl2 <- emptyMap
+    patched <- ePatch ent pat ctrl2
+    pd <- eDataGet patched
+    pv <- getp pd "${updField}"
+    pm <- readIORef (eMatch patched)
+    pmid <- getp pm "id"
+    pure (ismap pd && vstring pv == "PatchedMark" && vstring pmid == vstring cid)
 `
         }
         if (hasCreate && hasRemove) {

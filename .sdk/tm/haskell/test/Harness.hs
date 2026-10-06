@@ -175,7 +175,7 @@ defaultOpArgs :: OpArgs
 defaultOpArgs = OpArgs "load" "widget" Nothing Nothing Nothing [] VNoval VNoval
 
 defaultMethodH :: String -> String
-defaultMethodH op = case op of "create" -> "POST"; "update" -> "PATCH"; "remove" -> "DELETE"; _ -> "GET"
+defaultMethodH op = case op of "create" -> "POST"; "update" -> "PATCH"; "patch" -> "PATCH"; "remove" -> "DELETE"; _ -> "GET"
 
 buildUrl :: Value -> IO String
 buildUrl spec = do

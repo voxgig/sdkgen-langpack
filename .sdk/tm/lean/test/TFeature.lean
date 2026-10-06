@@ -329,7 +329,7 @@ def allowResolved (config opts : Value) : SIO (String × String) := do
   pure (← gpS allow "method", ← gpS allow "op")
 
 def allowDefaultLists : String × String :=
-  ("GET,PUT,POST,PATCH,DELETE,OPTIONS", "create,update,load,list,remove,command,direct,graphql")
+  ("GET,PUT,POST,PATCH,DELETE,OPTIONS", "create,update,patch,load,list,remove,command,direct,graphql")
 
 /-- A null allow list takes the default, as validate refills one in the other
     targets, so a client built with one sends its request. -/

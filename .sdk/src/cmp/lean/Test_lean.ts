@@ -76,6 +76,11 @@ function synthData(fields: any): any {
 }
 
 
+function patchField(e: any): string {
+  return Object.keys(e.fields || {}).find((k) => k !== 'id' && !k.endsWith('$')) || 'name'
+}
+
+
 const Test = cmp(async function Test(props: any) {
   const ctx$ = props.ctx$
   const target = props.target
@@ -85,11 +90,11 @@ const Test = cmp(async function Test(props: any) {
     .filter((e: any) => false !== e.active)
 
   let offline = ''
+  let patchDefs = ''
   each(entity, (e: any) => {
     const ns = e.name.charAt(0).toUpperCase() + e.name.slice(1)
     const Name = e.Name || (e.name.charAt(0).toUpperCase() + e.name.slice(1))
     const ops = e.op || {}
-    if (!ops.list && !ops.load) return
 
     let body = ''
 
@@ -116,23 +121,40 @@ const Test = cmp(async function Test(props: any) {
 
     if (ops.create && ops.load && ops.remove) {
       body += `        -- create -> load back -> remove, all in the store
-        let newmap ← SdkRuntime.gp (← SdkRuntime.gp seed "new") "${e.name}"
-        let nks ← keysof newmap
-        if nks.size > 0 then do
-          let payload ← SdkRuntime.gp newmap nks[0]!
-          let created ← ${ns}.create tclient payload (← emptyMap)
-          let cid ← SdkRuntime.gpS created "id"
-          if cid == "" then fail "${e.name}.create offline returned no id" else do
-            let m2 ← newMap #[("id", Value.str cid)]
-            let back ← ${ns}.load tclient m2 (← emptyMap)
-            if (← SdkRuntime.gpS back "id") == cid then
-              pass s!"${e.name}.create/load offline (id={cid})"
-            else fail s!"${e.name}.create/load offline mismatch"
-            let _ ← ${ns}.remove tclient m2 (← emptyMap)
-            let gone ← ${ns}.load tclient m2 (← emptyMap)
-            match gone with
-            | Value.map _ => fail s!"${e.name}.remove offline: still present"
-            | _ => pass s!"${e.name}.remove offline (id={cid})"
+        let created ← ${ns}.create tclient (← newRefData seed "${e.name}") (← emptyMap)
+        let cid ← SdkRuntime.gpS created "id"
+        if cid == "" then fail "${e.name}.create offline returned no id" else do
+          let m2 ← newMap #[("id", Value.str cid)]
+          let back ← ${ns}.load tclient m2 (← emptyMap)
+          if (← SdkRuntime.gpS back "id") == cid then
+            pass s!"${e.name}.create/load offline (id={cid})"
+          else fail s!"${e.name}.create/load offline mismatch"
+          let _ ← ${ns}.remove tclient m2 (← emptyMap)
+          let gone ← ${ns}.load tclient m2 (← emptyMap)
+          match gone with
+          | Value.map _ => fail s!"${e.name}.remove offline: still present"
+          | _ => pass s!"${e.name}.remove offline (id={cid})"
+`
+    }
+
+    if (ops.create && ops.patch) {
+      const def = 'patchOffline' + ns
+      const field = patchField(e)
+      patchDefs += `/-- ${e.name}: a patch changes the field it sends, in the store. -/
+def ${def} (tclient seed : Value) : SIO Unit := do
+  try
+    let created ← ${ns}.create tclient (← newRefData seed "${e.name}") (← emptyMap)
+    let cid ← SdkRuntime.gpS created "id"
+    let m ← newMap #[("id", Value.str cid)]
+    let d ← newMap #[("id", Value.str cid), ("${field}", Value.str "PatchedMark")]
+    let patched ← ${ns}.patch tclient m d (← emptyMap)
+    check (SdkUtility.isMapV patched && (← SdkRuntime.gpS patched "id") == cid
+        && (← SdkRuntime.gpS patched "${field}") == "PatchedMark")
+      s!"${e.name}.patch offline (id={cid})"
+  catch err => fail s!"${e.name}.patch offline: {err}"
+
+`
+      body += `        ${def} tclient seed
 `
     }
 
@@ -213,11 +235,11 @@ ${body})
   each(entity, (e: any) => {
     const ns = e.name.charAt(0).toUpperCase() + e.name.slice(1)
     const ops = Object.keys(e.op || {})
-      .filter((op) => ['list', 'load', 'create', 'update', 'remove'].includes(op))
+      .filter((op) => ['list', 'load', 'create', 'update', 'patch', 'remove'].includes(op))
       .sort((a, b) => (rank[a] ?? 2) - (rank[b] ?? 2))
     for (const op of ops) {
-      const call = 'update' === op
-        ? `${ns}.update c m (← emptyMap) ctrl`
+      const call = 'update' === op || 'patch' === op
+        ? `${ns}.${op} c m (← emptyMap) ctrl`
         : `${ns}.${op} c m ctrl`
       const params = pointParams(e.op[op]).map((p) => JSON.stringify(p)).join(', ')
       candidates.push(`  { name := "${e.name}.${op}", params := #[${params}],\n` +
@@ -520,7 +542,16 @@ def cleanSensitivity : SIO Unit := do
     check (plain != "" && explained == plain)
       s!"clean: with clean off, explain keeps the error ({explained})"
 
-def defaultBase : String := "http://localhost:8901"
+/-- The first new record the seed holds for an entity, or an empty map when it
+    holds none, so a check that creates from it still runs. -/
+def newRefData (seed : Value) (entName : String) : SIO Value := do
+  let newEnts ← SdkRuntime.gp (← SdkRuntime.gp seed "new") entName
+  let refs ← keysof newEnts
+  match refs[0]? with
+  | some ref => do clone (← SdkRuntime.gp newEnts ref)
+  | none => emptyMap
+
+${patchDefs}def defaultBase : String := "http://localhost:8901"
 
 def main : IO UInt32 := do
   let liveBase ← IO.getEnv "SDK_TEST_BASE"

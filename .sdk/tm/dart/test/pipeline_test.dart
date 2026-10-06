@@ -176,6 +176,12 @@ void tests() {
       equal('spec_method_allow', errcode(stdutil.makeSpec(ctx)));
     });
 
+    test('a patch, like an update, takes the request data as its input', (t) {
+      equal('data', stdutil.makeContext({'opname': 'patch'}).op.input);
+      equal('data', stdutil.makeContext({'opname': 'update'}).op.input);
+      equal('match', stdutil.makeContext({'opname': 'load'}).op.input);
+    });
+
     test('makePoint rejects an operation with no endpoints', (t) {
       final ctx = base({
         'op': {'name': 'load', 'points': []},
@@ -250,7 +256,7 @@ void tests() {
         final sdk = ProjectNameSDK.test({}, {'allow': allow});
         equal('GET,PUT,POST,PATCH,DELETE,OPTIONS',
             vs.getpath(sdk.options(), 'allow.method'));
-        equal('create,update,load,list,remove,command,direct,graphql',
+        equal('create,update,patch,load,list,remove,command,direct,graphql',
             vs.getpath(sdk.options(), 'allow.op'));
         equal('POST',
             (await sdk.prepare({'path': '/a', 'method': 'post'}))['method']);
@@ -263,7 +269,7 @@ void tests() {
       final sdk = ProjectNameSDK.test({}, {'allow': {}});
       equal('GET,PUT,POST,PATCH,DELETE,OPTIONS',
           vs.getpath(sdk.options(), 'allow.method'));
-      equal('create,update,load,list,remove,command,direct,graphql',
+      equal('create,update,patch,load,list,remove,command,direct,graphql',
           vs.getpath(sdk.options(), 'allow.op'));
       equal('spec_method_allow',
           errcode(await sdk.prepare({'path': '/a', 'method': 'HEAD'})));
@@ -283,7 +289,7 @@ void tests() {
             vs.getpath(opts, 'allow.method'));
         equal('load', vs.getpath(opts, 'allow.op'));
       }
-      equal('create,update,load,list,remove,command,direct,graphql',
+      equal('create,update,patch,load,list,remove,command,direct,graphql',
           vs.getpath(over('x', {'method': 'GET'}), 'allow.op'));
     });
 

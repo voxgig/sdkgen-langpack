@@ -203,6 +203,81 @@ describe('sdkgen-langpack', () => {
     ok(util && /hSetEncoding h utf8/.test(String(util[1])),
       'Testutil.hs no longer decodes readUtf8 as UTF-8')
   })
+
+
+  // A PATCH beside a PUT is a sixth operation, `patch`, which every target
+  // generates as it does `update`: its own entry, under its own name.
+  test('every target generates the patch operation', () => {
+    const file = (path) => {
+      ok(null != generated.files[path], 'not generated: ' + path)
+      return generated.files[path]
+    }
+
+    const dart = file('dart/lib/entity/PlanetEntity.dart')
+    ok(/Future<dynamic> patch\(\[dynamic reqdata, dynamic ctrl\]\)/.test(dart) &&
+      /'opname': 'patch'/.test(dart), 'dart: no patch method')
+
+    // sdkgen's opTypeName names the request type; before the floor's release
+    // it fell back to Match for a patch.
+    const types = file('dart/lib/DemoTypes.dart')
+    ok(/^class PlanetPatchData \{/m.test(types) && !/PlanetPatchMatch/.test(types),
+      'dart: the patch request type is not named PlanetPatchData')
+
+    ok(file('lean/src/SdkClient.lean').includes(
+      'def patch (c m d co : Value) : SIO Value := SdkRuntime.opPatch c "planet" m d co'),
+    'lean: no patch wrapper')
+
+    ok(file('haskell/REFERENCE.md').includes('ePatch ent data ctrl :: IO Entity'),
+      'haskell: the reference does not document ePatch')
+  })
+
+
+  // A fixture need not hold a `new` record for every entity: one a project
+  // wrote, or an older scaffold's, may not. haskell's newRefData and dart's
+  // patch test then create from an empty map, and lean must too, or its
+  // offline create and patch checks print nothing and the tally just shrinks.
+  test('lean creates from an empty map when the fixture holds no new record', async () => {
+    // A remove beside the create, so the create/load/remove check is emitted
+    // as well as the patch check.
+    const remove = `
+main: kit: entity: planet: op: remove: {
+  name: "remove"
+  points: [ {
+    g: { params: [
+      { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "p01" }
+    ] }
+    m: "DELETE", o: "/planet/{id}", s: [{ lit: "planet" }, { var: "id" }]
+    t: { req: "\`reqdata\`", res: "\`body\`" }
+  } ]
+}
+`
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, remove),
+    })
+    const runner = files['lean/test/Runner.lean']
+    ok(null != runner, 'lean: no test/Runner.lean generated')
+    const lines = String(runner).split('\n')
+
+    const creates = lines.filter((l) => /\bPlanet\.create tclient\b/.test(l))
+    strictEqual(creates.length, 2,
+      'lean: expected the create/load/remove and the patch checks each to create:\n' +
+      creates.join('\n'))
+    for (const line of creates) {
+      ok(line.includes('(← newRefData seed "planet")'),
+        'lean: an offline check creates only from a new record the fixture holds: ' +
+        line.trim())
+    }
+
+    // The seed's new records are read in that one place, which falls back.
+    const at = lines.findIndex((l) => l.startsWith('def newRefData '))
+    ok(-1 < at, 'lean: test/Runner.lean defines no newRefData')
+    const helper = lines.slice(at, lines.indexOf('', at))
+    const reads = lines.filter((l) => l.includes('"new"'))
+    ok(1 === reads.length && helper.includes(reads[0]),
+      'lean: the seed\'s new records are not read once, in newRefData:\n' + reads.join('\n'))
+    ok(helper.includes('  | none => emptyMap'),
+      'lean: newRefData gives no empty map for a seed without a new record')
+  })
 })
 
 

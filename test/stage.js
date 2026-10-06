@@ -34,7 +34,8 @@ const TARGETS = require('../sdkgen-package.json').provides.target
 
 // The API every target is generated from. Small, but carrying the shapes that
 // have historically broken generation: a required and an optional field, an
-// entity with an id binding, more than one operation, and a flow (several
+// entity with an id binding, more than one operation, a PATCH beside a PUT
+// (apidef keeps it as a sixth operation, `patch`), and a flow (several
 // targets' test emitters read one and throw without it).
 const API = `
 main: kit: info: { title: 'Demo', version: '1.0.0', auth: false }
@@ -69,6 +70,33 @@ main: kit: entity: planet: {
           { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "p01" }
         ] }
         m: "GET", o: "/planet/{id}", s: [{ lit: "planet" }, { var: "id" }]
+        t: { req: "\`reqdata\`", res: "\`body\`" }
+      } ]
+    }
+    create: {
+      name: "create"
+      points: [ {
+        g: {}, m: "POST", o: "/planet", s: [{ lit: "planet" }]
+        t: { req: "\`reqdata\`", res: "\`body\`" }
+      } ]
+    }
+    update: {
+      name: "update"
+      points: [ {
+        g: { params: [
+          { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "p01" }
+        ] }
+        m: "PUT", o: "/planet/{id}", s: [{ lit: "planet" }, { var: "id" }]
+        t: { req: "\`reqdata\`", res: "\`body\`" }
+      } ]
+    }
+    patch: {
+      name: "patch"
+      points: [ {
+        g: { params: [
+          { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "p01" }
+        ] }
+        m: "PATCH", o: "/planet/{id}", s: [{ lit: "planet" }, { var: "id" }]
         t: { req: "\`reqdata\`", res: "\`body\`" }
       } ]
     }

@@ -60,7 +60,7 @@ dynamic makeOptions(dynamic ctx) {
     },
     'allow': {
       'method': 'GET,PUT,POST,PATCH,DELETE,OPTIONS',
-      'op': 'create,update,load,list,remove,command,direct,graphql',
+      'op': 'create,update,patch,load,list,remove,command,direct,graphql',
     },
     'entity': {
       '`\$CHILD`': {
