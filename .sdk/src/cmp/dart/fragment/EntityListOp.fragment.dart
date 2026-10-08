@@ -4,7 +4,7 @@
 // EJECT-START
 
   /// List EntityName entities by match (see EntityNameListMatch in
-  /// ProjectNameTypes.dart). Returns a list of EntityName entity instances.
+  /// ProjectNameTypes.dart). Returns a list of entities, one per record.
   Future<dynamic> list([dynamic reqmatch, dynamic ctrl]) async {
     final utility = this.utility;
 

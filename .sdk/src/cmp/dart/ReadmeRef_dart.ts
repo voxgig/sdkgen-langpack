@@ -33,33 +33,33 @@ function listMatchArg(ent: any): string {
 const OP_SIGNATURES: Record<string, { sig: string, returns: string, desc: string }> = {
   load: {
     sig: 'load(reqmatch, [ctrl]) -> Future<dynamic>',
-    returns: 'the entity data',
-    desc: 'Load a single entity matching the given criteria. Returns the entity data and throws on error.',
+    returns: 'the entity',
+    desc: 'Load a single entity matching the given criteria. Returns the entity, whose record `data()` reads, and throws on error.',
   },
   list: {
     sig: 'list([reqmatch, ctrl]) -> Future<List>',
-    returns: 'a list of entities',
-    desc: 'List entities matching the given criteria. The match is optional — call `list()` with no argument to list all records. Returns a list of entity instances and throws on error.',
+    returns: 'one entity per record',
+    desc: 'List entities matching the given criteria. The match is optional — call `list()` with no argument to list all records. Returns a list of entities, one per record, and throws on error.',
   },
   create: {
     sig: 'create(reqdata, [ctrl]) -> Future<dynamic>',
-    returns: 'the created entity data',
-    desc: 'Create a new entity with the given data. Returns the created entity data and throws on error.',
+    returns: 'the created entity',
+    desc: 'Create a new entity with the given data. Returns the created entity and throws on error.',
   },
   update: {
     sig: 'update(reqdata, [ctrl]) -> Future<dynamic>',
-    returns: 'the updated entity data',
-    desc: 'Update an existing entity. The data must include the entity `id`. Returns the updated entity data and throws on error.',
+    returns: 'the updated entity',
+    desc: 'Update an existing entity. The data must include the entity `id`. Returns the updated entity and throws on error.',
   },
   patch: {
     sig: 'patch(reqdata, [ctrl]) -> Future<dynamic>',
-    returns: 'the patched entity data',
-    desc: 'Change part of an existing entity: only the fields given are sent. The data must include the entity `id`. Returns the patched entity data and throws on error.',
+    returns: 'the patched entity',
+    desc: 'Change part of an existing entity: only the fields given are sent. The data must include the entity `id`. Returns the patched entity and throws on error.',
   },
   remove: {
     sig: 'remove(reqmatch, [ctrl]) -> Future<dynamic>',
-    returns: 'the removed entity data',
-    desc: 'Remove the entity matching the given criteria. Throws on error.',
+    returns: 'the removed entity',
+    desc: 'Remove the entity matching the given criteria. Returns the entity, marked as deleted (`deleted()`); it keeps the data it held. Throws on error.',
   },
 }
 

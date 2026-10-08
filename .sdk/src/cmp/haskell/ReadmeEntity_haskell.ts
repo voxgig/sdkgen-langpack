@@ -38,7 +38,7 @@ const OP_DESC: Record<string, { method: string, desc: string }> = {
   create: { method: 'eCreate ent data ctrl',  desc: 'Create a new entity with the given data. Resolves to the entity.' },
   update: { method: 'eUpdate ent data ctrl',  desc: 'Update an existing entity. Resolves to the entity.' },
   patch:  { method: 'ePatch ent data ctrl',   desc: 'Change part of an existing entity. Resolves to the entity.' },
-  remove: { method: 'eRemove ent match ctrl', desc: 'Remove the matching entity. Resolves to the entity, marked deleted.' },
+  remove: { method: 'eRemove ent match ctrl', desc: 'Remove the matching entity. Resolves to the entity, marked as deleted.' },
 }
 
 

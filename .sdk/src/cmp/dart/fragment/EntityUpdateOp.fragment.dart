@@ -4,7 +4,7 @@
 // EJECT-START
 
   /// Update a EntityName (see EntityNameUpdateData in
-  /// ProjectNameTypes.dart). Returns the entity data map (EntityName).
+  /// ProjectNameTypes.dart). Returns the updated entity.
   Future<dynamic> update([dynamic reqdata, dynamic ctrl]) async {
     final utility = this.utility;
 

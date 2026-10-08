@@ -24,8 +24,237 @@ const Fs = require('node:fs')
 const Path = require('node:path')
 
 const { stageConsumer, generateInto } = require('@voxgig/sdkgen/testkit')
+const { cmp, each, names, Project, Folder, ReadmeTop, Entity, Readme } = require('@voxgig/sdkgen')
 
 const { PKG, TARGETS, compile, consumerModel } = require('./stage')
+
+
+const PLANET_REMOVE = `
+main: kit: entity: planet: op: remove: {
+  name: "remove"
+  points: [ {
+    g: { params: [
+      { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "p01" }
+    ] }
+    m: "DELETE", o: "/planet/{id}", s: [{ lit: "planet" }, { var: "id" }]
+    t: { req: "\`reqdata\`", res: "\`body\`" }
+  } ]
+}
+`
+
+
+// EVERY ENTITY OPERATION RETURNS THE ENTITY, whose record an accessor reads.
+// These are the checks sdkgen's generate.test.ts runs over its bundled targets.
+// lean has no entity object, so it returns the record and is not read here.
+const ACCESSOR = { dart: 'data()', haskell: 'eDataGet' }
+
+const RETURNS = (target) => ({
+  load: new RegExp('\\bthe entity, whose record `' +
+    ACCESSOR[target].replace(/[()]/g, '\\$&') + '` reads\\b'),
+  list: /\bentities, one per record\b|\bone entity per record\b/,
+  create: /\bthe created entity\b(?! data)/,
+  update: /\bthe updated entity\b(?! data)/,
+  patch: /\bthe patched entity\b(?! data)/,
+  remove: /\bthe entity, marked as deleted\b/,
+})
+
+// A page leads with the first active entity, and a test-mode example with the
+// first operation of the entity it picks, so each model shows other branches:
+// every operation, a load-only singleton, and a load nested under a parent.
+const DOC_MODELS = {
+  crud: PLANET_REMOVE,
+  singleton: `
+main: kit: entity: planet: active: false
+main: kit: entity: ambient: {
+  alias: field: {}
+  name: "ambient"
+  fields: { "level": { h: 'Level', n: "level", r: false, t: "\`$NUMBER\`" } }
+  op: load: { name: "load", points: [ {
+    g: {}, m: "GET", o: "/ambient", s: [{ lit: "ambient" }]
+    t: { req: "\`reqdata\`", res: "\`body\`" }
+  } ] }
+}
+main: kit: flow: BasicAmbientFlow: {
+  entity: "ambient", kind: "basic", name: "BasicAmbientFlow"
+  step: [ { o: "load", i: {
+    ref: "ambient_ref01", srcdatavar: "ambient_ref01_data", suffix: "_dt0" } } ]
+}
+`,
+  nested: PLANET_REMOVE + `
+main: kit: entity: satellite: {
+  alias: field: {}
+  name: "satellite"
+  id: { field: "id", name: "id" }
+  relations: ancestors: [[path($.main.kit.entity.planet)]]
+  fields: {
+    "id": { h: 'Id', n: "id", r: true, t: "\`$STRING\`" }
+    "planet_id": { h: 'PlanetId', n: "planet_id", r: false, t: "\`$STRING\`" }
+  }
+  op: load: { name: "load", points: [ {
+    g: { params: [
+      { k: "param", n: "planet_id", or: "planet_id", r: true, t: "\`$STRING\`", ex: "p01" }
+      { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "s01" }
+    ] }
+    m: "GET", o: "/planet/{planet_id}/satellite/{id}"
+    s: [{ lit: "planet" }, { var: "planet_id" }, { lit: "satellite" }, { var: "id" }]
+    t: { req: "\`reqdata\`", res: "\`body\`" }
+  } ] }
+}
+main: kit: flow: BasicSatelliteFlow: {
+  entity: "satellite", kind: "basic", name: "BasicSatelliteFlow"
+  step: [ { o: "load", m: { planet_id: "planet01" }, i: {
+    ref: "satellite_ref01", srcdatavar: "satellite_ref01_data", suffix: "_dt0" } } ]
+}
+`,
+}
+
+// The branch each model is there to show.
+const DOC_MODEL_SHOWS = {
+  crud: [['dart/README.md', 'client.Planet().remove('], ['haskell/README.md', 'Sdk.eRemove ']],
+  singleton: [['dart/README.md', 'client.Ambient().load()'],
+    ['haskell/README.md', 'Sdk.eLoad ent arg ctrl']],
+  nested: [['dart/README.md', '### 3. Load a satellite'],
+    ['haskell/README.md', '### 3. Load a satellite']],
+}
+
+// The pages a reader sees. ReadmeTop is the only route to each target's
+// ReadmeTopQuick and ReadmeTopTest.
+function docsRoot() {
+  return cmp(function Root(props) {
+    const { model, ctx$ } = props
+    model.const = model.const || { name: model.name }
+    names(model.const, model.name)
+    names(model, model.name)
+    ctx$.model = model
+    ctx$.stdrep = ctx$.stdrep || {}
+    names(ctx$.stdrep, model.Name, 'ProjectName')
+
+    const { target, entity } = model.main.kit
+    Project({}, () => {
+      ReadmeTop({})
+      each(target).filter((t) => false !== t.active).map((t) => {
+        names(t, t.name)
+        Folder({ name: t.name }, () => {
+          each(entity).filter((e) => false !== e.active).map((e) => {
+            names(e, e.name)
+            Entity({ target: t, entity: e })
+          })
+          Readme({ target: t })
+        })
+      })
+    })
+  })
+}
+
+// Each heading under a reference's `### Operations`, with the paragraph below it.
+function operationDocs(ref) {
+  const docs = []
+  const lines = ref.split('\n')
+  let inOps = false
+  lines.forEach((line, i) => {
+    if (/^#{2,3} /.test(line)) {
+      inOps = /^### Operations\s*$/.test(line)
+    }
+    else if (inOps && line.startsWith('#### ')) {
+      const rest = lines.slice(i + 1)
+      const start = rest.findIndex((l) => '' !== l.trim())
+      const end = rest.findIndex((l, j) => start < j && '' === l.trim())
+      docs.push({ heading: line, desc: rest.slice(start, end < 0 ? undefined : end).join(' ') })
+    }
+  })
+  return docs
+}
+
+function codeBlocks(text, fence) {
+  return [...text.matchAll(/^```(\w+)\n([\s\S]*?)^```$/gm)]
+    .filter((m) => fence === m[1]).map((m) => m[2])
+}
+
+// How each target's examples call an operation, read a record, print, and bind
+// a name.
+const EXAMPLE = {
+  dart: {
+    call: /\.(load|list|create|update|patch|remove)(?=\()/,
+    reads: /\.data\(\)/,
+    print: /\bprint\(/,
+    bound: /^\s*(?:final|var)\s+(\w+)\s*=/,
+  },
+  haskell: {
+    call: /\bSdk\.e(Load|List|Create|Update|Patch|Remove)\b/,
+    reads: /\beDataGet\b/,
+    print: /\b(?:print|putStrLn)\b/,
+    bound: /^\s*(\w+)\s*<-/,
+  },
+}
+
+// A line without the arguments of the operation it calls, which begin at `at`.
+// A record read there is an argument, not what the operation returns.
+function withoutArgs(line, at) {
+  const own = '(' === line.slice(at).trimStart()[0]
+  let depth = 0
+  let end = at
+  for (; end < line.length; end++) {
+    if ('(' === line[end]) depth++
+    else if (')' === line[end]) {
+      if (0 === depth) break
+      if (0 === --depth && own) { end++; break }
+    }
+  }
+  return line.slice(0, at) + line.slice(end)
+}
+
+// Each print after an operation other than remove, up to the next one, that
+// shows neither the record nor a name bound to it.
+function entityPrints(target, code) {
+  const { call, reads, print, bound } = EXAMPLE[target]
+  const found = []
+  let op = ''
+  let recs = []
+  for (const line of code.split('\n')) {
+    if (/^\s*(?:\/\/|--)/.test(line)) continue
+    const m = call.exec(line)
+    if (null != m) {
+      op = m[1].toLowerCase()
+      recs = []
+    }
+    if ('' === op || 'remove' === op) continue
+    if (reads.test(null == m ? line : withoutArgs(line, m.index + m[0].length))) {
+      const name = bound.exec(line)
+      if (null != name) recs.push(name[1])
+    }
+    else if (print.test(line) && !/fail|\berr\b|\berror\b/i.test(line) &&
+      !recs.some((name) => new RegExp('\\b' + name + '\\b').test(line))) {
+      found.push(op + ': ' + line.trim())
+    }
+  }
+  return found
+}
+
+// Neither haskell's Value nor its Entity has a Show instance, so `print` takes
+// only the flag remove sets; anything else is shown through stringify.
+const HS_UNSHOWABLE = /^(?!\s*--).*\bprint\b(?! =<< readIORef\b).*$/gm
+
+const RECORD_PHRASES = [
+  /\(returns the record\b/i,
+  /\bthe value is the loaded record\b/i,
+  /\bbare (?:created )?record\b/i,
+  /\bbare result\b/i,
+  /\baggregate list\b/i,
+  /\bValue list\b(?! of entities)/,
+  /\bfor single-entity ops\b/i,
+  /\bresult data directly\b/i,
+  /\boperation's data\b/i,
+  /\bentity records?\b/i,
+  /\b(?:holds|contains) the mock response record\b/i,
+  /\breturns the (?:created |updated |patched |removed )?entity data\b/i,
+  /\bentity data (?:directly|map)\b/i,
+  /\bresolves to (?:void|undefined|nil|None|null)\b/i,
+  /\blist of records\b/i,
+  /\breturned mock data\b/i,
+  /\bis the returned data\b/i,
+  /\bcast results\b/i,
+  /\bread fields off results\b/i,
+]
 
 
 describe('sdkgen-langpack', () => {
@@ -239,20 +468,8 @@ describe('sdkgen-langpack', () => {
   test('lean creates from an empty map when the fixture holds no new record', async () => {
     // A remove beside the create, so the create/load/remove check is emitted
     // as well as the patch check.
-    const remove = `
-main: kit: entity: planet: op: remove: {
-  name: "remove"
-  points: [ {
-    g: { params: [
-      { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`", ex: "p01" }
-    ] }
-    m: "DELETE", o: "/planet/{id}", s: [{ lit: "planet" }, { var: "id" }]
-    t: { req: "\`reqdata\`", res: "\`body\`" }
-  } ]
-}
-`
     const { files } = await generateInto(consumer, {
-      model: consumerModel(consumer.sdk, remove),
+      model: consumerModel(consumer.sdk, PLANET_REMOVE),
     })
     const runner = files['lean/test/Runner.lean']
     ok(null != runner, 'lean: no test/Runner.lean generated')
@@ -277,6 +494,128 @@ main: kit: entity: planet: op: remove: {
       'lean: the seed\'s new records are not read once, in newRefData:\n' + reads.join('\n'))
     ok(helper.includes('  | none => emptyMap'),
       'lean: newRefData gives no empty map for a seed without a new record')
+  })
+
+
+  const docsOut = new Map()
+  const docs = (shape) => {
+    if (!docsOut.has(shape)) {
+      docsOut.set(shape, generateInto(consumer, {
+        model: consumerModel(consumer.sdk, DOC_MODELS[shape]), root: docsRoot(),
+      }).then((res) => res.files))
+    }
+    return docsOut.get(shape)
+  }
+
+
+  test('the reference says each operation returns the entity', async () => {
+    const out = await docs('crud')
+    const wrong = []
+    for (const target of Object.keys(ACCESSOR)) {
+      const ref = out[target + '/REFERENCE.md']
+      ok(null != ref, target + ': no REFERENCE.md generated')
+      const expect = RETURNS(target)
+      const documented = []
+      for (const { heading, desc } of operationDocs(ref)) {
+        const named = /^#### `e?(load|list|create|update|patch|remove)\b/i.exec(heading)
+        ok(null != named, target + ': an operation heading names no operation: ' + heading)
+        const op = named[1].toLowerCase()
+        documented.push(op)
+        if (!expect[op].test(desc) || /\bentity data\b/.test(desc)) {
+          wrong.push(target + ' ' + op + ': ' + desc)
+        }
+      }
+      deepStrictEqual(documented.sort(), Object.keys(expect).sort(),
+        target + ': the operations its reference documents')
+    }
+    deepStrictEqual(wrong, [], 'operations the reference says return a record')
+  })
+
+
+  // dart declares every operation Future<dynamic>, so its doc comment says what
+  // the operation returns; haskell's Entity type declares it.
+  test('each operation is declared to return the entity', async () => {
+    const out = await docs('crud')
+    const expect = RETURNS('dart')
+    const wrong = []
+
+    const dart = out['dart/lib/entity/PlanetEntity.dart']
+    ok(null != dart, 'dart: no entity source generated')
+    const declared = []
+    for (const [, comment, type, op] of dart.matchAll(
+      /((?:^[ \t]*\/\/\/.*\n)+)[ \t]*(\S+) (load|list|create|update|patch|remove)\(/gm)) {
+      declared.push(op)
+      const says = comment.replace(/^[ \t]*\/\/\/ ?/gm, '').replace(/\s+/g, ' ').trim()
+      if ('Future<dynamic>' !== type || !expect[op].test(says) || /\bentity data\b/.test(says)) {
+        wrong.push('dart ' + op + ': ' + type + ' /// ' + says)
+      }
+    }
+    deepStrictEqual(declared.sort(), Object.keys(expect).sort(), 'dart: the operations declared')
+
+    const types = Fs.readFileSync(Path.join(PKG, '.sdk', 'tm', 'haskell', 'src', 'SdkTypes.hs'), 'utf8')
+    const fields = []
+    for (const [, op, type] of types.matchAll(
+      /^\s*, e(Load|List|Create|Update|Patch|Remove)\s+:: (.+)$/gm)) {
+      fields.push(op.toLowerCase())
+      const want = 'Value -> Value -> IO ' + ('List' === op ? '[Entity]' : 'Entity')
+      if (want !== type.trim()) wrong.push('haskell ' + op + ': ' + type.trim())
+    }
+    deepStrictEqual(fields.sort(), Object.keys(expect).sort(), 'haskell: the operations declared')
+
+    deepStrictEqual(wrong, [], 'operations declared to return a record')
+  })
+
+
+  test('every example prints the record of the entity an operation returns', async () => {
+    const wrong = []
+    for (const shape of Object.keys(DOC_MODELS)) {
+      const out = await docs(shape)
+      for (const [path, text] of DOC_MODEL_SHOWS[shape]) {
+        ok(String(out[path]).includes(text), shape + ': ' + path + ' no longer shows ' + text)
+      }
+      for (const target of Object.keys(ACCESSOR)) {
+        for (const path of ['README.md', target + '/README.md', target + '/REFERENCE.md']) {
+          ok(null != out[path], shape + ' ' + target + ': no ' + path)
+          for (const code of codeBlocks(out[path], target)) {
+            for (const line of entityPrints(target, code)) {
+              wrong.push(shape + ' ' + path + ' ' + target + ': ' + line)
+            }
+            if ('haskell' === target) {
+              for (const [line] of code.matchAll(HS_UNSHOWABLE)) {
+                wrong.push(shape + ' ' + path + ' haskell, no Show instance: ' + line.trim())
+              }
+            }
+          }
+        }
+      }
+    }
+    deepStrictEqual([...new Set(wrong)], [], 'examples that print the entity, not its record')
+  })
+
+
+  test('no page says an entity operation returns a record', async () => {
+    const said = []
+    for (const shape of Object.keys(DOC_MODELS)) {
+      const out = await docs(shape)
+      for (const target of Object.keys(ACCESSOR)) {
+        const pages = [
+          ['README.md', codeBlocks(out['README.md'], target).join('\n')],
+          [target + '/README.md', out[target + '/README.md']],
+          [target + '/REFERENCE.md', out[target + '/REFERENCE.md']],
+        ]
+        for (const [path, text] of pages) {
+          const flat = String(text).replace(/`/g, '').replace(/\s+/g, ' ')
+          for (const re of RECORD_PHRASES) {
+            const m = re.exec(flat)
+            if (null != m) {
+              said.push(shape + ' ' + path + ' ' + target + ': ' +
+                flat.substr(Math.max(0, m.index - 40), 100))
+            }
+          }
+        }
+      }
+    }
+    deepStrictEqual([...new Set(said)], [], 'pages that say an operation returns a record')
   })
 })
 

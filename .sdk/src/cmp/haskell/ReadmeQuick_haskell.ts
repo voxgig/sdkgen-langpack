@@ -42,14 +42,18 @@ const ReadmeQuick = cmp(function ReadmeQuick(props: any) {
 
   const authActive = isAuthActive(model)
 
+  // The blocks below continue this one's main, so it imports what they use.
+  const ioref = exampleEntity && entityOps(exampleEntity).includes('remove')
+    ? 'import Data.IORef (readIORef)\n' : ''
+
   Content(`### 1. Create a client
 
 \`\`\`haskell
 `)
   if (authActive) {
     Content(`import System.Environment (lookupEnv)
-import qualified SdkClient as Sdk
-import VoxgigStruct (Value (..), emptyMap)
+${ioref}import qualified SdkClient as Sdk
+import VoxgigStruct (Value (..), emptyMap, stringify)
 import SdkHelpers (jo)
 
 main :: IO ()
@@ -60,8 +64,8 @@ main = do
 `)
   }
   else {
-    Content(`import qualified SdkClient as Sdk
-import VoxgigStruct (Value (..), emptyMap)
+    Content(`${ioref}import qualified SdkClient as Sdk
+import VoxgigStruct (Value (..), emptyMap, stringify)
 import SdkHelpers (jo)
 
 main :: IO ()
@@ -71,9 +75,9 @@ main = do
   }
   Content(`\`\`\`
 
-Entity operations raise on error (via \`Control.Exception.throwIO\`) and
-return the bare result \`Value\`. Wrap a call in \`Control.Exception.try\`
-to recover from failures.
+Entity operations return the entity, whose record \`eDataGet\` reads, and
+raise on error (via \`Control.Exception.throwIO\`). Wrap a call in
+\`Control.Exception.try\` to recover from failures.
 
 `)
 
@@ -98,7 +102,7 @@ error. Read a record with \`eDataGet\`.
   match <- emptyMap
   ctrl <- emptyMap
   ${eFn}s <- Sdk.eList ent match ctrl
-  mapM_ (\\en -> print =<< Sdk.eDataGet en) ${eFn}s
+  mapM_ (\\en -> putStrLn =<< stringify =<< Sdk.eDataGet en) ${eFn}s
 \`\`\`
 
 `)
@@ -132,7 +136,7 @@ record.
   m <- jo [${neMatch.join(', ')}]
   ctrl2 <- emptyMap
   ${neFn} <- Sdk.eLoad ${neFn}Ent m ctrl2
-  print =<< Sdk.eDataGet ${neFn}
+  putStrLn =<< stringify =<< Sdk.eDataGet ${neFn}
 \`\`\`
 
 `)
@@ -158,7 +162,7 @@ record.
   m <- jo ${loadArg}
   ctrl2 <- emptyMap
   ${eFn} <- Sdk.eLoad ent2 m ctrl2
-  print =<< Sdk.eDataGet ${eFn}
+  putStrLn =<< stringify =<< Sdk.eDataGet ${eFn}
 \`\`\`
 
 `)
@@ -196,7 +200,7 @@ record.
   d <- jo [${examplePairs('create').join(', ')}]
   cctrl <- emptyMap
   created <- Sdk.eCreate createEnt d cctrl
-  print =<< Sdk.eDataGet created
+  putStrLn =<< stringify =<< Sdk.eDataGet created
 \`\`\`
 
 `)
@@ -208,7 +212,7 @@ record.
   upd <- jo [${updatePairs.join(', ')}]
   uctrl <- emptyMap
   updated <- Sdk.eUpdate updateEnt upd uctrl
-  print =<< Sdk.eDataGet updated
+  putStrLn =<< stringify =<< Sdk.eDataGet updated
 \`\`\`
 
 `)
@@ -220,7 +224,7 @@ record.
   pat <- jo [${patchPairs.join(', ')}]  -- only the fields to change
   pctrl <- emptyMap
   patched <- Sdk.ePatch patchEnt pat pctrl
-  print =<< Sdk.eDataGet patched
+  putStrLn =<< stringify =<< Sdk.eDataGet patched
 \`\`\`
 
 `)
@@ -237,7 +241,7 @@ record.
   removeEnt <- Sdk.${eFn} sdk VNoval
   rm <- jo [${removePairs.length ? removePairs.join(', ') : ''}]
   rctrl <- emptyMap
-  -- Resolves to the entity, marked deleted; it keeps the data it held.
+  -- Resolves to the entity, marked as deleted; it keeps the data it held.
   removed <- Sdk.eRemove removeEnt rm rctrl
   print =<< readIORef (Sdk.eDeleted removed)
 \`\`\`
