@@ -745,17 +745,11 @@ def prepareHeaders (ctx : Value) : SIO Value := do
     if 0 < kept.size then sp out "cookie" (.str ("; ".intercalate kept.toList))
   pure out
 
-/-- The credential prefix (`Bearer`): the caller's `options.auth.prefix` when
-    the caller passed an `auth` map, else the one the API model declares in
-    `config.options.auth.prefix`, else none.
-
-    runOp hands the pipeline the caller's RAW options - lean's client never
-    runs them through makeOptions, so the model's declared prefix was never
-    in `options` and a live SDK built `authorization: <key>` for a bearer
-    API. The corpus lane, which does merge, is unaffected: with `auth`
-    present in options the first branch answers exactly as before. Shared
-    with the secrets feature, whose transport wrapper rewrites the header
-    from the same rule. -/
+/-- The credential prefix (`Bearer`): `options.auth.prefix`, where makeOptions
+    has merged the caller's `auth` over the model's, so the caller's prefix
+    wins; with no `auth` map in the options, the model's
+    `config.options.auth.prefix`; else none. Shared with the secrets feature,
+    whose transport wrapper rewrites the header from the same rule. -/
 def authPrefix (ctx : Value) : SIO String := do
   let options ← gp ctx "options"
   match (← gp options "auth") with
@@ -822,7 +816,7 @@ def fieldArg (ctx : Value) (name : String) : SIO Bool := do
 
 /-- A header, cookie or query argument travels where prepareHeaders or
     prepareQuery sends it, so the body is built from the request data without it,
-    unless the entity declares it as a field too. -/
+    unless the point marks it as a field the body keeps. -/
 def routedArgNames (ctx : Value) : SIO (Array String) := do
   let mut names : Array String := #[]
   for kind in #["header", "cookie", "query"] do
