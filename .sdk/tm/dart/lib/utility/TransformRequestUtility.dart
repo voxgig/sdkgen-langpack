@@ -34,7 +34,7 @@ dynamic stripAction(dynamic reqdata) => omit(reqdata, [r'$action']);
 
 // A header, cookie or query argument travels where prepareHeaders or
 // prepareQuery sends it, so the body is built from the request data without it,
-// unless the entity declares it as a field too.
+// unless the point marks it as a field the body keeps.
 List<dynamic> routedArgNames(dynamic ctx) => [
       ...callArgs(ctx, 'header'),
       ...callArgs(ctx, 'cookie'),
