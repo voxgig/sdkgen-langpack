@@ -373,12 +373,11 @@ def allowNovalCases : SIO Unit := do
 /-- Over a config.options `allow` that is null or not a map, the caller's `allow`
     map is taken whole, and a key it omits still takes the default. -/
 def allowOmittedKeyCases : SIO Unit := do
-  -- Fresh per client: the default is filled into the caller's own map.
-  let opOnly : SIO Value := do newMap #[("allow", ← newMap #[("op", .str "load")])]
-  let s ← headLoad (← opOnly) r#", "allow": "x""#
+  let opOnly ← newMap #[("allow", ← newMap #[("op", .str "load")])]
+  let s ← headLoad opOnly r#", "allow": "x""#
   check (headRefused s)
     s!"pipeline: a caller's allow without method refuses a HEAD over a config allow \"x\" ({s.1})"
-  let n ← headLoad (← opOnly) r#", "allow": null"#
+  let n ← headLoad opOnly r#", "allow": null"#
   check (headRefused n)
     s!"pipeline: a caller's allow without method refuses a HEAD over a null config allow ({n.1})"
   let config ← newMap #[("options", ← newMap #[("allow", .str "x")])]
@@ -386,11 +385,51 @@ def allowOmittedKeyCases : SIO Unit := do
   check (got == ("GET", allowDefaultLists.2))
     s!"makeOptions: an allow.op the caller's allow omits takes the default ({got.2})"
 
+/-- The pipeline model with its allow.method narrowed to GET. -/
+def getOnlyConfig : SIO String := do
+  let config ← SdkJson.jsonRead pipeConfig
+  SdkUtility.sp (← gp config "options") "allow" (← newMap #[("method", .str "GET")])
+  jsonEncode config
+
+/-- One options map builds two clients, the second over a model that allows
+    only GET. Building the first leaves the map as it was, down to its entity
+    block, so the second resolves what a fresh map gives it and refuses a
+    POST; makeOptions leaves the model as it was too. -/
+def optionsReuseCases : SIO Unit := do
+  let literal := r#"{"base": "http://api.test", "allow": {"op": "create,load,list"},
+    "headers": {"x-caller": "c1"}, "entity": {"widget": {"note": "c1"}}}"#
+  let reply : SIO (Value × Option Value) := do answer 200.0 "OK" (← emptyMap) #[]
+  let shared ← SdkJson.jsonRead literal
+  let before ← jsonEncode shared (sort := true)
+  let _ ← SdkRuntime.mkClientWith shared pipeConfig (recording (← mkWire) reply)
+  let after ← jsonEncode shared (sort := true)
+  check (after == before)
+    s!"makeOptions: building a client leaves the caller's options map as it was ({after})"
+  let getOnly ← getOnlyConfig
+  let w ← mkWire
+  let second ← SdkRuntime.mkClientWith shared getOnly (recording w reply)
+  let fresh ← SdkRuntime.mkClientWith (← SdkJson.jsonRead literal) getOnly
+    (recording (← mkWire) reply)
+  let got ← jsonEncode (← gp second "options") (sort := true)
+  check (got == (← jsonEncode (← gp fresh "options") (sort := true)))
+    s!"makeOptions: a second client from that map resolves what a fresh map does ({got})"
+  let msg ← thrown (SdkRuntime.opCreate second "widget" (← newMap #[("title", .str "T")])
+    (← emptyMap))
+  check (hasSub msg "not allowed by SDK option allow.method" && (← w.calls.get) == 0)
+    s!"pipeline: the second client refuses the POST its own model refuses ({msg})"
+  let model ← SdkJson.jsonRead getOnly
+  let modelBefore ← jsonEncode model (sort := true)
+  let _ ← SdkUtility.makeOptions model shared
+  let modelAfter ← jsonEncode model (sort := true)
+  check (modelAfter == modelBefore)
+    s!"makeOptions: resolving the options leaves the model as it was ({modelAfter})"
+
 /-- One call from `main`, which is at the compiler's heartbeat limit. -/
 def allowDefaultCases : SIO Unit := do
   allowNullCases
   allowNovalCases
   allowOmittedKeyCases
+  optionsReuseCases
 
 def main : IO UInt32 := do
   let sctx ← mkCtx

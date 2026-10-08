@@ -410,11 +410,13 @@ def fillAllowDefaults (opts : Value) : SIO Unit := do
       if isNullish (← lookupRaw allow (.str k)) then sp allow k (← gp defaults k)
 
 /-- Defaults <- config.options <- options, then a nullish or missing allow list
-    takes its default and every entity gets an alias map. -/
+    takes its default and every entity gets an alias map. Neither the caller's
+    options nor the model's are changed. -/
 def makeOptions (config options : Value) : SIO Value := do
   let base ← defaultOptions
-  let copts ← asMap (← gp config "options")
-  let uopts ← asMap options
+  -- Copies: merge writes each merged child back into the map it walks.
+  let copts ← clone (← asMap (← gp config "options"))
+  let uopts ← clone (← asMap options)
   -- The secret registry is fed from the RAW input, before anything else
   -- reads the options.
   let cfgclean ← gp copts "clean"

@@ -9,7 +9,7 @@ import Data.IORef
 import Data.List (isInfixOf, isSuffixOf)
 import Data.Maybe (isNothing)
 
-import VoxgigStruct (Value (..), InjArg (INone), emptyMap, emptyList, mkList, size, ismap, isNoval, vint, listItems, transform)
+import VoxgigStruct (Value (..), InjArg (INone), emptyMap, emptyList, mkList, size, ismap, isNoval, vint, listItems, transform, jsonEncode)
 import SdkTypes
 import SdkHelpers
 import SdkRuntime
@@ -214,6 +214,37 @@ tests c = do
     viaNull <- opOnly VNull
     methodOnly <- allowLists =<< over (VStr "x") =<< jo [("method", VStr "GET")]
     pure (viaStr && viaNull && methodOnly == ("GET", snd defaultAllowLists))
+
+  -- One options map builds two clients, the second over the model with its
+  -- allow.method narrowed to GET. The first leaves the map as it was, down to
+  -- its entity block, so the second resolves what a fresh map gives it and
+  -- refuses a POST, and building the second leaves its model as it was.
+  runTest c "options.reused_map_builds_independent_clients" $ do
+    let literal = do
+          ao <- jo [("op", VStr "create,load,list")]; hs <- jo [("x-caller", VStr "c1")]
+          w <- jo [("note", VStr "c1")]; ent <- jo [("widget", w)]
+          jo [("base", VStr "http://api.test"), ("allow", ao), ("headers", hs), ("entity", ent)]
+        getOnly = do
+          cfg <- makeConfig
+          cfgopts <- getp cfg "options"
+          setp cfgopts "allow" =<< jo [("method", VStr "GET")]
+          pure cfg
+        snapshot = jsonEncode True Nothing
+        resolved cl = snapshot =<< readIORef (clOptions cl)
+    shared <- literal
+    before <- snapshot shared
+    _ <- C.newSdk shared
+    after <- snapshot shared
+    model <- getOnly
+    modelBefore <- snapshot model
+    second <- F.makeClientBase model makeFeature shared
+    modelAfter <- snapshot model
+    freshModel <- getOnly
+    fresh <- F.makeClientBase freshModel makeFeature =<< literal
+    same <- (==) <$> resolved second <*> resolved fresh
+    refused <- prepareAs second "post" >>= either
+      (\(SdkException e) -> errCodeIs e "spec_method_allow") (const (pure False))
+    pure (after == before && modelAfter == modelBefore && same && refused)
 
   runTest c "direct.allow_names_whole_ops" $ do
     ao <- jo [("op", VStr "indirect,reload")]; sdkopts <- jo [("allow", ao)]
