@@ -1697,7 +1697,8 @@ makeOptionsUtil ctx = do
   configV <- readIORef (cConfig ctx)
   config <- case configV of VMap _ -> pure configV; _ -> emptyMap
   cfgoptsV <- toMap <$> getp config "options"
-  cfgopts <- case cfgoptsV of VMap _ -> pure cfgoptsV; _ -> emptyMap
+  -- A copy, like optsC: merge writes each merged child back into the map it walks.
+  cfgopts <- case cfgoptsV of VMap _ -> clone cfgoptsV; _ -> emptyMap
   -- The secret registry exists BEFORE validation, fed from the raw input, so
   -- the constructor's own rejection of a mistyped credential is clean too.
   cfgclean <- getp cfgopts "clean"

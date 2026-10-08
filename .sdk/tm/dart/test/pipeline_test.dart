@@ -293,6 +293,39 @@ void tests() {
           vs.getpath(over('x', {'method': 'GET'}), 'allow.op'));
     });
 
+    test('one options map builds two clients, each over its own model', (t) {
+      Map<String, dynamic> literal() => {
+            'base': 'http://api.test',
+            'allow': {'op': 'create,load,list'},
+            'headers': {'x-caller': 'c1'},
+            'entity': {
+              'widget': {'note': 'c1'}
+            },
+          };
+      // The constructor reads the generated config, so a client over the
+      // model narrowed to GET is the makeOptions it runs, given that model.
+      dynamic getOnly(dynamic options) =>
+          stdutil.makeOptions(stdutil.makeContext({
+            'utility': stdutil,
+            'options': options,
+            'config': {
+              ...config.toMap(),
+              'options': {
+                ...config.options,
+                'allow': {'method': 'GET'}
+              },
+            },
+          }));
+      final model = vs.clone(config.options);
+      final shared = literal();
+      ProjectNameSDK(shared);
+      deepEqual(literal(), shared, 'the first client changed the options map');
+      deepEqual(model, config.options, 'the first client changed the model');
+      final second = getOnly(shared);
+      deepEqual(getOnly(literal()), second, 'the second client');
+      equal('GET', vs.getpath(second, 'allow.method'));
+    });
+
     test('direct is refused by a list that names only indirect', (t) async {
       final sdk = ProjectNameSDK.test({}, {
         'allow': {'op': 'indirect,reload'}
