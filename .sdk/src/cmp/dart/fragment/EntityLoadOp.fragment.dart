@@ -4,7 +4,7 @@
 // EJECT-START
 
   /// Load a EntityName by match (see EntityNameLoadMatch in
-  /// ProjectNameTypes.dart). Returns the entity data map (EntityName).
+  /// ProjectNameTypes.dart). Returns the entity, whose record `data()` reads.
   Future<dynamic> load([dynamic reqmatch, dynamic ctrl]) async {
     final utility = this.utility;
 

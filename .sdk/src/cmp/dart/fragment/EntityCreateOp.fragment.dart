@@ -4,7 +4,7 @@
 // EJECT-START
 
   /// Create a EntityName (see EntityNameCreateData in
-  /// ProjectNameTypes.dart). Returns the entity data map (EntityName).
+  /// ProjectNameTypes.dart). Returns the created entity.
   Future<dynamic> create([dynamic reqdata, dynamic ctrl]) async {
     final utility = this.utility;
 

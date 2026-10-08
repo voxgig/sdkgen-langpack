@@ -4,7 +4,7 @@
 // EJECT-START
 
   /// Change part of a EntityName (see EntityNamePatchData in
-  /// ProjectNameTypes.dart). Returns the entity data map (EntityName).
+  /// ProjectNameTypes.dart). Returns the patched entity.
   Future<dynamic> patch([dynamic reqdata, dynamic ctrl]) async {
     final utility = this.utility;
 

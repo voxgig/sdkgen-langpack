@@ -29,7 +29,7 @@ const ReadmeTopTest = cmp(function ReadmeTopTest(props: any) {
 
   Content(`\`\`\`haskell
 import qualified SdkClient as Sdk
-import VoxgigStruct (Value (..), emptyMap)
+import VoxgigStruct (Value (..), emptyMap, stringify)
 import SdkHelpers (jo)
 
 main :: IO ()
@@ -65,7 +65,9 @@ main = do
   arg <- ${argExpr}
   ctrl <- emptyMap
   ${resVar} <- Sdk.${opCap} ent arg ctrl
-  print ${resVar}
+  ${'list' === primaryOp
+    ? `mapM_ (\\en -> putStrLn =<< stringify =<< Sdk.eDataGet en) ${resVar}`
+    : `putStrLn =<< stringify =<< Sdk.eDataGet ${resVar}`}
 `)
   }
 
