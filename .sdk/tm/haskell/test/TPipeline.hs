@@ -218,7 +218,7 @@ tests c = do
   -- One options map builds two clients, the second over the model with its
   -- allow.method narrowed to GET. The first leaves the map as it was, down to
   -- its entity block, so the second resolves what a fresh map gives it and
-  -- refuses a POST; neither changes its model.
+  -- refuses a POST, and building the second leaves its model as it was.
   runTest c "options.reused_map_builds_independent_clients" $ do
     let literal = do
           ao <- jo [("op", VStr "create,load,list")]; hs <- jo [("x-caller", VStr "c1")]

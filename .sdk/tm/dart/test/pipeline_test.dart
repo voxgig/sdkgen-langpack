@@ -296,10 +296,10 @@ void tests() {
     test('one options map builds two clients, each over its own model', (t) {
       Map<String, dynamic> literal() => {
             'base': 'http://api.test',
-            'allow': {'op': 'create,load,list'},
-            'headers': {'x-caller': 'c1'},
-            'entity': {
-              'widget': {'note': 'c1'}
+            'allow': <String, dynamic>{'op': 'create,load,list'},
+            'headers': <String, dynamic>{'x-caller': 'c1'},
+            'entity': <String, dynamic>{
+              'widget': <String, dynamic>{'note': 'c1'}
             },
           };
       // The constructor reads the generated config, so a client over the
