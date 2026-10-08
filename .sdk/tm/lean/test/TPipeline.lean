@@ -99,8 +99,8 @@ def allowEdgeCases : SIO Unit := do
       && (← specCode bare) == "" && (← specCode other) == "")
     "makePoint, makeSpec: a hand-built context with no allow option allows"
 
-/-- A header, cookie or query argument the entity declares as a field stays in
-    the body, beside an unmarked one that leaves it. -/
+/-- A header, cookie or query argument the point marks as a field the body
+    keeps stays in the body, beside an unmarked one that leaves it. -/
 def fieldArgCase : SIO Unit := do
   let tr ← newMap #[("req", .str "`reqdata`")]
   let mut kept := true
@@ -111,7 +111,7 @@ def fieldArgCase : SIO Unit := do
       #[("name", .str "n"), ("locale", .str "en"), ("session_id", .str "s1")]
     let b ← SdkUtility.transformRequest ctx
     kept := kept && (← keysof b) == #["locale", "name"] && (← gpS b "locale") == "en"
-  check kept "transformRequest: an argument the entity declares as a field stays in the body"
+  check kept "transformRequest: an argument the point marks as a field the body keeps stays in the body"
 
 def patchInputCase : SIO Unit := do
   check (SdkUtility.opInputOf "patch" == "data" && SdkUtility.opInputOf "update" == "data"

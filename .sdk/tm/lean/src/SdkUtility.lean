@@ -745,9 +745,10 @@ def prepareHeaders (ctx : Value) : SIO Value := do
     if 0 < kept.size then sp out "cookie" (.str ("; ".intercalate kept.toList))
   pure out
 
-/-- The credential prefix (`Bearer`): the caller's `options.auth.prefix` when
-    the caller passed an `auth` map, else the one the API model declares in
-    `config.options.auth.prefix`, else none. Shared with the secrets feature,
+/-- The credential prefix (`Bearer`): `options.auth.prefix`, where makeOptions
+    has merged the caller's `auth` over the model's, so the caller's prefix
+    wins; with no `auth` map in the options, the model's
+    `config.options.auth.prefix`; else none. Shared with the secrets feature,
     whose transport wrapper rewrites the header from the same rule. -/
 def authPrefix (ctx : Value) : SIO String := do
   let options ← gp ctx "options"

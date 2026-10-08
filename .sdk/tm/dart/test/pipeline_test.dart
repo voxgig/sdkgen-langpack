@@ -1005,7 +1005,7 @@ void tests() {
               {'x_trace': 't1', 'session_id': 's1', 'page_size': 2, 'title': 'T', r'$action': 'a'})));
     });
 
-    test('an argument the entity declares as a field stays in the body', (t) {
+    test('an argument the point marks as a field the body keeps stays in the body', (t) {
       for (final kind in ['header', 'cookie', 'query']) {
         final point = <String, dynamic>{
           'transform': {'req': '`reqdata`'},
