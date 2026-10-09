@@ -114,6 +114,78 @@ main: kit: flow: BasicPlanetFlow: {
 `
 
 
+// A child entity, whose routes name its parent: a load, list or remove of it
+// that gives only its own id leaves {planet_id} unfilled, which makeUrl
+// refuses. Separate from API, so the documentation tests keep planet as the
+// entity each page leads with.
+const CHILD = `
+main: kit: entity: moon: {
+  alias: field: {}
+  name: "moon"
+  id: { field: "id", name: "id" }
+  relations: ancestors: [[path($.main.kit.entity.planet)]]
+  field: {
+    id:        { name: "id",        kind: "field", type: "\`$STRING\`", required: true }
+    planet_id: { name: "planet_id", kind: "field", type: "\`$STRING\`", required: true }
+    title:     { name: "title",     kind: "field", type: "\`$STRING\`" }
+  }
+  fields: {
+    "id": { h: 'Id', n: "id", r: true, t: "\`$STRING\`" }
+    "planet_id": { h: 'PlanetId', n: "planet_id", r: true, t: "\`$STRING\`" }
+    "title": { h: 'Title', n: "title", r: false, t: "\`$STRING\`" }
+  }
+  op: {
+    list: {
+      name: "list"
+      points: [ {
+        g: { params: [
+          { k: "param", n: "planet_id", or: "planet_id", r: true, t: "\`$STRING\`" }
+        ] }
+        m: "GET", o: "/planet/{planet_id}/moon"
+        s: [{ lit: "planet" }, { var: "planet_id" }, { lit: "moon" }]
+        t: { req: "\`reqdata\`", res: "\`body\`" }
+      } ]
+    }
+    load: {
+      name: "load"
+      points: [ {
+        g: { params: [
+          { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`" }
+          { k: "param", n: "planet_id", or: "planet_id", r: true, t: "\`$STRING\`" }
+        ] }
+        m: "GET", o: "/planet/{planet_id}/moon/{id}"
+        s: [{ lit: "planet" }, { var: "planet_id" }, { lit: "moon" }, { var: "id" }]
+        t: { req: "\`reqdata\`", res: "\`body\`" }
+      } ]
+    }
+    remove: {
+      name: "remove"
+      points: [ {
+        g: { params: [
+          { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`" }
+          { k: "param", n: "planet_id", or: "planet_id", r: true, t: "\`$STRING\`" }
+        ] }
+        m: "DELETE", o: "/planet/{planet_id}/moon/{id}"
+        s: [{ lit: "planet" }, { var: "planet_id" }, { lit: "moon" }, { var: "id" }]
+        t: { req: "\`reqdata\`", res: "\`body\`" }
+      } ]
+    }
+  }
+}
+
+main: kit: flow: BasicMoonFlow: {
+  entity: "moon", kind: "basic", name: "BasicMoonFlow"
+  step: [
+    { o: "list", m: { planet_id: "planet01" } }
+    { o: "load", m: { id: "moon01", planet_id: "planet01" }, i: {
+        ref: "moon_ref01", srcdatavar: "moon_ref01_data", suffix: "_dt0" } }
+    { o: "remove", m: { id: "moon01", planet_id: "planet01" }, i: {
+        ref: "moon_ref01", srcdatavar: "moon_ref01_data", suffix: "_rm0" } }
+  ]
+}
+`
+
+
 function consumerModel(sdk, extra) {
   const src = [
     '@"@voxgig/apidef/model/apidef.aontu"',
@@ -137,4 +209,4 @@ function consumerModel(sdk, extra) {
 }
 
 
-module.exports = { PKG, TARGETS, API, compile, consumerModel }
+module.exports = { PKG, TARGETS, API, CHILD, compile, consumerModel }

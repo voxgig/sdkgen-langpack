@@ -26,7 +26,7 @@ const Path = require('node:path')
 const { stageConsumer, generateInto } = require('@voxgig/sdkgen/testkit')
 const { cmp, each, names, Project, Folder, ReadmeTop, Entity, Readme } = require('@voxgig/sdkgen')
 
-const { PKG, TARGETS, compile, consumerModel } = require('./stage')
+const { PKG, TARGETS, CHILD, compile, consumerModel } = require('./stage')
 
 
 const PLANET_REMOVE = `
@@ -494,6 +494,38 @@ describe('sdkgen-langpack', () => {
       'lean: the seed\'s new records are not read once, in newRefData:\n' + reads.join('\n'))
     ok(helper.includes('  | none => emptyMap'),
       'lean: newRefData gives no empty map for a seed without a new record')
+  })
+
+
+  // makeUrl refuses a route with a {placeholder} left in it, so a child's test
+  // call gives its parent's id beside its own, read from the record it acts on.
+  test('a child entity\'s test calls give its parent\'s id', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, CHILD),
+    })
+    const hs = String(files['haskell/test/SdkGenTests.hs'])
+    for (const line of [
+      '    em1 <- emptyMap; em2 <- emptyMap\n    entmap <- getp existing "moon"',
+      '    setp em1 "planet_id" =<< getp rec0 "planet_id"\n    lst <- eList ent em1 em2',
+      '        setp m "planet_id" =<< getp rec0 "planet_id"\n        loaded <- eLoad ent m ctrl',
+      '  let parentVals = [("planet_id", VStr "P1")]',
+    ]) {
+      ok(hs.includes(line), 'haskell: the moon test lacks:\n' + line)
+    }
+
+    const lean = String(files['lean/test/Runner.lean'])
+    for (const line of [
+      '          SdkUtility.sp lm "planet_id" (← SdkUtility.gp rec0 "planet_id")\n        let items ← Moon.list tclient lm',
+      '          SdkUtility.sp m "planet_id" (← SdkUtility.gp rec0 "planet_id")\n          let got ← Moon.load tclient m',
+    ]) {
+      ok(lean.includes(line), 'lean: the moon test lacks:\n' + line)
+    }
+
+    // dart's stream test lists with no match, so a child has none.
+    ok(!String(files['dart/test/entity/moon/MoonEntity_test.dart']).includes("test('stream'"),
+      'dart: the moon test streams its list with no parent id')
+    ok(String(files['dart/test/entity/planet/PlanetEntity_test.dart']).includes("test('stream'"),
+      'dart: the planet test no longer streams its list')
   })
 
 

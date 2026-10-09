@@ -12,7 +12,7 @@ const { pipeline } = require('node:stream/promises')
 const { stageConsumer, generateInto } = require('@voxgig/sdkgen/testkit')
 const { cmp, Project } = require('@voxgig/sdkgen')
 
-const { PKG, TARGETS, compile, consumerModel } = require('./stage')
+const { PKG, TARGETS, CHILD, compile, consumerModel } = require('./stage')
 
 
 const SCAFFOLD = Path.join('project', 'standard', '.sdk')
@@ -47,13 +47,13 @@ async function generate(out) {
     await consumer.addPackage(PKG)
     compile(consumer)
 
-    const sdk = await generateInto(consumer, { model: consumerModel(consumer.sdk) })
+    const sdk = await generateInto(consumer, { model: consumerModel(consumer.sdk, CHILD) })
     if (0 < sdk.leaks.length) {
       throw new Error('placeholders survived generation: ' + sdk.leaks.join(', '))
     }
 
     const data = await generateInto(consumer, {
-      model: consumerModel(consumer.sdk),
+      model: consumerModel(consumer.sdk, CHILD),
       root: buildRoot(csg),
     })
 

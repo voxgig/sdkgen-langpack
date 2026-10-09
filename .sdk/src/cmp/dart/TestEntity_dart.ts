@@ -1,5 +1,5 @@
 import { buildIdNames } from '@voxgig/sdkgen'
-import { flowSteps } from '@voxgig/sdkgen'
+import { flowSteps, opReachable } from '@voxgig/sdkgen'
 
 import {
   flatten,
@@ -133,11 +133,12 @@ const TestEntity = cmp(function TestEntity(props: any) {
 
         const idlist = buildIdNames(entity, basicflow)
 
-        // The stream test drives the `list` op; only emit it when the entity
-        // actually has a list op (a create-only entity like a *_result has no
-        // list endpoint, so ent.stream('list', …) would throw point_no_points).
+        // The stream test drives the `list` op with no match; only emit it when
+        // a bare call can reach a list route (a create-only entity like a
+        // *_result has none, and a child's list route names its parents).
         const flowHasList = Object.values(flowSteps(basicflow))
-          .some((s: any) => 'list' === s.o)
+          .some((s: any) => 'list' === s.o) &&
+          opReachable((entity.op as any)?.list, [])
         Slot({ name: 'stream' }, () => {
           if (!flowHasList) {
             return
