@@ -529,6 +529,24 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // prepareAuth base64-encodes `key:secret` only when the config marks the
+  // scheme as HTTP Basic.
+  for (const repr of ['literal', 'data']) {
+    test('the dart config marks HTTP Basic (' + repr + ')', async () => {
+      const BASIC = /['"]basic\\?['"]\s*:\s*true/
+      const config = async (auth) => String((await generateInto(consumer, {
+        model: consumerModel(consumer.sdk, "main: kit: config: repr: '" + repr + "'\n" +
+          'main: kit: config: auth: ' + auth),
+      })).files['dart/lib/Config.dart'])
+
+      ok(BASIC.test(await config("{ active: true, prefix: 'Basic', basic: true }")),
+        'dart: an HTTP Basic config drops auth.basic')
+      ok(!BASIC.test(await config("{ active: true, prefix: 'Bearer' }")),
+        'dart: a Bearer config is marked as Basic')
+    })
+  }
+
+
   const docsOut = new Map()
   const docs = (shape) => {
     if (!docsOut.has(shape)) {
