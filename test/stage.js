@@ -135,6 +135,29 @@ main: kit: entity: moon: {
     "title": { h: 'Title', n: "title", r: false, t: "\`$STRING\`" }
   }
   op: {
+    create: {
+      name: "create"
+      points: [ {
+        g: { params: [
+          { k: "param", n: "planet_id", or: "planet_id", r: true, t: "\`$STRING\`" }
+        ] }
+        m: "POST", o: "/planet/{planet_id}/moon"
+        s: [{ lit: "planet" }, { var: "planet_id" }, { lit: "moon" }]
+        t: { req: "\`reqdata\`", res: "\`body\`" }
+      } ]
+    }
+    patch: {
+      name: "patch"
+      points: [ {
+        g: { params: [
+          { k: "param", n: "id", or: "id", r: true, t: "\`$STRING\`" }
+          { k: "param", n: "planet_id", or: "planet_id", r: true, t: "\`$STRING\`" }
+        ] }
+        m: "PATCH", o: "/planet/{planet_id}/moon/{id}"
+        s: [{ lit: "planet" }, { var: "planet_id" }, { lit: "moon" }, { var: "id" }]
+        t: { req: "\`reqdata\`", res: "\`body\`" }
+      } ]
+    }
     list: {
       name: "list"
       points: [ {

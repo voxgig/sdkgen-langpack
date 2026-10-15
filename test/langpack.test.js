@@ -480,9 +480,11 @@ describe('sdkgen-langpack', () => {
       'lean: expected the create/load/remove and the patch checks each to create:\n' +
       creates.join('\n'))
     for (const line of creates) {
-      ok(line.includes('(← newRefData seed "planet")'),
-        'lean: an offline check creates only from a new record the fixture holds: ' +
-        line.trim())
+      ok(line.includes('Planet.create tclient cd '),
+        'lean: an offline check creates only from the data it built: ' + line.trim())
+      const built = lines[lines.indexOf(line) - 1] || ''
+      ok(built.includes('let cd ← newRefData seed "planet"'),
+        'lean: the create data comes from a new record the fixture holds: ' + built.trim())
     }
 
     // The seed's new records are read in that one place, which falls back.
@@ -509,6 +511,7 @@ describe('sdkgen-langpack', () => {
       '    setp em1 "planet_id" =<< getp rec0 "planet_id"\n    lst <- eList ent em1 em2',
       '        setp m "planet_id" =<< getp rec0 "planet_id"\n        loaded <- eLoad ent m ctrl',
       '  let parentVals = [("planet_id", VStr "P1")]',
+      '    setp d "planet_id" =<< getp rec0 "planet_id"\n    ctrl <- emptyMap\n    created <- eCreate ent d ctrl',
     ]) {
       ok(hs.includes(line), 'haskell: the moon test lacks:\n' + line)
     }
@@ -517,8 +520,18 @@ describe('sdkgen-langpack', () => {
     for (const line of [
       '          SdkUtility.sp lm "planet_id" (← SdkUtility.gp rec0 "planet_id")\n        let items ← Moon.list tclient lm',
       '          SdkUtility.sp m "planet_id" (← SdkUtility.gp rec0 "planet_id")\n          let got ← Moon.load tclient m',
+      '          SdkUtility.sp cd "planet_id" (← SdkUtility.gp rec0 "planet_id")\n        let created ← Moon.create tclient cd',
+      '      SdkUtility.sp cd "planet_id" (← SdkUtility.gp rec0 "planet_id")\n    let created ← Moon.create tclient cd',
     ]) {
       ok(lean.includes(line), 'lean: the moon test lacks:\n' + line)
+    }
+
+    const dartMoon = String(files['dart/test/entity/moon/MoonEntity_test.dart'])
+    for (const line of [
+      "      cdata['planet_id'] = rec0['planet_id'];",
+      "        'planet_id': created['planet_id'],",
+    ]) {
+      ok(dartMoon.includes(line), 'dart: the moon patch test lacks:\n' + line)
     }
 
     // dart's stream test lists with no match, so a child has none.
