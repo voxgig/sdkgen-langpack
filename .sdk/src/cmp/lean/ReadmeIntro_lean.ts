@@ -1,9 +1,9 @@
-import { cmp, Content } from '@voxgig/sdkgen'
+import { cmp, Content, modelText } from '@voxgig/sdkgen'
 import { KIT, getModelPath } from '@voxgig/apidef'
 
 const ReadmeIntro = cmp(function ReadmeIntro(props: any) {
   const { target, ctx$: { model } } = props
-  const info = (model.main && model.main.kit && model.main.kit.info) || {}
+  const info = modelText(model)
   const tagline = info.tagline || ''
 
   Content(`# ${model.Name} ${target.title} SDK

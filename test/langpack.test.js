@@ -656,6 +656,24 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // A project's own wording, under main.kit.text, words over the spec's.
+  test('each README takes the project\'s tagline over the spec\'s', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk,
+        "main: kit: info: tagline: 'Tagline from the spec.'\n" +
+        "main: kit: text: tagline: 'Tagline from the project.'"),
+      root: docsRoot(),
+    })
+    for (const target of TARGETS) {
+      const readme = String(files[target + '/README.md'])
+      ok(readme.includes('Tagline from the project.'),
+        target + ': the README does not show main.kit.text.tagline')
+      ok(!readme.includes('Tagline from the spec.'),
+        target + ': the README shows main.kit.info.tagline over main.kit.text.tagline')
+    }
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {
