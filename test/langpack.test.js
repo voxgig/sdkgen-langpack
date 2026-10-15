@@ -307,6 +307,19 @@ describe('sdkgen-langpack', () => {
   }
 
 
+  test('each LICENSE names the model\'s publisher, and Voxgig when it names none', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, "main: kit: publisher: name: 'Acme Widgets Ltd'"),
+    })
+    const year = new Date().getFullYear()
+    for (const target of TARGETS) {
+      const holder = (out) => (/^Copyright \(c\) (.*)$/m.exec(String(out[target + '/LICENSE'])) || [])[1]
+      strictEqual(holder(files), year + ' Acme Widgets Ltd', target + ': the LICENSE copyright holder')
+      strictEqual(holder(generated.files), year + ' Voxgig', target + ': the default LICENSE copyright holder')
+    }
+  })
+
+
   // No target may generate into another's folder. With one package shipping
   // three targets, a component that hardcoded a sibling's directory name —
   // or a Copy pointed at the wrong `tm/` tree — would produce exactly this,
