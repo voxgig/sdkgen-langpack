@@ -14,7 +14,7 @@ import Control.Concurrent (threadDelay)
 import Control.Exception
   ( SomeAsyncException, SomeException, displayException, fromException, throwIO
   , toException, try )
-import Control.Monad (forM_, unless, when)
+import Control.Monad (foldM, forM_, unless, when)
 import Data.Bits ((.&.))
 import Data.IORef
 import Data.Maybe (isJust, isNothing)
@@ -1021,7 +1021,7 @@ itemEnvelopeKey restf = do
 -- `transform.res: `body.item`` describes an API that answers {"item": {...}},
 -- and a list read by the transform above answers items of {"<key>": {...}}.
 -- Returning the bare payload gives the response transform nothing to read.
--- Like the dart and lean mocks, a string transform is exactly `body.<key>`.
+-- A string transform `body.<a>.<b>` answers {"<a>": {"<b>": ...}}.
 mockEnvelope :: Context -> Value -> IO Value
 mockEnvelope fctx dat
   | isNullish dat = pure dat
@@ -1035,7 +1035,7 @@ mockEnvelope fctx dat
         (_, _, VStr s)
           | length s > 7, take 6 s == "`body.", last s == '`'
           , let inner = take (length s - 7) (drop 6 s)
-          , not (null inner), '.' `notElem` inner -> jo [(inner, dat)]
+          , not (null inner) -> foldM (\acc seg -> jo [(seg, acc)]) dat (reverse (splitOnChar '.' inner))
         _ -> pure dat
 
 testFeature :: IO Feature

@@ -1079,5 +1079,13 @@ void tests() {
       deepEqual([{'badge': {'id': 'b1'}}, {'badge': {'id': 'b2'}}], out);
       deepEqual([{'id': 'b1'}, {'id': 'b2'}], vs.transform({'body': out}, spec));
     });
+
+    test('a deeper response path answers every segment', (t) {
+      final one = mockEnvelope('`body.data.thing`', {'id': 'g1'});
+      deepEqual({'data': {'thing': {'id': 'g1'}}}, one);
+      deepEqual({'id': 'g1'}, vs.transform({'body': one}, '`body.data.thing`'));
+      final many = mockEnvelope('`body.data.things`', [{'id': 'g1'}, {'id': 'g2'}]);
+      deepEqual([{'id': 'g1'}, {'id': 'g2'}], vs.transform({'body': many}, '`body.data.things`'));
+    });
   });
 }

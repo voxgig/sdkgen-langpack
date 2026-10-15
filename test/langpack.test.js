@@ -1143,4 +1143,24 @@ describe('the test mock in the templates', () => {
       ok(src.includes(form), lang + ': the test mock answers wrapped list items bare (' + rel + ')')
     })
   }
+
+  // Where each mock splits a `body.<path>` transform, so a GraphQL op's
+  // `body.data.<field>` is answered in full.
+  const SPLIT = {
+    dart: ['dart/lib/feature/test/TestFeature.dart', "m.group(1)!.split('.').reversed"],
+    haskell: ['haskell/src/SdkFeatures.hs', "reverse (splitOnChar '.' inner)"],
+    lean: ['lean/src/SdkRuntime.lean', '(inner.splitOn ".").foldrM'],
+  }
+
+  for (const [lang, [rel, form]] of Object.entries(SPLIT)) {
+    test(lang + ': the test mock rebuilds every segment of a response path', () => {
+      const src = Fs.readFileSync(Path.join(TM, rel), 'utf8')
+      ok(src.includes(form), lang + ': the test mock no longer splits the response path on "." (' + rel + ')')
+    })
+  }
+
+  test('every target the pack provides has its mock guarded', () => {
+    deepStrictEqual(Object.keys(WRAP).sort(), [...TARGETS].sort())
+    deepStrictEqual(Object.keys(SPLIT).sort(), [...TARGETS].sort())
+  })
 })

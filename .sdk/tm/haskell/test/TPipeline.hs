@@ -344,6 +344,21 @@ tests c = do
     i <- getp out "item" >>= \r -> getp r "id"
     pure (case i of VStr "i1" -> True; _ -> False)
 
+  runTest c "test_mock.deep_body_envelope" $ do
+    cl <- client
+    let answer op res dat = do
+          ctx <- mkCtx cl op
+          tm <- jo [("res", VStr res)]; point <- jo [("transform", tm)]
+          writeIORef (cPoint ctx) point
+          out <- F.mockEnvelope ctx dat
+          (\b -> transform INone b (VStr res)) =<< jo [("body", out)]
+    g1 <- jo [("id", VStr "g1")]; g2 <- jo [("id", VStr "g2")]
+    one <- answer "load" "`body.data.thing`" g1
+    many <- answer "list" "`body.data.things`" =<< ja [g1, g2]
+    oid <- getp one "id"
+    ids <- mapM (\r -> getp r "id") =<< listItems many
+    pure (vstring oid == "g1" && [s | VStr s <- ids] == ["g1", "g2"])
+
   runTest c "make_response.guard_no_spec" $ do
     cl <- client; ctx <- mkCtx cl "load"
     writeIORef (cSpec ctx) VNoval

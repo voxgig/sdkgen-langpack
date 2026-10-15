@@ -32,13 +32,15 @@ dynamic mockEnvelope(dynamic spec, dynamic data) {
   if (spec is! String) {
     return data;
   }
-  // Exactly `body.<key>`; a deeper path is not an envelope this mock can
-  // synthesise, so it is left alone rather than guessed at.
-  final m = RegExp(r'^`body\.([^`.]+)`$').firstMatch(spec);
+  final m = RegExp(r'^`body\.(.+)`$').firstMatch(spec);
   if (null == m) {
     return data;
   }
-  return <String, dynamic>{m.group(1)!: data};
+  dynamic out = data;
+  for (final seg in m.group(1)!.split('.').reversed) {
+    out = <String, dynamic>{seg: out};
+  }
+  return out;
 }
 
 class TestFeature extends BaseFeature {

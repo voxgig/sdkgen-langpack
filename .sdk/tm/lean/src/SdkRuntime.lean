@@ -321,12 +321,10 @@ def mockEnvelope (ctx : Value) (data : Value) : SIO Value := do
       newList (← items.mapM fun item => newMap #[(key, item)])
     else do
       let spec := asStr restf
-      -- Exactly `body.<key>`; a deeper path is not an envelope this mock can
-      -- synthesise, so it is left alone rather than guessed at.
       if spec.startsWith "`body." && spec.endsWith "`" && spec.length > 7 then
         let inner := ((spec.drop 6).dropEnd 1).toString
-        if inner.isEmpty || inner.contains '.' then pure data
-        else newMap #[(inner, data)]
+        if inner.isEmpty then pure data
+        else (inner.splitOn ".").foldrM (fun seg acc => newMap #[(seg, acc)]) data
       else pure data
 
 /-- The base transport in test mode: answer from the seeded store. -/

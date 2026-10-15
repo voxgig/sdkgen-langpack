@@ -159,6 +159,10 @@ def pipeConfig : String := r#"{
         "graphql": {"doc": "query Thing($id: ID!) { thing(id: $id) { id } }",
                     "vars": [{"name": "id", "from": "id"}]},
         "transform": {"req": "`reqdata`", "res": "`body.data.thing`"},
+        "args": {}, "select": {}}]},
+      "list": {"name": "list", "points": [{"kind": "graphql", "method": "POST", "parts": [],
+        "graphql": {"doc": "query Things { things { id } }", "vars": []},
+        "transform": {"req": "`reqdata`", "res": "`body.data.things`"},
         "args": {}, "select": {}}]}
     }},
     "badge": {"name": "badge", "op": {
@@ -436,6 +440,34 @@ def allowDefaultCases : SIO Unit := do
   allowOmittedKeyCases
   optionsReuseCases
 
+/-- The test mock answers each response transform with what it reads back. -/
+def mockEnvelopeCases : SIO Unit := do
+  -- pipeline: the test mock wraps each listed record under the key the
+  -- list's response transform reads it from
+  (do
+    let badge (id title : String) : SIO Value := newMap #[("id", .str id), ("title", .str title)]
+    let badges ← newMap #[("b1", ← badge "b1" "one"), ("b2", ← badge "b2" "two")]
+    let seed ← newMap #[("existing", ← newMap #[("badge", badges)])]
+    let c ← SdkRuntime.mkTestClientV (← emptyMap) pipeConfig seed
+    let got ← SdkRuntime.opList c "badge" (← emptyMap) (← emptyMap)
+    let titles ← (← listItemsOf got).mapM fun r => gpS r "title"
+    check (titles.qsort (· < ·) == #["one", "two"])
+      s!"pipeline: a list reads the record each of its items wraps ({titles})")
+
+  -- pipeline: the test mock answers every segment of a deeper response
+  -- path, such as a graphql op's `body.data.<field>`
+  (do
+    let gem ← newMap #[("id", .str "g1"), ("title", .str "one")]
+    let seed ← newMap #[("existing", ← newMap #[("thing", ← newMap #[("g1", gem)])])]
+    let c ← SdkRuntime.mkTestClientV (← emptyMap) pipeConfig seed
+    let got ← SdkRuntime.opLoad c "thing" (← newMap #[("id", .str "g1")]) (← emptyMap)
+    check ((← gpS got "title") == "one")
+      "pipeline: a test-mode load reads the record under body.data.thing"
+    let listed ← SdkRuntime.opList c "thing" (← emptyMap) (← emptyMap)
+    let titles ← (← listItemsOf listed).mapM fun r => gpS r "title"
+    check (titles == #["one"])
+      s!"pipeline: a test-mode list reads the records under body.data.things ({titles})")
+
 def main : IO UInt32 := do
   let sctx ← mkCtx
   let go : SIO Unit := do
@@ -610,17 +642,7 @@ def main : IO UInt32 := do
       check ((← gpS got "title") == "T")
         "pipeline: the point's response transform unwraps the envelope")
 
-    -- pipeline: the test mock wraps each listed record under the key the
-    -- list's response transform reads it from
-    (do
-      let badge (id title : String) : SIO Value := newMap #[("id", .str id), ("title", .str title)]
-      let badges ← newMap #[("b1", ← badge "b1" "one"), ("b2", ← badge "b2" "two")]
-      let seed ← newMap #[("existing", ← newMap #[("badge", badges)])]
-      let c ← SdkRuntime.mkTestClientV (← emptyMap) pipeConfig seed
-      let got ← SdkRuntime.opList c "badge" (← emptyMap) (← emptyMap)
-      let titles ← (← listItemsOf got).mapM fun r => gpS r "title"
-      check (titles.qsort (· < ·) == #["one", "two"])
-        s!"pipeline: a list reads the record each of its items wraps ({titles})")
+    mockEnvelopeCases
 
     -- pipeline: a data op carries the request body
     (do
