@@ -21,7 +21,9 @@ const { test, describe, before, after } = require('node:test')
 const { ok, strictEqual, deepStrictEqual } = require('node:assert')
 
 const Fs = require('node:fs')
+const Os = require('node:os')
 const Path = require('node:path')
+const { spawnSync } = require('node:child_process')
 
 const { stageConsumer, generateInto } = require('@voxgig/sdkgen/testkit')
 const { cmp, each, names, Project, Folder, ReadmeTop, Entity, Readme } = require('@voxgig/sdkgen')
@@ -229,6 +231,71 @@ function entityPrints(target, code) {
   }
   return found
 }
+
+// The offline examples: the root README's test section and the README's
+// test-mode how-to, each a test client and an operation on it.
+const OFFLINE = {
+  dart: {
+    client: /SDK\.test\(/,
+    call: /\bawait client\.\w+\(\)\.(?:load|list|create|update|patch|remove)\(/,
+    seeds: (name) => new RegExp("SDK\\.test\\(\\{\\s*'entity': \\{\\s*'" + name +
+      "': \\{\\s*'test01': \\{"),
+  },
+  haskell: {
+    client: /\bSdk\.testSdk/,
+    call: /\bSdk\.e(?:Load|List|Create|Update|Patch|Remove)\b/,
+    seeds: (name) => new RegExp('jo \\[\\("' + name + '", \\w+\\)\\][\\s\\S]*' +
+      'jo \\[\\("entity", \\w+\\)\\][\\s\\S]*\\bSdk\\.testSdk seed VNoval\\b'),
+  },
+}
+
+// The entity each documentation model's examples lead with.
+const DOC_MODEL_LEADS = { crud: 'planet', singleton: 'ambient', nested: 'planet' }
+
+function offlineExamples(out, target) {
+  const { client, call } = OFFLINE[target]
+  return ['README.md', target + '/README.md'].flatMap((path) =>
+    codeBlocks(String(out[path]), target)
+      .filter((code) => client.test(code) && call.test(code))
+      .map((code) => ({ path, code })))
+}
+
+function onPath(cmd) {
+  return 0 === spawnSync('sh', ['-c', 'command -v ' + cmd], { stdio: 'ignore' }).status
+}
+
+function run(cmd, args, cwd) {
+  const res = spawnSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  return { status: res.status, out: String(res.stdout) + String(res.stderr) }
+}
+
+// Builds each offline example against the SDK the same model generates, runs
+// it, and returns what it printed.
+const RUN_EXAMPLE = {
+  dart: (dir, examples) => {
+    const pkg = /^name: (\S+)$/m.exec(Fs.readFileSync(Path.join(dir, 'pubspec.yaml'), 'utf8'))[1]
+    const got = run('dart', ['pub', 'get', '--offline'], dir)
+    strictEqual(got.status, 0, 'dart pub get failed:\n' + got.out)
+    return examples.map(({ path, code }, i) => {
+      const main = /\bmain\(\)/.test(code) ? code :
+        "import 'package:" + pkg + "/DemoSDK.dart';\n\nFuture<void> main() async {\n" + code + '}\n'
+      const file = Path.join('example', 'readme_' + i + '.dart')
+      Fs.mkdirSync(Path.join(dir, 'example'), { recursive: true })
+      Fs.writeFileSync(Path.join(dir, file), main)
+      return { path, ...run('dart', ['run', file], dir) }
+    })
+  },
+  haskell: (dir, examples) => examples.map(({ path, code }, i) => {
+    const file = 'Readme' + i + '.hs'
+    Fs.writeFileSync(Path.join(dir, file), code)
+    const built = run('ghc', ['-O0', '-isrc', '-outputdir', '.readmebuild', '-o', 'readme' + i, file], dir)
+    if (0 !== built.status) return { path, ...built }
+    return { path, ...run(Path.join(dir, 'readme' + i), [], dir) }
+  }),
+}
+
+const TOOL = { dart: 'dart', haskell: 'ghc' }
+
 
 // Neither haskell's Value nor its Entity has a Show instance, so `print` takes
 // only the flag remove sets; anything else is shown through stringify.
@@ -667,6 +734,59 @@ describe('sdkgen-langpack', () => {
     }
     deepStrictEqual([...new Set(wrong)], [], 'examples that print the entity, not its record')
   })
+
+
+  // A test client's mock starts empty, so an offline example that did not
+  // seed it would throw on a load and list nothing.
+  test('each offline example seeds the mock with the record its call reads', async () => {
+    for (const shape of Object.keys(DOC_MODELS)) {
+      const out = await docs(shape)
+      for (const target of Object.keys(OFFLINE)) {
+        const found = offlineExamples(out, target)
+        deepStrictEqual(found.map((f) => f.path), ['README.md', target + '/README.md'],
+          shape + ' ' + target + ': the offline examples')
+        for (const { path, code } of found) {
+          ok(OFFLINE[target].seeds(DOC_MODEL_LEADS[shape]).test(code),
+            shape + ' ' + path + ' ' + target + ': the example does not seed the mock with ' +
+            DOC_MODEL_LEADS[shape] + ':\n' + code)
+        }
+      }
+    }
+  })
+
+
+  // Run where the toolchain is: a load-led and a list-led model, each example
+  // built against its own generated SDK, printing the record seeded for it.
+  for (const target of Object.keys(OFFLINE)) {
+    test(target + ': each offline example runs and prints its seeded record',
+      { skip: !onPath(TOOL[target]) && TOOL[target] + ' is not on PATH' }, async () => {
+        const tmp = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'langpack-readme-'))
+        try {
+          for (const shape of ['singleton', 'crud']) {
+            const sdk = await generateInto(consumer, {
+              model: consumerModel(consumer.sdk, DOC_MODELS[shape]),
+            })
+            const dir = Path.join(tmp, shape)
+            for (const [rel, content] of Object.entries(sdk.files)) {
+              if (!rel.startsWith(target + '/')) continue
+              Fs.mkdirSync(Path.dirname(Path.join(dir, rel)), { recursive: true })
+              Fs.writeFileSync(Path.join(dir, rel), content)
+            }
+            const examples = offlineExamples(await docs(shape), target)
+            ok(0 < examples.length, shape + ' ' + target + ': no offline example')
+            for (const res of RUN_EXAMPLE[target](Path.join(dir, target), examples)) {
+              strictEqual(res.status, 0, shape + ' ' + res.path + ' ' + target +
+                ': the example failed:\n' + res.out)
+              ok(/\btest01\b/.test(res.out), shape + ' ' + res.path + ' ' + target +
+                ': the example printed no seeded record:\n' + res.out)
+            }
+          }
+        }
+        finally {
+          Fs.rmSync(tmp, { recursive: true, force: true })
+        }
+      })
+  }
 
 
   // A project's own wording, under main.kit.text, words over the spec's.

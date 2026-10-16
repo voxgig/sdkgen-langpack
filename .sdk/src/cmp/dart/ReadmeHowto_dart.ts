@@ -1,5 +1,4 @@
-
-import { cmp, Content, isAuthActive, envName, canonKey, canonScalarKey, entityIdField, pickExampleEntity, opRequestShape, safeVarName, exampleVarName } from '@voxgig/sdkgen'
+import { cmp, Content, isAuthActive, envName, pickExampleEntity, exampleVarName } from '@voxgig/sdkgen'
 
 import {
   KIT,
@@ -7,16 +6,7 @@ import {
   nom,
 } from '@voxgig/apidef'
 
-
-// A type-correct Dart literal for a field's canonical type.
-function dartLit(type: any): string {
-  const k = canonScalarKey(type)
-  if ('INTEGER' === k || 'NUMBER' === k) return '1'
-  if ('BOOLEAN' === k) return 'true'
-  if ('ARRAY' === k) return '<dynamic>[]'
-  if ('OBJECT' === k) return '<String, dynamic>{}'
-  return "'example'"
-}
+import { dartTestCall } from './utility_dart'
 
 
 const ReadmeHowto = cmp(function ReadmeHowto(props: any) {
@@ -29,19 +19,8 @@ const ReadmeHowto = cmp(function ReadmeHowto(props: any) {
   const { entity: exampleEntity, primaryOp } = pickExampleEntity(entity)
   const eName = exampleEntity ? nom(exampleEntity, 'Name') : 'Entity'
   const eVar = exampleVarName(eName.toLowerCase(), 'dart')
-  // Model-driven id key: null when the entity has no id-like field.
-  const idF = exampleEntity ? entityIdField(exampleEntity) : null
-  const isMatchOp = 'load' === primaryOp || 'remove' === primaryOp
-  let testArg = ''
-  if (exampleEntity && isMatchOp) {
-    testArg = idF ? `{'${idF}': 'test01'}` : ''
-  } else if (exampleEntity && ('create' === primaryOp || 'update' === primaryOp || 'patch' === primaryOp)) {
-    const items = opRequestShape(exampleEntity, primaryOp).items
-      .filter((it: any) => it.name !== idF && it.name !== 'id')
-    const required = items.filter((it: any) => !it.optional)
-    const chosen = required.length ? required : items.slice(0, 3)
-    testArg = `{${chosen.map((it: any) => `'${it.name}': ${dartLit(it.type)}`).join(', ')}}`
-  }
+  const testCall = exampleEntity && primaryOp ? dartTestCall(exampleEntity, primaryOp, '') : null
+  const testArg = testCall ? testCall.arg : ''
 
   // The op-driven test-mode line, shown only when the SDK has an entity op.
   // A direct()-only SDK (no ops anywhere) shows a direct() call instead.
@@ -107,7 +86,10 @@ print(fetchdef['headers']);
 Create a mock client for unit testing — no server required:
 
 \`\`\`dart
-final client = ${model.const.Name}SDK.test();
+${testCall
+    ? `// The offline mock starts empty: seed the record the call reads.
+final client = ${model.const.Name}SDK.test(${testCall.seed});`
+    : `final client = ${model.const.Name}SDK.test();`}
 
 ${testModeExample}
 \`\`\`

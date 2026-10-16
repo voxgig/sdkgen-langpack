@@ -1,23 +1,12 @@
 
-import { cmp, Content, isAuthActive, envName, canonKey, entityIdField, pickExampleEntity, opRequestShape } from '@voxgig/sdkgen'
+import { cmp, Content, isAuthActive, envName, pickExampleEntity } from '@voxgig/sdkgen'
 
 import {
   KIT,
   getModelPath,
-  nom,
 } from '@voxgig/apidef'
 
-import { hsVarName } from './utility_haskell'
-
-
-// A type-correct Haskell `Value` literal for a field's canonical type.
-function hsLit(type: any): string {
-  const k = canonKey(type)
-  if ('INTEGER' === k || 'NUMBER' === k) return 'VNum 1'
-  if ('BOOLEAN' === k) return 'VBool True'
-  if ('ARRAY' === k || 'OBJECT' === k) return 'VNoval'
-  return 'VStr "example"'
-}
+import { hsTestCall, hsVarName } from './utility_haskell'
 
 
 const ReadmeHowto = cmp(function ReadmeHowto(props: any) {
@@ -27,20 +16,9 @@ const ReadmeHowto = cmp(function ReadmeHowto(props: any) {
   // Pick an entity with a real op (prefer a read op). primaryOp is null only
   // when NO entity exposes any op (a direct()-only SDK).
   const { entity: exampleEntity, primaryOp } = pickExampleEntity(entity)
-  const eName = exampleEntity ? nom(exampleEntity, 'Name') : 'Entity'
   const eFn = exampleEntity ? hsVarName(exampleEntity.name) : 'entity'
-  const idF = exampleEntity ? entityIdField(exampleEntity) : null
-  const isMatchOp = 'load' === primaryOp || 'remove' === primaryOp
-  let testArgExpr = 'emptyMap'
-  if (exampleEntity && isMatchOp) {
-    testArgExpr = idF ? `jo [("${idF}", VStr "test01")]` : 'emptyMap'
-  } else if (exampleEntity && ('create' === primaryOp || 'update' === primaryOp || 'patch' === primaryOp)) {
-    const items = opRequestShape(exampleEntity, primaryOp).items
-      .filter((it: any) => it.name !== idF && it.name !== 'id')
-    const required = items.filter((it: any) => !it.optional)
-    const chosen = required.length ? required : items.slice(0, 3)
-    testArgExpr = `jo [${chosen.map((it: any) => `("${it.name}", ${hsLit(it.type)})`).join(', ')}]`
-  }
+  const testCall = exampleEntity && primaryOp ? hsTestCall(exampleEntity, primaryOp, '  ') : null
+  const testArgExpr = testCall ? testCall.argExpr : 'emptyMap'
 
   // The op-driven test-mode line, shown only when the SDK has an entity op.
   const testModeExample = 'list' === primaryOp
@@ -133,7 +111,11 @@ import SdkHelpers (jo)
 
 main :: IO ()
 main = do
-  sdk <- Sdk.testSdk0
+${testCall
+    ? `  -- The offline mock starts empty: seed the record the call reads.
+${testCall.seedLines}
+  sdk <- Sdk.testSdk seed VNoval`
+    : '  sdk <- Sdk.testSdk0'}
 ${testModeExample}
 \`\`\`
 

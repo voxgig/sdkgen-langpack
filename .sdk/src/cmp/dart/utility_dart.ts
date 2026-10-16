@@ -7,6 +7,13 @@ import {
   walk,
 } from '@voxgig/struct'
 
+import {
+  canonScalarKey,
+  entityIdField,
+  opRequestShape,
+  requiredItems,
+} from '@voxgig/sdkgen'
+
 
 // Escape a string for a single-quoted Dart string literal. `$` must be
 // escaped or Dart interpolates it (model values like '`$COPY`' would break).
@@ -110,10 +117,70 @@ function dartStringLiteral(json: string): string {
   return JSON.stringify(json).replace(/\$/g, '\\$')
 }
 
+
+// A type-correct Dart literal for a field's canonical type.
+function dartLit(type: any): string {
+  const k = canonScalarKey(type)
+  if ('INTEGER' === k || 'NUMBER' === k) return '1'
+  if ('BOOLEAN' === k) return 'true'
+  if ('ARRAY' === k) return '<dynamic>[]'
+  if ('OBJECT' === k) return '<String, dynamic>{}'
+  return "'example'"
+}
+
+
+const TEST_ID = 'test01'
+
+
+// A test-mode example's call argument, and the mock seed holding the record
+// that call reads: SDK.test() starts with an empty mock.
+function dartTestCall(ent: any, op: string, indent: string): { arg: string, seed: string } {
+  const idF = entityIdField(ent)
+  const isId = (it: any) => it.name === idF || 'id' === it.name
+  const idLit = dartString(TEST_ID)
+  const lit = (it: any) => isId(it) ? idLit : dartLit(it.type)
+
+  const data = 'create' === op || 'update' === op || 'patch' === op
+  let items: any[] = []
+  if ('load' === op || 'remove' === op) {
+    items = opRequestShape(ent, op).items.filter((it: any) => !it.optional || it.name === idF)
+  }
+  else if ('list' === op) {
+    items = requiredItems(ent, 'list')
+  }
+  else if (data) {
+    const own = opRequestShape(ent, op).items.filter((it: any) => !isId(it))
+    const required = own.filter((it: any) => !it.optional)
+    items = required.length ? required : own.slice(0, 3)
+  }
+  items = [...items].sort((a: any, b: any) => (a.name === idF ? 0 : 1) - (b.name === idF ? 0 : 1))
+
+  const pairs = (entries: [string, string][]) =>
+    entries.map(([name, value]) => dartString(name) + ': ' + value).join(', ')
+  const call: [string, string][] = items.map((it: any) => [it.name, lit(it)])
+
+  const record = new Map<string, string>([['id', idLit]])
+  if (null != idF) record.set(idF, idLit)
+  if (!data) call.forEach(([name, value]) => record.set(name, value))
+
+  const pad = (n: number) => indent + '  '.repeat(n)
+  const seed = '{\n' +
+    pad(1) + "'entity': {\n" +
+    pad(2) + dartString(ent.name) + ': {\n' +
+    pad(3) + idLit + ': {' + pairs([...record]) + '},\n' +
+    pad(2) + '},\n' +
+    pad(1) + '},\n' +
+    indent + '}'
+
+  return { arg: 0 < call.length ? '{' + pairs(call) + '}' : '', seed }
+}
+
 export {
   dartStringLiteral,
   clean,
+  dartLit,
   dartString,
+  dartTestCall,
   dartValue,
   projectPath,
 }

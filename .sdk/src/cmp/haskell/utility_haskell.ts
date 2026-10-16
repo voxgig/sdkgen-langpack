@@ -5,6 +5,13 @@ import {
   walk,
 } from '@voxgig/struct'
 
+import {
+  canonKey,
+  entityIdField,
+  opRequestShape,
+  requiredItems,
+} from '@voxgig/sdkgen'
+
 
 function projectPath(suffix?: string): string {
   return Path.normalize(Path.join(__dirname, '../../..', suffix ?? ''))
@@ -119,10 +126,68 @@ function clean(o: any, dropDefaults?: boolean): any {
 }
 
 
+// A type-correct Haskell `Value` literal for a field's canonical type.
+function hsLit(type: any): string {
+  const k = canonKey(type)
+  if ('INTEGER' === k || 'NUMBER' === k) return 'VNum 1'
+  if ('BOOLEAN' === k) return 'VBool True'
+  if ('ARRAY' === k || 'OBJECT' === k) return 'VNoval'
+  return 'VStr "example"'
+}
+
+
+const TEST_ID = 'test01'
+
+
+// A test-mode example's call argument, and the do-block lines that bind
+// `seed` to a mock seed holding the record that call reads: testSdk0 starts
+// with an empty mock.
+function hsTestCall(ent: any, op: string, indent: string): { argExpr: string, seedLines: string } {
+  const idF = entityIdField(ent)
+  const isId = (it: any) => it.name === idF || 'id' === it.name
+  const idLit = 'VStr ' + hsString(TEST_ID)
+  const lit = (it: any) => isId(it) ? idLit : hsLit(it.type)
+
+  const data = 'create' === op || 'update' === op || 'patch' === op
+  let items: any[] = []
+  if ('load' === op || 'remove' === op) {
+    items = opRequestShape(ent, op).items.filter((it: any) => !it.optional || it.name === idF)
+  }
+  else if ('list' === op) {
+    items = requiredItems(ent, 'list')
+  }
+  else if (data) {
+    const own = opRequestShape(ent, op).items.filter((it: any) => !isId(it))
+    const required = own.filter((it: any) => !it.optional)
+    items = required.length ? required : own.slice(0, 3)
+  }
+  items = [...items].sort((a: any, b: any) => (a.name === idF ? 0 : 1) - (b.name === idF ? 0 : 1))
+
+  const jo = (entries: [string, string][]) =>
+    'jo [' + entries.map(([name, value]) => '(' + hsString(name) + ', ' + value + ')').join(', ') + ']'
+  const call: [string, string][] = items.map((it: any) => [it.name, lit(it)])
+
+  const record = new Map<string, string>([['id', idLit]])
+  if (null != idF) record.set(idF, idLit)
+  if (!data) call.forEach(([name, value]) => record.set(name, value))
+
+  const seedLines = [
+    'seedRecord <- ' + jo([...record]),
+    'seedRecords <- ' + jo([[TEST_ID, 'seedRecord']]),
+    'seedEntities <- ' + jo([[ent.name, 'seedRecords']]),
+    'seed <- ' + jo([['entity', 'seedEntities']]),
+  ].map((line) => indent + line).join('\n')
+
+  return { argExpr: 0 < call.length ? jo(call) : 'emptyMap', seedLines }
+}
+
+
 export {
   clean,
   formatHsValue,
+  hsLit,
   hsString,
+  hsTestCall,
   hsVarName,
   projectPath,
 }
