@@ -1,5 +1,5 @@
 // VENDORED: @voxgig/sekreto sdk-20260908-1556-0 (dart/plugins/httpjson.dart)
-// Source: https://github.com/voxgig/sekreto @ 1267ee2e5f49566bc92695bc9eb3a60ef4924998  [tag: sdk-20260908-1556-0]
+// Source: https://github.com/voxgig/sekreto @ ee837130bf444ca46a5a46181bdd6743e118898c  [tag: sdk-20261016-0845-0]
 // License: MIT (c) voxgig - see repository LICENSE. Do not edit: resync from upstream.
 // The shared HTTP-JSON transport, and the child-process runner.
 //

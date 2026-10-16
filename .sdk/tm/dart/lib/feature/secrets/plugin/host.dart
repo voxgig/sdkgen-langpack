@@ -1,5 +1,5 @@
 // VENDORED: @voxgig/plugin sdk-20260908-1556-0 (dart/lib/host.dart)
-// Source: https://github.com/voxgig/plugin @ 48392f5e2b6d1434ee9b1a4a9a11f4480aaeb46a  [tag: sdk-20260908-1556-0]
+// Source: https://github.com/voxgig/plugin @ caa404b2dfa206d77db6c2869e5b31c2a3202b2d  [tag: sdk-20261016-0845-0]
 // License: MIT (c) voxgig - see repository LICENSE. Do not edit: resync from upstream.
 /// The host: the lifecycle state machine (section 5), extension points
 /// (section 6), and resource capture (section 8).
@@ -149,6 +149,22 @@ class Inst {
   void export(String key, dynamic value) => _entry.exports[key] = value;
 
   /// What this instance can do for others (section 11.1).
+  /// WHICH provider this instance is bound to for [name] (§11.1), as a
+  /// ref, or null when nothing provides it.
+  ///
+  /// The host's own `capability` answers with the live providers RANKED,
+  /// not with the one THIS instance took; §11.4's reluctant rebinding
+  /// makes those differ. A REF, not the instance. The selection is
+  /// REMEMBERED, because this is the instance asking.
+  String? capability(String name) {
+    for (final req in dep.requirements(_entry.options)) {
+      if (name == req['name']) {
+        return host.instcapability(_entry, req);
+      }
+    }
+    return null;
+  }
+
   void provides(dynamic prov) => _entry.provides.add(prov);
 
   /// Where this binding landed (section 6.6) - the plugin-side counterpart
@@ -585,6 +601,9 @@ class Host {
   ///
   /// `remember` is false for the questions asked ABOUT an instance rather
   /// than BY it: introspection must not create a binding.
+  /// The instance api's way onto [_chosen], which is private.
+  String? instcapability(Entry entry, dynamic req) => _chosen(entry, req, true);
+
   String? _chosen(Entry entry, dynamic req, bool remember) {
     final cands = _providersOf(req);
     if (cands.isEmpty) return null;

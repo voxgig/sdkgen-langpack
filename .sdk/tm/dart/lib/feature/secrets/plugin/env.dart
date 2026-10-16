@@ -1,5 +1,5 @@
 // VENDORED: @voxgig/plugin sdk-20260908-1556-0 (dart/lib/env.dart)
-// Source: https://github.com/voxgig/plugin @ 48392f5e2b6d1434ee9b1a4a9a11f4480aaeb46a  [tag: sdk-20260908-1556-0]
+// Source: https://github.com/voxgig/plugin @ caa404b2dfa206d77db6c2869e5b31c2a3202b2d  [tag: sdk-20261016-0845-0]
 // License: MIT (c) voxgig - see repository LICENSE. Do not edit: resync from upstream.
 /// Environment overrides (section 9.5) - level 7 of the ladder.
 ///

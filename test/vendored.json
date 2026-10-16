@@ -2,188 +2,188 @@
  "library": {
   "omni/dart": {
    "repo": "https://github.com/voxgig/omni",
-   "commit": "274708cc2d12b21707d975543953f845f8444be0",
+   "commit": "e9cb45a308a4da47ffdbc1b3149b9c59199190b2",
    "version": "sdk-20260908-1556-0",
-   "tag": "sdk-20260908-1556-0",
+   "tag": "sdk-20261016-0845-0",
    "file": {
     "tm/dart/test/vendor/omni/omni.dart": {
-     "sha256": "e55575e8957f3eef7648187d54593462ee4f465361670b00a9ef4616b6a04302",
+     "sha256": "f2e2c7f8e6fd80ba00467a9941031032219480eee5d76205174f11b5d3d6a59b",
      "upstream": "dart/lib/omni.dart"
     },
     "tm/dart/test/vendor/omni/runner.dart": {
-     "sha256": "e50c08b3b3f7f820ec673e765d251504547fa38e377d05d071673d6598b26fe9",
+     "sha256": "f6d7502748c5027da3f9036af50e1902b8c3dda6f9451dbb7aca8cf807d7ed80",
      "upstream": "dart/lib/runner.dart"
     },
     "tm/dart/test/vendor/omni/util.dart": {
-     "sha256": "ed5cbedf7bccbaebf94ea25fa2397c9749f374caf5b8ccf9e06cda0d63c8dc48",
+     "sha256": "55f6266da7058e82de1b7e3a376153b6dbbcd9b8354adf282a74b7ef404076fb",
      "upstream": "dart/lib/util.dart"
     }
    }
   },
   "omni/haskell": {
    "repo": "https://github.com/voxgig/omni",
-   "commit": "274708cc2d12b21707d975543953f845f8444be0",
+   "commit": "e9cb45a308a4da47ffdbc1b3149b9c59199190b2",
    "version": "sdk-20260908-1556-0",
-   "tag": "sdk-20260908-1556-0",
+   "tag": "sdk-20261016-0845-0",
    "file": {
     "tm/haskell/test/vendor/omni/Omni.hs": {
-     "sha256": "6af196fdd337745c3418084e32431f9b2c3901d92cc0c156ca3d03cb82958f0c",
+     "sha256": "80a2576ef4ef64a0e33f971897bc72c09e9e6bd191c4df840a08a29760e1f658",
      "upstream": "haskell/src/Omni.hs"
     }
    }
   },
   "omni/lean": {
    "repo": "https://github.com/voxgig/omni",
-   "commit": "274708cc2d12b21707d975543953f845f8444be0",
+   "commit": "e9cb45a308a4da47ffdbc1b3149b9c59199190b2",
    "version": "sdk-20260908-1556-0",
-   "tag": "sdk-20260908-1556-0",
+   "tag": "sdk-20261016-0845-0",
    "file": {
     "tm/lean/test/vendor/omni/Omni.lean": {
-     "sha256": "57764d28457d57db7f81d647787f0a7aee1040fdecbf319d61d4135030f3c35f",
+     "sha256": "a0819617ddc48b0e74ddba210a72634215bbf9b5757d997738a81e24be922f0d",
      "upstream": "lean/Omni.lean"
     }
    }
   },
   "plugin/dart": {
    "repo": "https://github.com/voxgig/plugin",
-   "commit": "48392f5e2b6d1434ee9b1a4a9a11f4480aaeb46a",
+   "commit": "caa404b2dfa206d77db6c2869e5b31c2a3202b2d",
    "version": "sdk-20260908-1556-0",
-   "tag": "sdk-20260908-1556-0",
+   "tag": "sdk-20261016-0845-0",
    "file": {
     "tm/dart/lib/feature/secrets/plugin/capability.dart": {
-     "sha256": "f07832dd78100639908a14f05e53519acb668d6073b1483c38c9996ce24cce93",
+     "sha256": "0130dd99967cc557e331e5d65d0acc1db07a2bce14898edc29a166e64245400c",
      "upstream": "dart/lib/capability.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/catalog.dart": {
-     "sha256": "816db82925933ee690f49a980b28cef9c4f1764a5a13019f2b463efb3fd42536",
+     "sha256": "1a879fffa641afe179c7619fe1396db1990d3038622e9dd637fdbe44d20d4360",
      "upstream": "dart/lib/catalog.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/config.dart": {
-     "sha256": "e23b01a9d1b5d256eeaa51b81c52bed31ed35e05753098487be467560288dee2",
+     "sha256": "3a98c152fa9c14cfae89e3b0c839c28942fc02896ba394745df88dbe9e13149d",
      "upstream": "dart/lib/config.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/depend.dart": {
-     "sha256": "848bb10da70c581867fe045175e8ca05dc260787c46859a8d7374de324ac0521",
+     "sha256": "86226f0fcada521a5004ab0ec3a1d092ceffbf45e1ed57c29ca939d9812be537",
      "upstream": "dart/lib/depend.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/env.dart": {
-     "sha256": "7d38ccf60b9971da5c385f4ae3abcbe4f2efe543081b10ac728bec324d179368",
+     "sha256": "48eed5746101e31fe3b0472244d05a1ed5d5dbf668748b4b66c76b2610587f2b",
      "upstream": "dart/lib/env.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/export.dart": {
-     "sha256": "0f5f3a51e9695a0a3c393b6b16345db6f6192cbe65f2070ce44c1161d12316fa",
+     "sha256": "47e852a9112a1465c0700771feead344bf266bd71e867275136975a4ccf138ee",
      "upstream": "dart/lib/export.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/graph.dart": {
-     "sha256": "2b7751b688913541a253e2ed2fc8ea2884423439c12c62dbfc4d5cc7ee0cf1bb",
+     "sha256": "02352dc6f2edd626a14ca4d060fa2a6d934d2a04b037411662ee3da02036e5ca",
      "upstream": "dart/lib/graph.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/host.dart": {
-     "sha256": "0e0190c7c033dc67e38b861dbe8cfca3a8d746391898c7f39a07b775b08e78d0",
+     "sha256": "ec88a1cb43329f3a47b505cb276d3d9f6b2d0fcd6fd3d4356e47e407772d26ab",
      "upstream": "dart/lib/host.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/order.dart": {
-     "sha256": "920c7cae603e6fb413977f13e45bc69186db5167ea4265f9b236560aee38ffff",
+     "sha256": "fc7ffbc5f1fb7d3b2d9d7a8c167fe47485d96fbfda4d2e57f1f20a25e147aa19",
      "upstream": "dart/lib/order.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/plugin.dart": {
-     "sha256": "503682ce87de9b22226193add98bbb02dd057a539e7d2682a492567511061e69",
+     "sha256": "688cc59cf8531d969980b7289a1e1171612784be722b12512c2ed66388c56177",
      "upstream": "dart/lib/plugin.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/point.dart": {
-     "sha256": "5d5f9a56edcba838cd3b631accd6492f28f10374d1615b5c62ae776e4a9a4d12",
+     "sha256": "560be70d04c3e5b3ee5830971ea4440121a3497e3af16d6146d50a9ad02d27f8",
      "upstream": "dart/lib/point.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/ref.dart": {
-     "sha256": "80c6cb6765713b77188baa8b502207311b9a150d693097a32a673d671071841f",
+     "sha256": "a6b8dd8baa06a923c66b98f7ebfca89e3efb8d42aa5e3ec0edc825b9ddf3bba5",
      "upstream": "dart/lib/ref.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/resolve.dart": {
-     "sha256": "2486c96a91192bd51ac1959194cd5b1080dc649f89d10829d61192b651dc83a9",
+     "sha256": "7d0b35655f018228ab36fea88367c9d23739109b52ec165644ffecd5f4407ee6",
      "upstream": "dart/lib/resolve.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/types.dart": {
-     "sha256": "9b9b768a7c54087f9c283d28532f94aa0d05a8b67a94b724ffa59ee8b0c32f7c",
+     "sha256": "1f68255b4a26c85241f70d8080cdc817e0c2bc9ab431236f76446de0179f0e66",
      "upstream": "dart/lib/types.dart"
     },
     "tm/dart/lib/feature/secrets/plugin/version.dart": {
-     "sha256": "251f8a73d5f1c29a6e804971c43d6138b69f66e66b1ab5ae7f3839f966bfc083",
+     "sha256": "1d60a71264ddba163b7659a96edd665c7963c313d825f32a63440c1161268ad9",
      "upstream": "dart/lib/version.dart"
     }
    }
   },
   "sekreto/dart": {
    "repo": "https://github.com/voxgig/sekreto",
-   "commit": "1267ee2e5f49566bc92695bc9eb3a60ef4924998",
+   "commit": "ee837130bf444ca46a5a46181bdd6743e118898c",
    "version": "sdk-20260908-1556-0",
-   "tag": "sdk-20260908-1556-0",
+   "tag": "sdk-20261016-0845-0",
    "file": {
     "tm/dart/lib/feature/secrets/sekreto/plugins/aws.dart": {
-     "sha256": "3987f3c1ecc7b5dcaec8eac4ec05f7816806cbdef27124d04469d99337395280",
+     "sha256": "cc877994bcf85fb59bdbd8fb4a0e2052ad5425f508f90b47396ccb6111c26de6",
      "upstream": "dart/plugins/aws.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/plugins/azuresecrets.dart": {
-     "sha256": "bbec34f6d1afb9743381f6474a6a3eaef135b0827cc33fbdfe15234b405dced4",
+     "sha256": "e6368b280b34bf0d3fd47c200c00bbf7fbc33d04bcd6b00cc94b3faa1c67ae6f",
      "upstream": "dart/plugins/azuresecrets.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/plugins/boru.dart": {
-     "sha256": "a2cb719027626de6a9b8dbfdaae81b5e705c6bf043c80459541d97c979accacf",
+     "sha256": "f0a8163a297b2b178a553acd6fcd60c6df0a18b9ae92a624a932c041d830f40f",
      "upstream": "dart/plugins/boru.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/plugins/crypto.dart": {
-     "sha256": "7c293eb217bdd81053ccb91be89ba7044768fb330222e8da7dd443c3e4d62e7c",
+     "sha256": "4c587342f62fa2d995e96f927a6643312f8f8273db914ff46769aa0d91288e3e",
      "upstream": "dart/plugins/crypto.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/plugins/doppler.dart": {
-     "sha256": "356fa9cd92fe43733789a505580db5b0357b0383e7461222ee6d54c72845ba8f",
+     "sha256": "5a33b92b32568db2bebd4dcf2ec378f8c7c75173e53e3019e11aaa6159438154",
      "upstream": "dart/plugins/doppler.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/plugins/gcpsecrets.dart": {
-     "sha256": "fee86d4b0cf7ddecc0fff6d5173d80fb6777fe0ce64a2faf08ffe93ec2adbd81",
+     "sha256": "fc89ed81674ba4ca5b4cfcad8013066dd39f52f2f02fcde8a27854a8b8ea8e9b",
      "upstream": "dart/plugins/gcpsecrets.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/plugins/hashicorp.dart": {
-     "sha256": "5cde86443c068fab3b8bea3eaf3893e6001157377d72e5ad8f8df1c9b689605e",
+     "sha256": "1b2be9ca190aa50ddf24c02b6df42753a8ae93bac2419314a3833ee0a4f260e1",
      "upstream": "dart/plugins/hashicorp.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/plugins/httpjson.dart": {
-     "sha256": "7fd25623bb04fe6f9927f5aa32e0d88b690388af705c59c1a32b2b9f0bfef262",
+     "sha256": "1bf70db8a5d2732b0990a3d4e7a2518a083a5ac1283874d892aa0ff7d57d0144",
      "upstream": "dart/plugins/httpjson.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/plugins/infisical.dart": {
-     "sha256": "9964271b9730f49d2683fbb075db773247776d363297ac0a1ab2b195042f0900",
+     "sha256": "33dded356a855f9d0798c8226ec0192c5c20238148d915a67de0bc71bae60152",
      "upstream": "dart/plugins/infisical.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/plugins/onepassword.dart": {
-     "sha256": "55364e400262e102af834d0c88c02204e8c930b6cda8000eff02f0f3ea6af91d",
+     "sha256": "f3b8633f2264de58eb8d349bab5243d1d9fbf731e9d805f99c3095ffbd79af4e",
      "upstream": "dart/plugins/onepassword.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/plugins/secretspec.dart": {
-     "sha256": "9424c23c072a09528e4e47eee9d833aaa5e9ea7c008cb1b85d3893834bb58cfe",
+     "sha256": "a8b211fe9185c1c62f1eecb9e45e8bdcba1417d0831bdeecc2347ac22d3c3c89",
      "upstream": "dart/plugins/secretspec.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/plugins/sigv4.dart": {
-     "sha256": "82df03f049f447e68839f2dda137db5e201ad94afe861f7a5bd9919e95737691",
+     "sha256": "ee6a329211dc2104a957fd3c19bdf82ef42513ccc1e0f8499071a06df36cca43",
      "upstream": "dart/plugins/sigv4.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/src/addr.dart": {
-     "sha256": "cccb3c457d3fb1ee92b6d8544dfc4a9e9e6c61c7ac2966011ee0ea3868f917fd",
+     "sha256": "a3cf97b30bb8339db707dd0d3cc7b39dbb07c70a42669e2ece88bbfa79d78fef",
      "upstream": "dart/src/addr.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/src/json.dart": {
-     "sha256": "7aac6da2415901cc91d3772200d5d01e9db6a4174a33ca95035f2d4b66f01216",
+     "sha256": "2182a22e950b72c4898b5b2aed49c590c1a3f723830e41032539aa8a51e4aad7",
      "upstream": "dart/src/json.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/src/provider.dart": {
-     "sha256": "f5bbe79b1ef2b8a9ad62a080a5978ab9ab29a661ffcbc570cb7234c959779e94",
+     "sha256": "bf27e452e1daad81a506938a411e90f14a6559bdadc46a2314aa6a7ceb3091fc",
      "upstream": "dart/src/provider.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/src/providers.dart": {
-     "sha256": "75f5f9ea30613775f1f1c352f1f5dc25f2647e4fee4c6679c139f0fb19230986",
+     "sha256": "94a8f5db288764a39b832ec5d6229c65e14a9b3697a8a9ace62ef7763ba0e81e",
      "upstream": "dart/src/providers.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/src/sekreto.dart": {
-     "sha256": "f6adf9c9b3fc4ce1625bcdd147c55119f6af0ada81405ab0e100cc784a4db389",
+     "sha256": "fb9c1bd41b7add4e7f88555d49edc9fdda68ff6c48fe63fca035f36d2c648189",
      "upstream": "dart/src/sekreto.dart",
      "adapt": [
       {
@@ -193,11 +193,11 @@
      ]
     },
     "tm/dart/lib/feature/secrets/sekreto/src/spec.dart": {
-     "sha256": "34915ff2323ae056d775245e9e3778e68c91e19f66233aeb507c0486e2638623",
+     "sha256": "6725dea34cdb55ab868b4002d107b6d567f5956d4087a1ea8f8184d902c7ac0a",
      "upstream": "dart/src/spec.dart"
     },
     "tm/dart/lib/feature/secrets/sekreto/src/support.dart": {
-     "sha256": "a29b4df73fd47677c937412def378dc329bf494defa3c2e8b3e18fcc8a5996bc",
+     "sha256": "698929bd783cca024550ec359c1a04ec4d839e97ecc961dc9e0472a87a6ecef7",
      "upstream": "dart/src/support.dart",
      "adapt": [
       {
@@ -209,6 +209,6 @@
    }
   }
  },
- "tag": "sdk-20260908-1556-0",
+ "tag": "sdk-20261016-0845-0",
  "note": "Generated by build/vendor.js from vendor/routes.json. See test/vendored.test.ts."
 }
