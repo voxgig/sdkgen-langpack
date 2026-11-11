@@ -1,16 +1,10 @@
-import { cmp, Content, modelText } from '@voxgig/sdkgen'
+import { cmp, Content } from '@voxgig/sdkgen'
 import { KIT, getModelPath } from '@voxgig/apidef'
 
-const ReadmeIntro = cmp(function ReadmeIntro(props: any) {
+const ReadmeIntroBody = cmp(function ReadmeIntroBody(props: any) {
   const { target, ctx$: { model } } = props
-  const info = modelText(model)
-  const tagline = info.tagline || ''
 
-  Content(`# ${model.Name} ${target.title} SDK
-
-${tagline}
-
-The ${target.title} SDK for the ${model.Name} API — an entity-oriented client
+  Content(`The ${target.title} SDK for the ${model.Name} API — an entity-oriented client
 for Lean 4. The API is surfaced as capitalised Entities with a small, uniform
 verb set (\`list\`, \`load\`, \`create\`, \`update\`, \`patch\`, \`remove\`); every operation is
 driven by the embedded config through the dependency-free vendored voxgig
@@ -22,4 +16,4 @@ driven by the embedded config through the dependency-free vendored voxgig
   getModelPath(model, `main.${KIT}.entity`)
 })
 
-export { ReadmeIntro }
+export { ReadmeIntroBody }

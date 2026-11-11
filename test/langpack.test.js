@@ -807,6 +807,25 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // sdkgen's ReadmeIntro writes the title and the alongside note around each
+  // target's ReadmeIntroBody; a body that wrote either too would double it.
+  test('each README opens with one title and names its siblings once', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, ''),
+      root: docsRoot(),
+    })
+    for (const target of TARGETS) {
+      const readme = String(files[target + '/README.md'])
+      const title = readme.split('\n')[0]
+      ok(/^# .+ SDK$/.test(title), target + ': the README opens with ' + title)
+      strictEqual(readme.split(title + '\n').length - 1, 1, target + ': the title appears more than once')
+      strictEqual(readme.split('alongside this one').length - 1, 1,
+        target + ': the README does not name its siblings exactly once')
+      ok(readme.includes('> Other languages'), target + ': the note does not name the other languages')
+    }
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {

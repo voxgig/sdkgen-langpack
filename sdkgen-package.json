@@ -5,7 +5,7 @@
   "name": "@voxgig/sdkgen-langpack",
   "version": "0.0.15",
   "engines": {
-    "sdkgen": ">=4.34.2"
+    "sdkgen": ">=4.43.0"
   },
   "provides": {
     "target": [
