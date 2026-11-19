@@ -11,7 +11,7 @@
 module SdkRuntime where
 
 import Control.Exception (throwIO, try)
-import Control.Monad (forM_, when)
+import Control.Monad (filterM, forM_, when)
 import Data.Bits ((.&.), (.|.), shiftL, shiftR)
 import Data.Char (chr, isAlphaNum, isHexDigit, isSpace, digitToInt, ord, toLower, toUpper)
 import Data.IORef
@@ -1292,13 +1292,22 @@ makePointUtil ctx = do
           pure (VNoval, Just e)
         else do
           pts <- listItems (opPoints op)
+          (reqsel, sel) <- if opInput op == "data"
+            then (,) <$> readIORef (cReqdata ctx) <*> readIORef (cData ctx)
+            else (,) <$> readIORef (cReqmatch ctx) <*> readIORef (cMatch ctx)
+          reqAction <- getp reqsel "$action"
+          let pointAction pt = do
+                selectDef <- toMap <$> getp pt "select"
+                getp selectDef "$action"
+          -- A lone point still needs the call's action to agree with its own;
+          -- the selection below refuses a mismatch either way.
+          loneAgrees <- case pts of
+            [single] -> valEqScalar reqAction <$> pointAction single
+            _ -> pure False
           case pts of
             [] -> do e <- mkErr "point_no_points" ("Operation \"" ++ opName op ++ "\" has no endpoint definitions."); pure (VNoval, Just e)
-            [single] -> do writeIORef (cPoint ctx) single; pure (single, Nothing)
+            [single] | loneAgrees -> do writeIORef (cPoint ctx) single; pure (single, Nothing)
             _ -> do
-              (reqsel, sel) <- if opInput op == "data"
-                then (,) <$> readIORef (cReqdata ctx) <*> readIORef (cData ctx)
-                else (,) <$> readIORef (cReqmatch ctx) <*> readIORef (cMatch ctx)
               let isFound pt = do
                     selectDef <- toMap <$> getp pt "select"
                     existOk <- case selectDef of
@@ -1316,7 +1325,6 @@ makePointUtil ctx = do
                       _ -> pure True
                     if not existOk then pure False
                     else do
-                      reqAction <- getp reqsel "$action"
                       selectAction <- getp selectDef "$action"
                       pure (valEqScalar reqAction selectAction)
                   findMatch [] = pure Nothing
@@ -1362,8 +1370,10 @@ makePointUtil ctx = do
                             b <- betterOwn c best
                             go (if b then c else best) cs
               matched <- findMatch pts
-              reqAction <- getp reqsel "$action"
-              chosen <- maybe (ownPoint pts) pure matched
+              -- A call without an action falls back to a point without one, as
+              -- generation does.
+              plain <- filterM (\pt -> valEqScalar VNoval <$> pointAction pt) pts
+              chosen <- maybe (ownPoint plain) pure matched
               -- select.exist can list more than the params needed to pick a
               -- point, so nothing matched. A request naming an action gets
               -- here only because that action's own point failed its exist
@@ -1374,6 +1384,10 @@ makePointUtil ctx = do
               if isNothing matched && not (isNoval reqAction)
                 then do
                   e <- mkErr "point_action_invalid" ("Operation \"" ++ opName op ++ "\" action \"" ++ vstring reqAction ++ "\" is not valid.")
+                  pure (VNoval, Just e)
+                else if isNothing matched && null plain
+                then do
+                  e <- mkErr "point_action_required" ("Operation \"" ++ opName op ++ "\" has only action endpoints; pass $action to choose one.")
                   pure (VNoval, Just e)
                 else if not (isNoval reqAction) && not (isNoval chosen)
                 then do

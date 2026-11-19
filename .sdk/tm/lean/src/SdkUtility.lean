@@ -1290,8 +1290,10 @@ def pointShape (pt : Value) : SIO (Nat × Bool) := do
     else pure (items.size, (vs items[items.size - 1]!).startsWith "{")
   | _ => pure (0, false)
 
-/-- Select the endpoint for this operation: the single point, else the first
-    whose `select.exist` keys are all present and whose `$action` agrees. An
+/-- Select the endpoint for this operation: the single point if the call's
+    `$action` agrees with its own, else the first whose `select.exist` keys are
+    all present and whose `$action` agrees, else the entity's own route among
+    the points without an action. An
     op `options.allow.op` does not name is refused before any endpoint is
     resolved, and an `$action` no point declares is refused rather than
     answered with a different endpoint. -/
@@ -1315,8 +1317,12 @@ def makePoint (ctx : Value) : SIO Value := do
   let pts ← match (← gp op "points") with
     | .list i => listItems i
     | _ => pure #[]
+  -- A lone point still needs the call's action to agree with its own; the
+  -- selection below refuses a mismatch either way.
+  let loneAction ← if pts.size == 1 then do gp (← gp pts[0]! "select") "$action"
+    else pure .noval
   if pts.size == 0 then pure .noval
-  else if pts.size == 1 then do
+  else if pts.size == 1 && loneAction == action then do
     sp ctx "point" (pts[0]!)
     pure (pts[0]!)
   else do
@@ -1343,8 +1349,15 @@ def makePoint (ctx : Value) : SIO Value := do
       -- Fall back to the entity's own route rather than sending nowhere. Only
       -- an actionless call gets that fallback: an action nothing declares is
       -- the caller's error, and the entity's own route is a different request.
-      let mut best := pts[0]!
+      -- The fallback is only ever a point without an action, as generation's.
+      let mut plain : Array Value := #[]
       for cand in pts do
+        if isNov (← gp (← gp cand "select") "$action") then plain := plain.push cand
+      if plain.size == 0 then
+        return (← mkErr "point_action_required"
+          s!"Operation \"{opname}\" has only action endpoints; pass $action to choose one.")
+      let mut best := plain[0]!
+      for cand in plain do
         let (candLen, candTerm) ← pointShape cand
         let (bestLen, bestTerm) ← pointShape best
         if candTerm && !bestTerm then

@@ -146,6 +146,34 @@ tests c = do
     isRefused <- case refused of Just e -> errCodeIs e "point_op_allow"; Nothing -> pure False
     pure (isRefused && isNothing named)
 
+  let pointCode declared called = do
+        cl <- client; ctx <- mkCtx cl "load"
+        let selectOf a = maybe (jo []) (\v -> jo [("$action", VStr v)]) a
+        pts <- mapM (\a -> do
+                       parts <- ja [VStr "items", VStr "all"]
+                       sel <- selectOf a
+                       jo [("method", VStr "DELETE"), ("parts", parts), ("select", sel)]) declared
+        ptsv <- ja pts
+        op <- newOperation =<< jo [("name", VStr "load"), ("points", ptsv)]
+        writeIORef (cOp ctx) op
+        writeIORef (cReqmatch ctx) =<< selectOf called
+        (_, merr) <- makePointUtil ctx
+        maybe (pure "ok") errCode merr
+
+  runTest c "make_point.lone_action_needs_its_action" $ do
+    codes <- mapM (uncurry pointCode)
+      [([Just "purge"], Nothing), ([Just "purge"], Just "purge"), ([Just "purge"], Just "other")]
+    pure (codes == ["point_action_required", "ok", "point_action_invalid"])
+
+  runTest c "make_point.lone_plain_refuses_an_action" $ do
+    codes <- mapM (uncurry pointCode) [([Nothing], Just "nope"), ([Nothing], Nothing)]
+    pure (codes == ["point_action_invalid", "ok"])
+
+  runTest c "make_point.all_actions_need_one" $ do
+    codes <- mapM (uncurry pointCode)
+      [([Just "purge", Just "archive"], Nothing), ([Just "purge", Just "archive"], Just "archive")]
+    pure (codes == ["point_action_required", "ok"])
+
   runTest c "make_context.patch_takes_data" $ do
     cl <- client
     ins <- mapM (\name -> do ctx <- mkCtx cl name; opInput <$> readIORef (cOp ctx)) ["patch", "update", "load"]

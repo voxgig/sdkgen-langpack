@@ -207,6 +207,42 @@ void tests() {
       equal(true, identical(r, ctx.op.points[0]));
     });
 
+    String pointCode(List<dynamic> declared, dynamic called) {
+      final ctx = base({
+        'op': {
+          'name': 'load',
+          'points': [
+            for (final action in declared)
+              {
+                'method': 'DELETE',
+                'parts': ['items', 'all'],
+                'select': null == action ? {} : {r'$action': action}
+              }
+          ]
+        },
+        'options': {'allow': allow}
+      });
+      ctx.reqmatch = null == called ? {} : {r'$action': called};
+      final r = stdutil.makePoint(ctx);
+      return iserr(r) ? errcode(r) : 'ok';
+    }
+
+    test('makePoint reaches a lone action route only with its action', (t) {
+      equal('point_action_required', pointCode(['purge'], null));
+      equal('ok', pointCode(['purge'], 'purge'));
+      equal('point_action_invalid', pointCode(['purge'], 'other'));
+    });
+
+    test('makePoint refuses an action a lone plain route does not have', (t) {
+      equal('point_action_invalid', pointCode([null], 'nope'));
+      equal('ok', pointCode([null], null));
+    });
+
+    test('makePoint needs an action when every route is one', (t) {
+      equal('point_action_required', pointCode(['purge', 'archive'], null));
+      equal('ok', pointCode(['purge', 'archive'], 'archive'));
+    });
+
     test('makePoint short-circuits a feature-supplied point', (t) {
       final preset = {'method': 'GET'};
       final ctx = base({

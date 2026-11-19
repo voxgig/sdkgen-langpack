@@ -27,14 +27,17 @@ dynamic makePoint(dynamic ctx) {
         'Operation "' + op.name.toString() + '" has no endpoint definitions.');
   }
 
-  // Choose the appropriate point based on the match or data.
-  if (1 == op.points.length) {
+  // Operation argument has priority, but also look in current data or match.
+  final reqselector = 'data' == op.input ? ctx.reqdata : ctx.reqmatch;
+  final selector = 'data' == op.input ? ctx.data : ctx.match;
+
+  // A lone point still needs the call's action to agree with its own; the
+  // selection below refuses a mismatch either way.
+  if (1 == op.points.length &&
+      vs.getprop(reqselector, r'$action') ==
+          vs.getprop(op.points[0].select, r'$action')) {
     ctx.point = op.points[0];
   } else {
-    // Operation argument has priority, but also look in current data or match.
-    final reqselector = 'data' == op.input ? ctx.reqdata : ctx.reqmatch;
-    final selector = 'data' == op.input ? ctx.data : ctx.match;
-
     dynamic point;
     var matched = false;
     for (var i = 0; i < op.points.length; i++) {
@@ -100,8 +103,21 @@ dynamic makePoint(dynamic ctx) {
         return last is String && last.startsWith('{');
       }
 
-      point = op.points[0];
-      for (final cand in op.points) {
+      // A call without an action falls back to a point without one, as
+      // generation does.
+      final plain = op.points
+          .where((cand) => null == vs.getprop(cand.select, r'$action'))
+          .toList();
+      if (plain.isEmpty) {
+        return ctx.error(
+            'point_action_required',
+            'Operation "' +
+                op.name.toString() +
+                '" has only action endpoints; pass \$action to choose one.');
+      }
+
+      point = plain[0];
+      for (final cand in plain) {
         if (terminalParam(cand) != terminalParam(point)) {
           if (terminalParam(cand)) {
             point = cand;

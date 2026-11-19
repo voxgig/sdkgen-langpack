@@ -113,6 +113,34 @@ def fieldArgCase : SIO Unit := do
     kept := kept && (← keysof b) == #["locale", "name"] && (← gpS b "locale") == "en"
   check kept "transformRequest: an argument the point marks as a field the body keeps stays in the body"
 
+/-- The code makePoint answers for a call naming `called` against points that
+    each declare one of `declared` (none: a route without an action). -/
+def pointCode (declared : Array (Option String)) (called : Option String) : SIO String := do
+  let selectOf (a : Option String) : SIO Value :=
+    match a with
+    | some v => newMap #[("$action", .str v)]
+    | none => emptyMap
+  let mut pts : Array Value := #[]
+  for a in declared do
+    pts := pts.push (← newMap #[("method", .str "DELETE"),
+      ("parts", ← newList #[.str "items", .str "all"]), ("select", ← selectOf a)])
+  let op ← newMap #[("name", .str "load"), ("points", ← newList pts)]
+  let r ← SdkUtility.makePoint (← newMap #[("op", op), ("reqmatch", ← selectOf called)])
+  let code ← gpS r "code"
+  pure (if code == "" then "ok" else code)
+
+def actionPointCases : SIO Unit := do
+  check ((← pointCode #[some "purge"] none) == "point_action_required"
+      && (← pointCode #[some "purge"] (some "purge")) == "ok"
+      && (← pointCode #[some "purge"] (some "other")) == "point_action_invalid")
+    "makePoint: a lone action route is reached only with its action"
+  check ((← pointCode #[none] (some "nope")) == "point_action_invalid"
+      && (← pointCode #[none] none) == "ok")
+    "makePoint: a lone plain route refuses an action it does not have"
+  check ((← pointCode #[some "purge", some "archive"] none) == "point_action_required"
+      && (← pointCode #[some "purge", some "archive"] (some "archive")) == "ok")
+    "makePoint: a call without an action is refused when every route is one"
+
 def patchInputCase : SIO Unit := do
   check (SdkUtility.opInputOf "patch" == "data" && SdkUtility.opInputOf "update" == "data"
       && SdkUtility.opInputOf "load" == "match")
@@ -137,6 +165,7 @@ def main : IO UInt32 := do
         "makePoint: an allow.op that is not a string allows nothing")
 
     allowEdgeCases
+    actionPointCases
 
     (do
       let hdefs ← defs #[("idempotency_key", "Idempotency-Key"), ("page_size", "Page-Size")]
