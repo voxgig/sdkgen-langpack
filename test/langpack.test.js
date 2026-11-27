@@ -110,6 +110,24 @@ main: kit: flow: BasicSatelliteFlow: {
 `,
 }
 
+// One active entity, with a list and nothing else.
+const LIST_ONLY = `
+main: kit: entity: planet: active: false
+main: kit: entity: comet: {
+  alias: field: {}
+  name: "comet"
+  fields: { "name": { h: 'Name', n: "name", r: false, t: "\`$STRING\`" } }
+  op: list: { name: "list", points: [ {
+    g: {}, m: "GET", o: "/comet", s: [{ lit: "comet" }]
+    t: { req: "\`reqdata\`", res: "\`body\`" }
+  } ] }
+}
+main: kit: flow: BasicCometFlow: {
+  entity: "comet", kind: "basic", name: "BasicCometFlow"
+  step: [ { o: "list" } ]
+}
+`
+
 // The branch each model is there to show.
 const DOC_MODEL_SHOWS = {
   crud: [['dart/README.md', 'client.Planet().remove('], ['haskell/README.md', 'Sdk.eRemove ']],
@@ -822,6 +840,22 @@ describe('sdkgen-langpack', () => {
       strictEqual(readme.split('alongside this one').length - 1, 1,
         target + ': the README does not name its siblings exactly once')
       ok(readme.includes('> Other languages'), target + ': the note does not name the other languages')
+    }
+  })
+
+
+  // introOps names what the active entities have, and no default set.
+  test('each introduction names only the operations the entities have', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, LIST_ONLY), root: docsRoot(),
+    })
+    const VERBS = { dart: '`list`', haskell: '`eList`', lean: '`list`' }
+    for (const target of TARGETS) {
+      const intro = String(files[target + '/README.md']).split('\n## ')[0]
+      ok(intro.includes('(' + VERBS[target] + ')'),
+        target + ': the introduction does not name the list operation alone:\n' + intro)
+      ok(!/`e?(?:[Ll]oad|[Cc]reate|[Uu]pdate|[Pp]atch|[Rr]emove)`/.test(intro),
+        target + ': the introduction names an operation no entity has:\n' + intro)
     }
   })
 
