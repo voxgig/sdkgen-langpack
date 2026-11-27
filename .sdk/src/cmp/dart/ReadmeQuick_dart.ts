@@ -20,7 +20,7 @@ const ReadmeQuick = cmp(function ReadmeQuick(props: any) {
   const { target, ctx$: { model } } = props
 
   const entity = getModelPath(model, `main.${KIT}.entity`)
-  const pkg = dartPackageName(model)
+  const pkg = dartPackageName(model, target.name)
 
   const exampleEntity = Object.values(entity).find((e: any) => e.active !== false) as any
 

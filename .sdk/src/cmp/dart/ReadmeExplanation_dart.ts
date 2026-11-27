@@ -8,7 +8,7 @@ const ReadmeExplanation = cmp(function ReadmeExplanation(props: any) {
   const { target, ctx$: { model } } = props
 
   const Name = model.const.Name
-  const pkg = dartPackageName(model)
+  const pkg = dartPackageName(model, target.name)
 
   Content(`### Maps in, typed models alongside
 

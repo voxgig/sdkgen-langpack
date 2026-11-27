@@ -14,7 +14,7 @@ const ReadmeModel = cmp(function ReadmeModel(props: any) {
 
   const entity = getModelPath(model, `main.${KIT}.entity`)
   const entityList = each(entity).filter((e: any) => e.active !== false)
-  const pkg = dartPackageName(model)
+  const pkg = dartPackageName(model, target.name)
 
   // Model-driven op rows for the shared entity interface: emit a row only for
   // operations at least one active entity actually exposes.

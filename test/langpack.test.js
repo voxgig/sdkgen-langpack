@@ -988,6 +988,22 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // sdkgen's packageName reads a declared name first, and so does the pubspec.
+  test('a declared dart package name is the one the pubspec and the root README give', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk,
+        "main: kit: target: dart: publish: registry: package: 'acme_demo'"),
+      top: true,
+    })
+    strictEqual((/^name: (\S+)$/m.exec(files['dart/pubspec.yaml']) || [])[1], 'acme_demo',
+      'dart: the pubspec name')
+    ok(/^\| Dart \| `acme_demo` \|/m.test(String(files['README.md'])),
+      'the root README Packages row names another dart package')
+    ok(String(files['dart/README.md']).includes("import 'package:acme_demo/DemoSDK.dart';"),
+      'dart: the README imports another package')
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {

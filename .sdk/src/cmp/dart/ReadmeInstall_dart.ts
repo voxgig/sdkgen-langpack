@@ -10,7 +10,7 @@ const ReadmeInstall = cmp(function ReadmeInstall(props: any) {
   const { target, ctx$ } = props
   const { model } = ctx$
 
-  const pkg = dartPackageName(model)
+  const pkg = dartPackageName(model, target.name)
 
   if (isPublished(model, target.name)) {
     Content(`\`\`\`bash

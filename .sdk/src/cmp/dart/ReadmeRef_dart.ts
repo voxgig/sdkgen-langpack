@@ -70,7 +70,7 @@ const ReadmeRef = cmp(function ReadmeRef(props: any) {
 
   const entity = getModelPath(model, `main.${KIT}.entity`)
   const feature = getModelPath(model, `main.${KIT}.feature`)
-  const pkg = dartPackageName(model)
+  const pkg = dartPackageName(model, target.name)
 
   const publishedEntities = each(entity).filter((e: any) => e.active !== false)
 
