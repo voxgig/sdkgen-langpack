@@ -1124,6 +1124,23 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // sdkgen's explanation has no row for a pack language's entity state.
+  test('dart and haskell explain their entity state, lean has none to explain', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, ''), root: docsRoot(),
+    })
+    for (const [target, make] of [['dart', '`make()`'], ['haskell', '`eMake`']]) {
+      const state = String(files[target + '/README.md']).split('### Entity state')[1]
+      ok(null != state, target + ': the README has no entity state section')
+      ok(state.split('\n### ')[0].includes('Call ' + make), target + ': the section names no ' + make)
+    }
+    ok(!/### Entity state|Entity instances are stateful/.test(String(files['lean/README.md'])),
+      'lean: the README explains an entity state lean does not have')
+    ok(!/--\s*Built-in features|\b(?:base|test|log), \.\.\./.test(String(files['dart/README.md'])),
+      'dart: the package tree names features the SDK may not have')
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {
