@@ -78,8 +78,8 @@ def isErrV (v : Value) : SIO Bool := do
 def CLEAN_MAXDEPTH : Nat := 32
 
 /-- The `clean` block of the option spec (main.kit.optspec.clean in the sdkgen
-    base model), held here because this pack's targets read no generated
-    Schema module. Numbers are strings, like every optspec value. -/
+    base model), held here because lean reads no generated Schema module.
+    Numbers are strings, like every optspec value. -/
 def cleanOptSpec : SIO Value :=
   newMap #[("active", .bool true),
            ("keys", .str "key,secret,token,password,passwd,authorization,cookie,credential,signature"),
@@ -393,7 +393,8 @@ def defaultOptions : SIO Value := do
   -- `allow.op` and `allow.method` carry the ts optspec's own defaults,
   -- because makePoint and makeSpec enforce them; the other optspec slots are
   -- not defaulted here, so nothing below is a value a caller could mistake
-  -- for an enforced one.
+  -- for an enforced one. lean validates no option against `main.kit.optspec`:
+  -- every option it declares is taken as given.
   newMap #[("base", .str "http://localhost:8000"), ("prefix", .str ""),
            ("suffix", .str ""), ("headers", hdr), ("entity", ent),
            ("allow", ← allowDefaults), ("clean", ← cleanOptSpec)]

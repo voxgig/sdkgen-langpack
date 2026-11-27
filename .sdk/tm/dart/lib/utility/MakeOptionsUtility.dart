@@ -1,4 +1,5 @@
 import '../ProjectNameError.dart';
+import '../Schema.dart';
 
 import 'voxgig_struct.dart' as vs;
 
@@ -42,63 +43,7 @@ dynamic makeOptions(dynamic ctx) {
     utility.setUtility(item[0], item[1]);
   }
 
-  // Standard SDK option values.
-  final optspec = {
-    'apikey': '',
-    'base': 'http://localhost:8000',
-    'secret': '',
-    'prefix': '',
-    'suffix': '',
-    // `basic` and `secret`: HTTP Basic Auth needs a second credential and a
-    // flag to say the pair is Basic rather than a single bearer token. `in`
-    // and `name` say where the credential travels.
-    'auth': {
-      'prefix': '',
-      'basic': false,
-      'in': '',
-      'name': '',
-    },
-    'headers': {
-      '`\$CHILD`': '`\$STRING`',
-    },
-    'allow': {
-      'method': 'GET,PUT,POST,PATCH,DELETE,OPTIONS',
-      'op': 'create,update,patch,load,list,remove,command,direct,graphql',
-    },
-    'entity': {
-      '`\$CHILD`': {
-        '`\$OPEN`': true,
-        'active': false,
-        'alias': {},
-      },
-    },
-    'feature': {
-      '`\$CHILD`': {
-        '`\$OPEN`': true,
-        'active': false,
-      },
-    },
-    'utility': {},
-    // Feature INSTANCES supplied at construction (the station adopt
-    // path): consumed by the constructor's featureAdd loop, so they are
-    // class instances, not data - `$ANY` accepts them verbatim. Without
-    // this entry the seam is dead: the constructor reads
-    // options.extend, but validate rejected the key.
-    'extend': '`\$ANY`',
-    'system': {},
-    'test': {
-      'active': false,
-      'entity': {
-        '`\$OPEN`': true,
-      },
-    },
-    'clean': CLEAN_OPTSPEC,
-    // Server-variable values for a templated base URL (OpenAPI server
-    // variables): {name} placeholders in "base" are substituted from this
-    // map at construction. Spec defaults arrive via the generated config;
-    // user values override them. Mirrors go's make_options optspec.
-    'server': {'`\$CHILD`': ''},
-  };
+  final optspec = makeOptspec();
 
   // Dart specific: preserve the (function-valued) system.fetch across
   // merge/validate, defaulting to the dart:io transport.

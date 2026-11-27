@@ -33,6 +33,7 @@ library
     exposed-modules:  VoxgigStruct
                       Vregex
                       SdkJson
+                      SdkSchema
                       SdkTypes
                       SdkHelpers
                       SdkRuntime

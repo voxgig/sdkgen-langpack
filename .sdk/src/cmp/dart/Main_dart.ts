@@ -22,6 +22,7 @@ import {
 
 import { Package } from './Package_dart'
 import { Config } from './Config_dart'
+import { Schema } from './Schema_dart'
 import { Gitignore } from './Gitignore_dart'
 import { MainEntity } from './MainEntity_dart'
 import { EntityBase } from './EntityBase_dart'
@@ -121,6 +122,7 @@ const Main = cmp(async function Main(props: any) {
     })
 
     Config({ target })
+    Schema({ target })
     EntityBase({ target })
     EntityTypes({ target })
 

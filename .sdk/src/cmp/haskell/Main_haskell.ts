@@ -17,6 +17,7 @@ import {
 
 import { Package } from './Package_haskell'
 import { Config } from './Config_haskell'
+import { Schema } from './Schema_haskell'
 import { Gitignore } from './Gitignore_haskell'
 import { hsVarName } from './utility_haskell'
 
@@ -45,6 +46,7 @@ const Main = cmp(async function Main(props: any) {
   Folder({ name: 'src' }, () => {
 
     Config({ target })
+    Schema({ target })
 
     File({ name: 'SdkClient.' + target.ext }, () => {
 

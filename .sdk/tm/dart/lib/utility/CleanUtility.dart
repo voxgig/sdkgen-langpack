@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import '../ProjectNameError.dart';
+import '../Schema.dart';
 
 // Everything that leaves the pipeline passes through clean; inside it data
 // stays raw, so a hook can still read the header it must add to. See the
@@ -10,18 +11,8 @@ import '../ProjectNameError.dart';
 const MAXDEPTH = 32;
 const CIRCULAR = '[circular]';
 
-// The `clean` block of the option spec (main.kit.optspec.clean in the sdkgen
-// base model), held here because this pack's targets read no generated
-// Schema module. Numbers are strings, like every optspec value.
-const Map<String, dynamic> CLEAN_OPTSPEC = {
-  'active': true,
-  'keys':
-      'key,secret,token,password,passwd,authorization,cookie,credential,signature',
-  'values': '',
-  'mask': '[redacted]',
-  'hint': '0',
-  'min': '4',
-};
+final Map<String, dynamic> CLEAN_OPTSPEC =
+    makeOptspec()['clean'] ?? <String, dynamic>{};
 
 class _Drop {
   const _Drop();

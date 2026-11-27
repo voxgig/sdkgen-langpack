@@ -31,6 +31,7 @@ import VoxgigStruct
   , escurl, escre, stringify, walk, join, jsonEncode )
 import SdkTypes
 import SdkHelpers
+import SdkSchema (optSpec)
 
 -- ------------------------------------------------------------------
 -- random ids (no external dep; LCG)
@@ -233,17 +234,10 @@ cleanMaxDepth = 32
 cleanCircular :: String
 cleanCircular = "[circular]"
 
--- The `clean` block of the option spec (main.kit.optspec.clean in the sdkgen
--- base model), held here because this pack's targets read no generated
--- Schema module. Numbers are strings, like every optspec value.
 cleanOptSpec :: IO Value
-cleanOptSpec = jo
-  [ ("active", VBool True)
-  , ("keys", VStr "key,secret,token,password,passwd,authorization,cookie,credential,signature")
-  , ("values", VStr "")
-  , ("mask", VStr "[redacted]")
-  , ("hint", VStr "0")
-  , ("min", VStr "4") ]
+cleanOptSpec = do
+  clean <- flip getp "clean" =<< optSpec
+  case clean of VMap _ -> pure clean; _ -> emptyMap
 
 normkey :: String -> String
 normkey = filter (\c -> c /= '-' && c /= '_') . lower
@@ -1724,29 +1718,6 @@ fetcherUtil ctx fullurl fetchdef = do
 -- make_options
 -- ------------------------------------------------------------------
 
-optSpecValue :: IO Value
-optSpecValue = do
-  auth <- jo [("prefix", VStr ""), ("basic", VBool False), ("in", VStr ""), ("name", VStr "")]
-  hdrs <- jo [("`$CHILD`", VStr "`$STRING`")]
-  -- OpenAPI server-variable defaults, carried by the generated config whenever
-  -- the spec's server URL is templated. Accepted here so validation does not
-  -- reject the SDK's own config; the {name} substitution into base is a
-  -- separate concern.
-  srv <- jo [("`$CHILD`", VStr "")]
-  allow <- jo [("method", VStr "GET,PUT,POST,PATCH,DELETE,OPTIONS"), ("op", VStr "create,update,patch,load,list,remove,command,direct,graphql")]
-  entChild <- do a <- emptyMap; jo [("`$OPEN`", VBool True), ("active", VBool False), ("alias", a)]
-  ent <- jo [("`$CHILD`", entChild)]
-  featChild <- jo [("`$OPEN`", VBool True), ("active", VBool False)]
-  feat <- jo [("`$CHILD`", featChild)]
-  utilm <- emptyMap
-  sysm <- emptyMap
-  testEnt <- jo [("`$OPEN`", VBool True)]
-  test <- jo [("active", VBool False), ("entity", testEnt)]
-  clean <- cleanOptSpec
-  jo [ ("apikey", VStr ""), ("secret", VStr ""), ("base", VStr "http://localhost:8000"), ("prefix", VStr ""), ("suffix", VStr "")
-     , ("auth", auth), ("headers", hdrs), ("server", srv), ("allow", allow), ("entity", ent), ("feature", feat)
-     , ("utility", utilm), ("system", sysm), ("test", test), ("clean", clean) ]
-
 makeOptionsUtil :: Context -> IO Value
 makeOptionsUtil ctx = do
   optionsV <- readIORef (cOptions ctx)
@@ -1804,7 +1775,7 @@ makeOptionsUtil ctx = do
       setp opts0 "feature" fmap'
       pure (Just order)
     _ -> pure Nothing
-  optspec <- optSpecValue
+  optspec <- optSpec
   sysFetch <- getpathS opts0 "system.fetch"
   em <- emptyMap
   mlist <- ja [em, cfgopts, opts0]

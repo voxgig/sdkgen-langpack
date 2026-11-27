@@ -1214,6 +1214,39 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // The option spec is the model's, so an option the model adds is accepted.
+  test('an option added to main.kit.optspec reaches each runtime\'s option spec', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, "main: kit: optspec: region: ''"),
+    })
+    ok(/^\s+'region': '',$/m.test(String(files['dart/lib/Schema.dart'])),
+      'dart: the generated option spec has no region')
+    ok(String(files['haskell/src/SdkSchema.hs']).includes('("region", (CVStr ""))'),
+      'haskell: the generated option spec has no region')
+    ok(/^import '\.\.\/Schema\.dart';$/m.test(String(files['dart/lib/utility/MakeOptionsUtility.dart'])) &&
+      String(files['dart/lib/utility/MakeOptionsUtility.dart']).includes('final optspec = makeOptspec();'),
+    'dart: makeOptions does not validate against the generated spec')
+    ok(String(files['haskell/src/SdkRuntime.hs']).includes('optspec <- optSpec\n') &&
+      !/^optSpecValue\b/m.test(String(files['haskell/src/SdkRuntime.hs'])),
+    'haskell: makeOptions does not validate against the generated spec')
+
+    const dartSpec = String(files['dart/lib/Schema.dart'])
+    ok(['secret', 'in', 'name'].every((key) => new RegExp("^\\s+'" + key + "': '',$", 'm').test(dartSpec)),
+      'dart: the generated option spec refuses the secret or the placement a config declares')
+    const hsSpec = String(files['haskell/src/SdkSchema.hs'])
+    ok(['secret', 'in', 'name'].every((key) => hsSpec.includes('("' + key + '", (CVStr ""))')),
+      'haskell: the generated option spec refuses the secret or the placement a config declares')
+
+    ok(String(files['dart/lib/utility/CleanUtility.dart']).includes("makeOptspec()['clean']"),
+      'dart: the clean defaults are not the generated spec\'s')
+    ok(String(files['haskell/src/SdkRuntime.hs']).includes('clean <- flip getp "clean" =<< optSpec'),
+      'haskell: the clean defaults are not the generated spec\'s')
+    const lean = String(files['lean/src/SdkUtility.lean'])
+    const makeOptions = lean.slice(lean.indexOf('def makeOptions '), lean.indexOf('def makeContext '))
+    ok(!/\bvalidate\b/.test(makeOptions), 'lean: makeOptions validates the options')
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {
@@ -1645,10 +1678,6 @@ describe('credential placement in the templates', () => {
     'dart: prepareAuth places no credential in the query or a cookie')
     ok(!/HEADER_auth|'authorization'/.test(src), 'dart: prepareAuth names the authorization header itself')
 
-    const opts = Fs.readFileSync(Path.join(TM, 'dart/lib/utility/MakeOptionsUtility.dart'), 'utf8')
-    ok(/'auth': \{[^}]*'in': ''[^}]*'name': ''/.test(opts),
-      'dart: the option spec rejects the placement a config declares')
-
     const suite = Fs.readFileSync(Path.join(TM, 'dart/test/pipeline_test.dart'), 'utf8')
     ok(suite.includes("test('Basic under query placement sets no authorization header'"),
       'dart: the pipeline suite does not run Basic under query placement')
@@ -1677,9 +1706,6 @@ describe('credential placement in the templates', () => {
     ok(src.includes('else if "header" == place && isTrueV basicV') &&
       src.includes('b64 = base64Encode (apikeyStr ++ ":" ++ pass)'),
     'haskell: prepareAuth has no Basic branch gated on the header placement')
-    ok(/^optSpecValue = do\n  auth <- jo \[\("prefix", VStr ""\), \("basic", VBool False\), \("in", VStr ""\), \("name", VStr ""\)\]/m.test(src) &&
-      /\("secret", VStr ""\)/.test(src),
-    'haskell: the option spec refuses the secret or the placement a config declares')
 
     const suite = Fs.readFileSync(Path.join(TM, 'haskell/test/TPipeline.hs'), 'utf8')
     for (const name of ['prepare_auth.basic_header_joins_key_and_secret',
