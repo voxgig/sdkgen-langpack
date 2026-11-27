@@ -26,7 +26,7 @@ const Path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
 const { stageConsumer, generateInto } = require('@voxgig/sdkgen/testkit')
-const { cmp, each, names, Project, Folder, ReadmeTop, Entity, Readme } = require('@voxgig/sdkgen')
+const { cmp, each, names, fact, Project, Folder, ReadmeTop, Entity, Readme } = require('@voxgig/sdkgen')
 
 const { PKG, TARGETS, CHILD, compile, consumerModel } = require('./stage')
 
@@ -167,7 +167,8 @@ const DOC_MODEL_SHOWS = {
     ['haskell/README.md', '### 3. Load a satellite']],
 }
 
-// The pages a reader sees. ReadmeTop is the only route to each target's
+// The pages a reader sees, written where the root plan facts place them, as
+// the standard Root does. ReadmeTop is the only route to each target's
 // ReadmeTopQuick and ReadmeTopTest.
 function docsRoot() {
   return cmp(function Root(props) {
@@ -179,19 +180,25 @@ function docsRoot() {
     ctx$.stdrep = ctx$.stdrep || {}
     names(ctx$.stdrep, model.Name, 'ProjectName')
 
-    const { target, entity } = model.main.kit
+    const kit = model.main.kit
     Project({}, () => {
-      ReadmeTop({})
-      each(target).filter((t) => false !== t.active).map((t) => {
+      if (fact(kit, 'top')) ReadmeTop({})
+      for (const name of fact(kit, 'active')) {
+        const t = kit.target[name]
         names(t, t.name)
-        Folder({ name: t.name }, () => {
-          each(entity).filter((e) => false !== e.active).map((e) => {
-            names(e, e.name)
-            Entity({ target: t, entity: e })
-          })
-          Readme({ target: t })
-        })
-      })
+        const phase = fact(t, 'phase')
+        const pages = () => {
+          if (phase.entity) {
+            each(kit.entity).filter((e) => false !== e.active).map((e) => {
+              names(e, e.name)
+              Entity({ target: t, entity: e })
+            })
+          }
+          if (phase.readme) Readme({ target: t })
+        }
+        if ('root' === fact(t, 'place')) pages()
+        else Folder({ name: t.name }, pages)
+      }
     })
   })
 }
@@ -963,6 +970,14 @@ describe('sdkgen-langpack', () => {
     ok(!off.includes('.sdk/test/entity'), 'lean: the how-to names test data the build did not write')
     ok(off.includes('match (← Planet.load sdk m (← emptyMap)) with'),
       'lean: the missing-record how-to does not load a planet')
+
+    const atRoot = String((await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, 'main: kit: phase: top: active: false\n' +
+        'main: kit: target: lean: output: root: true'),
+      root: docsRoot(),
+    })).files['README.md'])
+    ok(atRoot.includes('IO.FS.readFile ".sdk/test/entity/planet/PlanetTestData.json"'),
+      'lean: at the project root, the how-to does not read the test data from .sdk')
   })
 
 
@@ -1173,7 +1188,10 @@ describe('sdkgen-langpack', () => {
         'main: kit: target: dart: output: root: true'),
       root: docsRoot(),
     })
-    ok(!/\bcd dart\b/.test(String(atRoot.files['dart/README.md'])),
+    const rootReadme = atRoot.files['README.md']
+    ok(null != rootReadme && null == atRoot.files['dart/README.md'],
+      'dart: a target at the project root does not write its README there')
+    ok(!/\bcd dart\b/.test(String(rootReadme)),
       'dart: the README enters a dart directory a root target does not have')
   })
 
