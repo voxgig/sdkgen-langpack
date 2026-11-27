@@ -1,6 +1,10 @@
 import { cmp, Content } from '@voxgig/sdkgen'
 
-const ReadmeModel = cmp(function ReadmeModel(_props: any) {
+import { leanOptionRows } from './utility_lean'
+
+const ReadmeModel = cmp(function ReadmeModel(props: any) {
+  const { ctx$: { model } } = props
+
   Content(`Every value crossing the SDK boundary — options, request payloads,
 responses and results — is a vendored voxgig \`Value\` (see \`VoxgigStruct.lean\`):
 a JSON-shaped, heap-backed node, the Lean equivalent of the \`map[string]any\`
@@ -18,6 +22,13 @@ let ctx ← mkCtx
 Build values with \`newMap\` / \`newList\`, read them with \`getprop\` / \`getpath\`,
 and render them with \`stringify\` (debug) or \`jsonify\` (strict JSON).
 
+### Client options
+
+\`Sdk.newSdk\` takes its options as a \`Value\` map:
+
+| Option | Type | Description |
+| --- | --- | --- |
+${leanOptionRows(model)}
 `)
 })
 

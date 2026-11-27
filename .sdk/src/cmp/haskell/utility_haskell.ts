@@ -7,6 +7,7 @@ import {
 
 import {
   canonKey,
+  clientOptions,
   entityIdField,
   opRequestShape,
   requiredItems,
@@ -182,9 +183,23 @@ function hsTestCall(ent: any, op: string, indent: string): { argExpr: string, se
 }
 
 
+// The client options SdkRuntime's makeOptions accepts, which has no `extend`
+// and no `secret`.
+const HS_OPTIONS = ['server', 'apikey', 'base', 'prefix', 'suffix', 'headers', 'feature', 'system']
+
+const HS_OPTION_KIND: Record<string, string> = { string: 'String', map: 'Value', list: 'Value' }
+
+// One table row per option, `| <key> | <type> | <description> |`.
+function hsOptionRows(model: any, key: (name: string) => string): string {
+  return clientOptions(model).filter((o: any) => HS_OPTIONS.includes(o.name))
+    .map((o: any) => '| ' + key(o.name) + ' | `' + HS_OPTION_KIND[o.kind] + '` | ' + o.desc + ' |\n').join('')
+}
+
+
 export {
   clean,
   formatHsValue,
+  hsOptionRows,
   hsLit,
   hsString,
   hsTestCall,

@@ -128,6 +128,36 @@ main: kit: flow: BasicCometFlow: {
 }
 `
 
+// The credential and server shapes a constructor's options follow.
+const AUTH_MODELS = {
+  off: '',
+  bearer: "main: kit: config: auth: { active: true, prefix: 'Bearer' }",
+  query: "main: kit: config: auth: { active: true, prefix: '', in: 'query', name: 'api_key' }",
+  basic: "main: kit: config: auth: { active: true, prefix: 'Basic', basic: true }",
+  server: "main: kit: info: servers: [ { url: 'https://{tenant}.example.com/{version}', " +
+    "variables: { tenant: { description: 'The tenant' }, version: { default: 'v1' } } } ]",
+}
+
+// The option names each options table lists: a table headed Option, or one
+// a constructor's Parameters or Options line leads into.
+function optionTables(text) {
+  const tables = []
+  const lines = String(text).split('\n')
+  lines.forEach((line, i) => {
+    const head = /^\| ([^|]+?) \| Type \| Description \|$/.exec(line)
+    const lead = lines.slice(Math.max(0, i - 2), i).join(' ')
+    if (null == head || !(/^Option/.test(head[1]) ||
+      (/^(Name|Key)$/.test(head[1]) && /\*\*(Parameters|Options)\b/.test(lead)))) return
+    const rows = []
+    for (let j = i + 2; j < lines.length && lines[j].startsWith('|'); j++) {
+      const cell = /^\| `(?:options\['([a-z]+)'\]|([a-z]+))` \|/.exec(lines[j])
+      if (null != cell && 'options' !== (cell[1] || cell[2])) rows.push({ name: cell[1] || cell[2], line: lines[j] })
+    }
+    if (0 < rows.length) tables.push(rows)
+  })
+  return tables
+}
+
 // The branch each model is there to show.
 const DOC_MODEL_SHOWS = {
   crud: [['dart/README.md', 'client.Planet().remove('], ['haskell/README.md', 'Sdk.eRemove ']],
@@ -856,6 +886,36 @@ describe('sdkgen-langpack', () => {
         target + ': the introduction does not name the list operation alone:\n' + intro)
       ok(!/`e?(?:[Ll]oad|[Cc]reate|[Uu]pdate|[Pp]atch|[Rr]emove)`/.test(intro),
         target + ': the introduction names an operation no entity has:\n' + intro)
+    }
+  })
+
+
+  // The rows come from sdkgen's clientOptions, less what a runtime does not read.
+  test('each options table lists what the constructor takes', async () => {
+    const LISTS = {
+      off: { dart: [], haskell: [], lean: [] },
+      bearer: { dart: ['apikey'], haskell: ['apikey'], lean: ['apikey'] },
+      query: { dart: ['apikey'], haskell: ['apikey'], lean: ['apikey'] },
+      basic: { dart: ['apikey', 'secret'], haskell: ['apikey'], lean: ['apikey'] },
+      server: { dart: ['server'], haskell: ['server'], lean: [] },
+    }
+    for (const [shape, extra] of Object.entries(AUTH_MODELS)) {
+      const { files } = await generateInto(consumer, {
+        model: consumerModel(consumer.sdk, extra), root: docsRoot(),
+      })
+      for (const target of TARGETS) {
+        const tables = ['README.md', 'REFERENCE.md']
+          .flatMap((page) => optionTables(files[target + '/' + page]))
+        ok(0 < tables.length, shape + ' ' + target + ': no options table')
+        for (const rows of tables) {
+          const names = rows.map((r) => r.name)
+          ok(names.includes('base'), shape + ' ' + target + ': a table without base: ' + names)
+          deepStrictEqual(names.filter((n) => ['apikey', 'secret', 'server'].includes(n)),
+            LISTS[shape][target], shape + ' ' + target + ': the credential and server rows')
+          deepStrictEqual(rows.filter((r) => /authorization/i.test(r.line)).map((r) => r.line), [],
+            shape + ' ' + target + ': a row names the authorization header')
+        }
+      }
     }
   })
 

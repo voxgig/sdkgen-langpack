@@ -1,12 +1,12 @@
 
-import { cmp, each, Content, canonKey, File, isAuthActive, entityIdField, opRequestShape } from '@voxgig/sdkgen'
+import { cmp, each, Content, canonKey, File, entityIdField, opRequestShape } from '@voxgig/sdkgen'
 
 import {
   KIT,
   getModelPath,
 } from '@voxgig/apidef'
 
-import { hsVarName } from './utility_haskell'
+import { hsOptionRows, hsVarName } from './utility_haskell'
 
 
 // A type-correct Haskell `Value` literal for a field's canonical type.
@@ -110,13 +110,7 @@ Construct a live SDK client.
 
 | Key | Type | Description |
 | --- | --- | --- |
-${isAuthActive(model) ? '| `apikey` | `String` | API key for authentication. |\n' : ''}| \`base\` | \`String\` | Base URL for API requests. |
-| \`prefix\` | \`String\` | URL prefix appended after base. |
-| \`suffix\` | \`String\` | URL suffix appended after path. |
-| \`headers\` | \`Value\` | Custom headers for all requests. |
-| \`feature\` | \`Value\` | Feature configuration. |
-| \`system\` | \`Value\` | System overrides (e.g. custom fetch). |
-
+${hsOptionRows(model, (name: string) => '`' + name + '`')}
 
 ### Test constructors
 

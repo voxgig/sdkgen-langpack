@@ -1,12 +1,12 @@
 
-import { cmp, each, Content, isAuthActive } from '@voxgig/sdkgen'
+import { cmp, each, Content } from '@voxgig/sdkgen'
 
 import {
   KIT,
   getModelPath,
 } from '@voxgig/apidef'
 
-import { hsVarName } from './utility_haskell'
+import { hsOptionRows, hsVarName } from './utility_haskell'
 
 
 const ReadmeModel = cmp(function ReadmeModel(props: any) {
@@ -31,10 +31,6 @@ const ReadmeModel = cmp(function ReadmeModel(props: any) {
   const opRows = ['load', 'list', 'create', 'update', 'patch', 'remove']
     .filter((o) => opUnion.has(o)).map((o) => opRowDefs[o]).join('\n')
 
-  const apikeyOptionRow = isAuthActive(model)
-    ? '| `apikey` | `String` | API key for authentication. |\n'
-    : ''
-
   Content(`### Client constructors
 
 \`\`\`haskell
@@ -53,13 +49,7 @@ makeClient = do
 
 | Option (map key) | Type | Description |
 | --- | --- | --- |
-${apikeyOptionRow}| \`base\` | \`String\` | Base URL of the API server. |
-| \`prefix\` | \`String\` | URL path prefix prepended to all requests. |
-| \`suffix\` | \`String\` | URL path suffix appended to all requests. |
-| \`headers\` | \`Value\` | Custom headers for all requests. |
-| \`feature\` | \`Value\` | Feature activation flags. |
-| \`system\` | \`Value\` | System overrides (e.g. custom \`fetch\` function). |
-
+${hsOptionRows(model, (name: string) => '`' + name + '`')}
 ### Test client
 
 \`\`\`haskell

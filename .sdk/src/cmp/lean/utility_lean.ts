@@ -6,6 +6,7 @@ import {
 } from '@voxgig/struct'
 
 import {
+  clientOptions,
   each,
   targetFeatures,
 } from '@voxgig/sdkgen'
@@ -16,9 +17,7 @@ function projectPath(suffix?: string): string {
 }
 
 
-// A Lean 4 string literal. Lean strings are UTF-8, so non-ASCII passes through;
-// only the structural characters need escaping. (Backticks are ordinary in Lean
-// strings, so the config's `body`-style transform exprs embed verbatim.)
+// A Lean 4 string literal: non-ASCII text and backticks pass through as is.
 function leanString(s: string): string {
   let out = '"'
   for (const ch of String(s)) {
@@ -140,8 +139,20 @@ function leanSecrets(model: any, target: any): {
 }
 
 
+// What SdkUtility's makeOptions reads: no `extend`, `system`, `secret` or `server`.
+const LEAN_OPTIONS = ['apikey', 'base', 'prefix', 'suffix', 'headers', 'feature']
+
+const LEAN_OPTION_KIND: Record<string, string> = { string: 'String', map: 'Value', list: 'Value' }
+
+function leanOptionRows(model: any): string {
+  return clientOptions(model).filter((o: any) => LEAN_OPTIONS.includes(o.name))
+    .map((o: any) => '| `' + o.name + '` | `' + LEAN_OPTION_KIND[o.kind] + '` | ' + o.desc + ' |\n').join('')
+}
+
+
 export {
   clean,
+  leanOptionRows,
   leanSecrets,
   leanString,
   leanVarName,
