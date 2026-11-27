@@ -1,8 +1,10 @@
 import { cmp, Content } from '@voxgig/sdkgen'
 
+import { leanClientOptions } from './utility_lean'
+
 // The Lean stanza of the top-level (multi-language) README quick start.
 const ReadmeTopQuick = cmp(function ReadmeTopQuick(props: any) {
-  const { target } = props
+  const { target, ctx$: { model } } = props
   Content(`\`\`\`lean
 import SdkClient
 open VoxgigStruct
@@ -10,7 +12,7 @@ open VoxgigStruct
 def main : IO Unit := do
   let ctx ← mkCtx
   (do
-    let sdk ← Sdk.newSdk (← emptyMap)
+    let sdk ← Sdk.newSdk ${leanClientOptions(model)}
     IO.println s!"client ready"
   ).run ctx
 \`\`\`

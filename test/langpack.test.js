@@ -920,6 +920,25 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // Both lean quick starts construct the client from the same options.
+  test('lean quick starts pass the API key the API needs, from <ENV>_APIKEY', async () => {
+    const APIKEY = '("apikey", .str ((← IO.getEnv "DEMO_APIKEY").getD ""))'
+    for (const [shape, extra] of [['off', AUTH_MODELS.off], ['bearer', AUTH_MODELS.bearer]]) {
+      const { files } = await generateInto(consumer, {
+        model: consumerModel(consumer.sdk, extra), root: docsRoot(),
+      })
+      const starts = ['README.md', 'lean/README.md'].map((path) =>
+        codeBlocks(files[path], 'lean').find((code) => /^def main\b/m.test(code)))
+      for (const code of starts) {
+        ok(null != code, shape + ': a lean quick start is missing')
+        const ctor = (/Sdk\.newSdk (.*)$/m.exec(code) || [])[1]
+        strictEqual(ctor, 'bearer' === shape ? '(← newMap #[' + APIKEY + '])' : '(← emptyMap)',
+          shape + ': the lean client options:\n' + code)
+      }
+    }
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {

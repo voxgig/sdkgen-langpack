@@ -8,8 +8,11 @@ import {
 import {
   clientOptions,
   each,
+  fact,
   targetFeatures,
 } from '@voxgig/sdkgen'
+
+import { KIT } from '@voxgig/apidef'
 
 
 function projectPath(suffix?: string): string {
@@ -150,8 +153,19 @@ function leanOptionRows(model: any): string {
 }
 
 
+// The options an example constructs its client with: what the API needs
+// from the caller, read from the environment.
+function leanClientOptions(model: any): string {
+  const kit = model.main[KIT]
+  const pairs = fact(kit, 'auth').apikey ?
+    [`("apikey", .str ((← IO.getEnv "${fact(kit, 'env').apikey}").getD ""))`] : []
+  return 0 === pairs.length ? '(← emptyMap)' : `(← newMap #[${pairs.join(', ')}])`
+}
+
+
 export {
   clean,
+  leanClientOptions,
   leanOptionRows,
   leanSecrets,
   leanString,
