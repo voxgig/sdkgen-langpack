@@ -10,11 +10,7 @@ import type {
   Model,
 } from '@voxgig/apidef'
 
-
-function pkgName(model: any): string {
-  const org = (model.origin || 'voxgig-sdk').replace(/-sdk$/, '')
-  return `${org}-${model.name}-sdk`.toLowerCase().replace(/[^a-z0-9-]/g, '-')
-}
+import { pkgName } from './utility_haskell'
 
 
 const Package = cmp(async function Package(props: any) {

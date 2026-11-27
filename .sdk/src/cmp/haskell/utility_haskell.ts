@@ -19,6 +19,13 @@ function projectPath(suffix?: string): string {
 }
 
 
+// The cabal package name, which the manifest, its file and the docs share.
+function pkgName(model: any): string {
+  const org = (model.origin || 'voxgig-sdk').replace(/-sdk$/, '')
+  return `${org}-${model.name}-sdk`.toLowerCase().replace(/[^a-z0-9-]/g, '-')
+}
+
+
 // Haskell reserved words that cannot be used as identifiers.
 const HS_RESERVED = new Set<string>([
   'case', 'class', 'data', 'default', 'deriving', 'do', 'else', 'foreign',
@@ -204,5 +211,6 @@ export {
   hsString,
   hsTestCall,
   hsVarName,
+  pkgName,
   projectPath,
 }

@@ -1,4 +1,4 @@
-import { cmp, Content, isPublished, repoInfo } from '@voxgig/sdkgen'
+import { cmp, Content, isPublished, repoInfo, cdTarget, registryNote, fact } from '@voxgig/sdkgen'
 
 const ReadmeInstall = cmp(function ReadmeInstall(props: any) {
   const { target, ctx$ } = props
@@ -6,22 +6,26 @@ const ReadmeInstall = cmp(function ReadmeInstall(props: any) {
 
   if (isPublished(model, target.name)) {
     Content(`\`\`\`bash
-cd ${target.name} && lake build
+${cdTarget(target)}lake build
 \`\`\`
 
 `)
     return
   }
 
-  const { releasesUrl } = repoInfo(model)
-  Content(`This package is not yet published to [Reservoir](https://reservoir.lean-lang.org).
-Install it from the GitHub release tag (\`${target.name}/vX.Y.Z\`, see
-[Releases](${releasesUrl})) or from a source checkout. The runtime is
+  const { hostName, tagsUrl } = repoInfo(model, target.name)
+  const tag = fact(target, 'tag')
+  // sdkgen names a registry it has no label for by its model name.
+  const note = registryNote(model, target.name)
+    .replace(/\breservoir\.$/, '[Reservoir](https://reservoir.lean-lang.org).')
+  Content(`${note}
+Install it from ${'' === tag ? '' : `the ${hostName} release tag (\`${tag}X.Y.Z\`, see
+[Tags](${tagsUrl})) or from `}a source checkout. The runtime is
 dependency-free (only the Lean 4 prelude + Std; the HTTP transport shells out
 to \`curl\`), so a plain Lake build is all that is needed:
 
 \`\`\`bash
-cd ${target.name} && lake build
+${cdTarget(target)}lake build
 \`\`\`
 
 Run the offline struct-corpus test (no server needed) and the live entity

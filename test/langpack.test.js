@@ -966,6 +966,28 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // One package name, whichever route a reader takes to it.
+  test('the haskell install and layout name the package the cabal file declares', async () => {
+    for (const state of ['active', 'pending']) {
+      const { files } = await generateInto(consumer, {
+        model: consumerModel(consumer.sdk, 'active' === state ?
+          'main: kit: target: haskell: publish: registry: active: true' : ''),
+      })
+      const cabal = Object.keys(files).filter((p) => /^haskell\/[^/]+\.cabal$/.test(p))
+      strictEqual(cabal.length, 1, state + ': the cabal files: ' + cabal)
+      const name = (/^name:\s+(\S+)$/m.exec(files[cabal[0]]) || [])[1]
+      strictEqual(cabal[0], 'haskell/' + name + '.cabal', state + ': the cabal file is named for its package')
+      const readme = String(files['haskell/README.md'])
+      ok(readme.includes('└── ' + name + '.cabal '), state + ': the layout names another cabal file')
+      deepStrictEqual(codeBlocks(readme, 'bash').filter((code) => '' === code.trim()), [],
+        state + ': an empty install block')
+      if ('active' === state) {
+        ok(readme.includes('cabal install ' + name + '\n'), 'the install command names another package')
+      }
+    }
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {

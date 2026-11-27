@@ -1,6 +1,8 @@
 
 import { cmp, Content } from '@voxgig/sdkgen'
 
+import { pkgName } from './utility_haskell'
+
 
 const ReadmeExplanation = cmp(function ReadmeExplanation(props: any) {
   const { target, ctx$: { model } } = props
@@ -31,7 +33,7 @@ ${target.name}/
 │   └── SdkClient.hs      -- generated public client (newSdk, entity accessors)
 ├── test/                 -- test suites
 ├── Makefile              -- stock-GHC build/test (no third-party deps)
-└── ${model.const.Name.toLowerCase()}-sdk.cabal      -- package manifest (for Hackage)
+└── ${pkgName(model)}.cabal      -- package manifest (for Hackage)
 \`\`\`
 
 The public module (\`SdkClient\`) exports the SDK constructors (\`newSdk\`,
