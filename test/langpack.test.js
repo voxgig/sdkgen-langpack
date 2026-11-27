@@ -569,6 +569,15 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // The corpus comes from the scaffold, not the port's tag, so a case the
+  // vendored port cannot settle can allocate without bound.
+  test('the haskell test runner caps its heap', () => {
+    const make = String(generated.files['haskell/Makefile'])
+    ok(/^\tghc [^\n]*-with-rtsopts=-M\d+[gm]\b[^\n]*-o \$\(BUILDDIR\)\/runner /m.test(make),
+      'haskell: make test links the runner with no heap cap:\n' + make)
+  })
+
+
   // A PATCH beside a PUT is a sixth operation, `patch`, which every target
   // generates as it does `update`: its own entry, under its own name.
   test('every target generates the patch operation', () => {
