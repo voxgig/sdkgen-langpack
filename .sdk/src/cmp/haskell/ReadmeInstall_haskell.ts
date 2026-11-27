@@ -1,21 +1,24 @@
 
-import { cmp, Content, installCommand, isPublished, repoInfo } from '@voxgig/sdkgen'
+import { cmp, Content, isPublished, repoInfo, cdTarget, collectDeps, registryNote, fact } from '@voxgig/sdkgen'
+
+import { pkgName } from './utility_haskell'
 
 
 const ReadmeInstall = cmp(function ReadmeInstall(props: any) {
   const { target, ctx$ } = props
   const { model } = ctx$
+  const free = 0 === collectDeps(model, target.name, target.deps).length
 
   if (isPublished(model, target.name)) {
     Content(`\`\`\`bash
-${installCommand(model, target.name)}
+cabal install ${pkgName(model)}
 \`\`\`
 
-Or build from a source checkout with the bundled Makefile (stock GHC, no
-third-party dependencies — only the GHC boot libraries):
+Or build from a source checkout with the bundled Makefile${free ? ` (stock GHC, no
+third-party dependencies — only the GHC boot libraries)` : ''}:
 
 \`\`\`bash
-cd ${target.name} && make test
+${cdTarget(target)}make test
 \`\`\`
 
 `)
@@ -23,23 +26,25 @@ cd ${target.name} && make test
   }
 
   // Publish pending: not yet on Hackage. Build from the git release tag or
-  // from a local source checkout. The runtime is dependency-free, so no cabal
-  // solve is needed — the Makefile drives stock GHC directly.
-  const { releasesUrl } = repoInfo(model)
-  Content(`This package is not yet published to Hackage. Install it from the GitHub
-release tag (\`${target.name}/vX.Y.Z\`, see [Releases](${releasesUrl})) or
-from a source checkout. The runtime has no third-party dependencies (only the
-GHC boot libraries: \`base\`, \`containers\`, \`array\`, \`time\`), so the
-bundled Makefile drives stock GHC with no cabal solve:
+  // from a local source checkout.
+  const { hostName, tagsUrl } = repoInfo(model, target.name)
+  const tag = fact(target, 'tag')
+  // sdkgen names a registry it has no label for by its model name.
+  const note = registryNote(model, target.name).replace(/\bhackage\.$/, 'Hackage.')
+  Content(`${note} Install it from ${'' === tag ? '' : `the ${hostName}
+release tag (\`${tag}X.Y.Z\`, see [Tags](${tagsUrl})) or from `}a source checkout${free ? `. The
+runtime has no third-party dependencies (only the GHC boot libraries:
+\`base\`, \`containers\`, \`array\`, \`time\`), so the bundled Makefile drives
+stock GHC with no cabal solve` : ', with the bundled Makefile'}:
 
 \`\`\`bash
-cd ${target.name} && make test
+${cdTarget(target)}make test
 \`\`\`
 
-A \`.cabal\` file is also generated for use with \`cabal\`/\`stack\`:
+The generated \`${pkgName(model)}.cabal\` builds it with \`cabal\` or \`stack\`:
 
 \`\`\`bash
-cd ${target.name} && cabal build
+${cdTarget(target)}cabal build
 \`\`\`
 
 `)

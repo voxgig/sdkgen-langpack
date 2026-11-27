@@ -30,6 +30,13 @@ def isNov := SdkUtility.isNov
 
 def has (s sub : String) : Bool := (s.splitOn sub).length > 1
 
+/-- The message an action throws, "" when it returns. -/
+def thrownBy (act : SIO Unit) : SIO String := do
+  try
+    act
+    pure ""
+  catch e => pure (toString e)
+
 /-- The error a response the transport marked as not JSON leaves on the result,
     as its code and message. -/
 def unreadableErr (status : Float) (ctype : Option String) (body : String) :
@@ -328,6 +335,45 @@ def main : IO UInt32 := do
       let m2 ← match e2 with | some e => gpS e "message" | none => pure ""
       check (kept && m2 == "URL path has no value for {id}.")
         "makeUrl: a placeholder in the base is a server variable")
+
+    (do
+      let authCtx (auth headers : Array (String × Value)) : SIO Value := do
+        let opts ← newMap #[("apikey", .str "user"), ("secret", .str "pass"), ("auth", ← newMap auth)]
+        let spec ← newMap #[("headers", ← newMap headers), ("query", ← emptyMap)]
+        newMap #[("options", opts), ("spec", spec)]
+      let c1 ← authCtx #[("prefix", .str "Basic"), ("basic", .bool true)] #[]
+      let _ ← SdkUtility.prepareAuth c1
+      check ((← gpS (← gp (← gp c1 "spec") "headers") "authorization") == "Basic dXNlcjpwYXNz")
+        "prepareAuth: Basic joins the key and the secret in the header"
+      let c2 ← authCtx #[("prefix", .str "Basic"), ("basic", .bool true), ("in", .str "query"),
+        ("name", .str "api_key")] #[]
+      let _ ← SdkUtility.prepareAuth c2
+      let s2 ← gp c2 "spec"
+      check (isNov (← gp (← gp s2 "headers") "authorization") && (← gpS (← gp s2 "query") "api_key") == "user")
+        "prepareAuth: Basic under query placement sets no authorization header"
+      let c3 ← authCtx #[("prefix", .str ""), ("in", .str "cookie"), ("name", .str "session")]
+        #[("cookie", .str "a=1; session=old")]
+      let _ ← SdkUtility.prepareAuth c3
+      check ((← gpS (← gp (← gp c3 "spec") "headers") "cookie") == "a=1; session=user")
+        "prepareAuth: a key in a cookie replaces its own piece of the cookie header")
+
+    (do
+      let config ← newMap #[("main", ← newMap #[("name", .str "Demo")]),
+        ("options", ← newMap #[("base", .str "https://{tenant}.example.com/{version}"),
+          ("server", ← newMap #[("tenant", .str ""), ("version", .str "v1")])])]
+      let test ← SdkUtility.makeOptions config (← emptyMap)
+      SdkUtility.resolveServer config test true
+      check ((← gpS test "base") == "https://test-tenant.example.com/v1")
+        "resolveServer: test mode fills a variable with no value"
+      let given ← SdkUtility.makeOptions config
+        (← newMap #[("server", ← newMap #[("tenant", .str "acme")])])
+      SdkUtility.resolveServer config given false
+      check ((← gpS given "base") == "https://acme.example.com/v1")
+        "resolveServer: the caller's value and the default fill the URL"
+      let live ← SdkUtility.makeOptions config (← emptyMap)
+      let refused ← thrownBy (SdkUtility.resolveServer config live false)
+      check (has refused "the server variable 'tenant' is required")
+        "resolveServer: a live client refuses a variable with no value")
 
     patchInputCase
 

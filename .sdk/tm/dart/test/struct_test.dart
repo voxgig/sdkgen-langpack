@@ -54,6 +54,25 @@ dynamic _vget(dynamic vin, String key) =>
 
 bool _vhas(dynamic vin, String key) => vin is Map && vin.containsKey(key);
 
+// Each validate group and its null flag, as struct's own runner drives them
+// at the vendored tag. The validate case fails on a group the corpus holds
+// and this table leaves out.
+const _validateGroups = {
+  'basic': false,
+  'child': true,
+  'nof': false,
+  'exact': true,
+  'invalid': false,
+  'special': true,
+  'directive': false,
+  'all': false,
+  'len': false,
+  'range': false,
+  'rest': false,
+  'like': false,
+  'unknown': false,
+};
+
 // omni.dart hands a zero-argument entry the struct port's own no-value
 // sentinel (test/omni.dart, decision 4). Only typify/stringify/pathify know
 // what to do with it; every other section wants the port's single `null`,
@@ -401,20 +420,25 @@ void tests() {
     });
 
     test('validate', (t) async {
-      await _sec('validate', 'basic', false,
-          (vin) => s.validate(_vget(vin, 'data'), _vget(vin, 'spec')));
-
-      for (var gn in ['child', 'one', 'exact']) {
-        await _sec('validate', gn, true,
-            (vin) => s.validate(_vget(vin, 'data'), _vget(vin, 'spec')));
+      for (final group in _validateGroups.entries) {
+        await _sec(
+            'validate',
+            group.key,
+            group.value,
+            (vin) => _vhas(vin, 'inj')
+                ? s.validate(_vget(vin, 'data'), _vget(vin, 'spec'),
+                    _vget(vin, 'inj'))
+                : s.validate(_vget(vin, 'data'), _vget(vin, 'spec')));
       }
 
-      await _sec('validate', 'invalid', false,
-          (vin) => s.validate(_vget(vin, 'data'), _vget(vin, 'spec')));
-
-      await _sec('validate', 'special', true,
-          (vin) => s.validate(_vget(vin, 'data'), _vget(vin, 'spec'),
-              _vget(vin, 'inj')));
+      final validates = s.getprop(_spec, 'validate');
+      final held =
+          s.keysof(validates).where((gn) => s.getprop(validates, gn) is Map);
+      ok(held.isNotEmpty, 'the corpus holds no validate group');
+      final unrun = held.where((gn) => !_validateGroups.containsKey(gn));
+      ok(unrun.isEmpty,
+          'the corpus holds validate groups this runner does not run: ' +
+              unrun.join(', '));
     });
 
     test('select', (t) async {

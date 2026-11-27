@@ -15,7 +15,7 @@ const ReadmeTopTest = cmp(function ReadmeTopTest(props: any) {
   const { target, ctx$: { model } } = props
 
   const entity = getModelPath(model, `main.${KIT}.entity`)
-  const pkg = dartPackageName(model)
+  const pkg = dartPackageName(model, target.name)
 
   // Pick an entity with a real op (prefer a read op) — never fabricate a
   // `load` on an op-less entity.

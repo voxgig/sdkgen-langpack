@@ -8,13 +8,10 @@ main: kit: target: haskell: {
   base: 'BASE'
   srcfeature: false
 
-  # Entities are generic (config-driven F.makeEntity), so no per-entity or
-  # per-feature generated modules. The readme + agentguide phases are
-  # model-driven (they read the API model directly, not per-entity generated
-  # code), so they are active and produce the docs; entity/feature generation
-  # stays off.
+  # Entities are generic (config-driven F.makeEntity): the entity phase runs,
+  # as it does for every SDK, and its component writes no module; no
+  # per-feature module is generated.
   phase: {
-    entity:     { active: false }
     feature:    { active: false }
     readme:     { active: true }
     agentguide: { active: true }

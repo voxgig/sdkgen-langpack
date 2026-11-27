@@ -98,6 +98,15 @@ def walkDepthSubject (vin : Value) : SIO Value := do
 
 -- ---------------- test groups ------------------------------------------
 
+/-- Each validate group and its null flag, as struct's own runner drives them
+at the vendored tag; a group the corpus holds and this table leaves out fails
+the run. -/
+def validateGroups : List (String × Bool) :=
+  [("basic", false), ("child", true), ("nof", false), ("exact", true),
+   ("invalid", false), ("special", true), ("directive", false), ("all", false),
+   ("len", false), ("range", false), ("rest", false), ("like", false),
+   ("unknown", false)]
+
 def runAll (r : Run) : SIO Unit := do
 
   -- minor
@@ -302,21 +311,21 @@ def runAll (r : Run) : SIO Unit := do
     (fun vin => do transform (← getp vin "data") (← getp vin "spec"))
 
   -- validate
-  runset r "validate.basic" (getset r ["validate", "basic"])
-    (fun vin => do validate (← getp vin "data") (← getp vin "spec"))
-    (nullflag := false)
-  for gn in ["child", "one", "exact"] do
+  for (gn, nullflag) in validateGroups do
     runset r ("validate." ++ gn) (getset r ["validate", gn])
-      (fun vin => do validate (← getp vin "data") (← getp vin "spec"))
-  runset r "validate.invalid" (getset r ["validate", "invalid"])
-    (fun vin => do validate (← getp vin "data") (← getp vin "spec"))
-    (nullflag := false)
-  runset r "validate.special" (getset r ["validate", "special"])
-    (fun vin => do
-      let injm ← getp vin "inj"
-      let d : InjDef := { dMeta := ← getprop injm (.str "meta") }
-      validate (← getp vin "data") (← getp vin "spec")
-        (if isNullish injm then .inone else .idef d))
+      (fun vin => do
+        let injm ← getp vin "inj"
+        let d : InjDef := { dMeta := ← getprop injm (.str "meta") }
+        validate (← getp vin "data") (← getp vin "spec")
+          (if isNullish injm then .inone else .idef d))
+      (nullflag := nullflag)
+  let held := ((Omni.asmap (getset r ["validate"])).getD []).filterMap fun kv =>
+    if (Omni.asmap (some kv.2)).isSome then some kv.1 else none
+  if held.isEmpty then
+    r.failures.modify (·.push "validate: the corpus holds no validate group")
+  for gn in held do
+    unless validateGroups.any (·.1 == gn) do
+      r.failures.modify (·.push s!"validate.{gn}: the corpus holds a group this runner does not run")
 
   -- select
   for gn in ["basic", "operators", "edge", "alts"] do

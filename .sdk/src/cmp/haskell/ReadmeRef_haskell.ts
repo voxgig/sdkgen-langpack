@@ -1,12 +1,12 @@
 
-import { cmp, each, Content, canonKey, File, isAuthActive, entityIdField, opRequestShape } from '@voxgig/sdkgen'
+import { cmp, each, Content, canonKey, File, entityIdField, opRequestShape, featureDocs, fact, entityOps, requiredItems } from '@voxgig/sdkgen'
 
 import {
   KIT,
   getModelPath,
 } from '@voxgig/apidef'
 
-import { hsVarName } from './utility_haskell'
+import { hsOptionRows, hsVarName } from './utility_haskell'
 
 
 // A type-correct Haskell `Value` literal for a field's canonical type.
@@ -31,6 +31,8 @@ function hsType(type: any): string {
 }
 
 
+const LIST_ALL = ' The match is optional \u2014 pass an empty map to list all records.'
+
 const OP_SIGNATURES: Record<string, { sig: string, returns: string, desc: string }> = {
   load: {
     sig: 'eLoad ent match ctrl :: IO Entity',
@@ -40,7 +42,7 @@ const OP_SIGNATURES: Record<string, { sig: string, returns: string, desc: string
   list: {
     sig: 'eList ent match ctrl :: IO [Entity]',
     returns: 'one entity per record',
-    desc: 'List entities matching the given criteria. The match is optional \u2014 pass an empty map to list all records. Resolves to one entity per record and raises on error.',
+    desc: 'List entities matching the given criteria.' + LIST_ALL + ' Resolves to one entity per record and raises on error.',
   },
   create: {
     sig: 'eCreate ent data ctrl :: IO Entity',
@@ -70,7 +72,6 @@ const ReadmeRef = cmp(function ReadmeRef(props: any) {
   const { model } = props.ctx$
 
   const entity = getModelPath(model, `main.${KIT}.entity`)
-  const feature = getModelPath(model, `main.${KIT}.feature`)
 
   const publishedEntities = each(entity).filter((e: any) => e.active !== false)
 
@@ -110,13 +111,7 @@ Construct a live SDK client.
 
 | Key | Type | Description |
 | --- | --- | --- |
-${isAuthActive(model) ? '| `apikey` | `String` | API key for authentication. |\n' : ''}| \`base\` | \`String\` | Base URL for API requests. |
-| \`prefix\` | \`String\` | URL prefix appended after base. |
-| \`suffix\` | \`String\` | URL suffix appended after path. |
-| \`headers\` | \`Value\` | Custom headers for all requests. |
-| \`feature\` | \`Value\` | Feature configuration. |
-| \`system\` | \`Value\` | System overrides (e.g. custom fetch). |
-
+${hsOptionRows(model, (name: string) => '`' + name + '`')}
 
 ### Test constructors
 
@@ -173,7 +168,7 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` and raises 
 
     // Entity reference sections
     publishedEntities.map((ent: any) => {
-      const opnames = Object.keys(ent.op || {})
+      const opnames = entityOps(ent)
       const fields = Object.values(ent.fields || {})
       const idF = entityIdField(ent)
       const eFn = hsVarName(ent.name)
@@ -185,8 +180,8 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` and raises 
 
 `)
 
-      if (ent.short) {
-        Content(`${ent.short}
+      if (fact(ent, 'desc').inline) {
+        Content(`${fact(ent, 'desc').inline}
 
 `)
       }
@@ -207,7 +202,7 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` and raises 
 `)
         each(fields, (field: any) => {
           const req = field.r ? 'Yes' : 'No'
-          const desc = field.sh || ''
+          const desc = fact(model.main[KIT], 'field')[ent.name]?.[field.n]?.desc.cell ?? ''
           Content(`| \`${field.n}\` | \`${hsType(field.t)}\` | ${req} | ${desc} |
 `)
         })
@@ -219,7 +214,7 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` and raises 
         const hasFieldOps = fields.some((f: any) => f.op && Object.keys(f.op).length > 0)
         if (hasFieldOps) {
           const opcols = ['load', 'list', 'create', 'update', 'patch', 'remove']
-            .filter((op: string) => opnames.includes(op) && ent.op[op]?.active !== false)
+            .filter((op: string) => opnames.includes(op))
           Content(`### Field Usage by Operation
 
 | Field | ${opcols.join(' | ')} |
@@ -252,10 +247,15 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` and raises 
         opnames.map((opname: string) => {
           const info = OP_SIGNATURES[opname]
           if (!info) return
+          const needs = requiredItems(ent, opname).map((it: any) => it.name)
+          const desc = info.desc.replace(' The data must include the entity `id`.',
+            null != idF && needs.includes(idF) ? ' The data must include the entity `' + idF + '`.' : '')
+            .replace(LIST_ALL, 0 === needs.length ? LIST_ALL :
+              ' The match must include ' + needs.map((n: string) => '`' + n + '`').join(', ') + '.')
 
           Content(`#### \`${info.sig}\`
 
-${info.desc}
+${desc}
 
 `)
 
@@ -363,7 +363,7 @@ The entity name.
 
 
     // Features section
-    const activeFeatures = each(feature).filter((f: any) => f.active)
+    const activeFeatures = featureDocs(model, target)
     if (activeFeatures.length > 0) {
       Content(`
 ---
@@ -375,7 +375,7 @@ The entity name.
 `)
 
       activeFeatures.map((f: any) => {
-        Content(`| \`${f.name}\` | ${f.version || '0.0.1'} | ${f.title || ''} |
+        Content(`| \`${f.name}\` | ${f.version} | ${f.titleCell} |
 `)
       })
 

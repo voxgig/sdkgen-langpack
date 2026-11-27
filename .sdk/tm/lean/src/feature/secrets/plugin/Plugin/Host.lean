@@ -1,5 +1,5 @@
--- VENDORED: @voxgig/plugin sdk-20260908-1556-0 (lean/src/Plugin/Host.lean)
--- Source: https://github.com/voxgig/plugin @ 48392f5e2b6d1434ee9b1a4a9a11f4480aaeb46a  [tag: sdk-20260908-1556-0]
+-- VENDORED: @voxgig/plugin sdk-20261125-1959-0 (lean/src/Plugin/Host.lean)
+-- Source: https://github.com/voxgig/plugin @ 8605cdc5e68a691130ae9b585baf8c0091a66351  [tag: sdk-20261125-1959-0]
 -- License: MIT (c) voxgig - see repository LICENSE. Do not edit: resync from upstream.
 import Plugin.Capability
 import Plugin.Config
@@ -234,6 +234,21 @@ def chosen (h : HostState) (e : InstState) (req : Value) (remember : Bool)
   let first := ((cands.idx 0).get "ref").asStr
   if remember then e.selected.set ((← e.selected.get).set name (.str first))
   return some first
+
+/-- WHICH provider this instance is bound to for `name` (§11.1), as a
+ref, or `none` when nothing provides it.
+
+The host's own `capability` answers with the live providers RANKED, not
+with the one THIS instance took; §11.4's reluctant rebinding makes those
+differ. A REF, not the instance. The selection is REMEMBERED, because
+this is the instance asking. -/
+def instCapability (h : HostState) (e : InstState) (name : String)
+    : PluginM (Option String) := do
+  for r in (requirements (← e.options.get)).items do
+    let rn := r.get "name"
+    if !rn.isStr || rn.asStr != name then continue
+    return ← chosen h e r true
+  return none
 
 /-- The instance currently SELECTED for each of this one's
 restart-causing requirements. A BINDING IS TO AN INSTANCE, not to a

@@ -1,19 +1,21 @@
-import { cmp, Content } from '@voxgig/sdkgen'
+import { cmp, Content, introOps } from '@voxgig/sdkgen'
 import { KIT, getModelPath } from '@voxgig/apidef'
 
 const ReadmeIntroBody = cmp(function ReadmeIntroBody(props: any) {
   const { target, ctx$: { model } } = props
 
+  const entity = getModelPath(model, `main.${KIT}.entity`)
+  const verbs = introOps(model).map((o) => '`' + o + '`').join(', ')
+  const lead = !Object.values(entity || {}).some((e: any) => e.active !== false) ?
+    'Every operation' : 'The API is surfaced as capitalised Entities' +
+    ('' === verbs ? '' : ` with a small, uniform\nverb set (${verbs})`) + '; every operation'
+
   Content(`The ${target.title} SDK for the ${model.Name} API — an entity-oriented client
-for Lean 4. The API is surfaced as capitalised Entities with a small, uniform
-verb set (\`list\`, \`load\`, \`create\`, \`update\`, \`patch\`, \`remove\`); every operation is
+for Lean 4. ${lead} is
 driven by the embedded config through the dependency-free vendored voxgig
 \`Value\` struct model, and runs in struct's \`SIO\` monad.
 
 `)
-
-  // touch the model so a mis-shaped model surfaces here, not at render time.
-  getModelPath(model, `main.${KIT}.entity`)
 })
 
 export { ReadmeIntroBody }

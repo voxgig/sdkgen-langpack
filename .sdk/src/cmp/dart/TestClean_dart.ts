@@ -1,5 +1,5 @@
 
-import { nom } from '@voxgig/apidef'
+import { KIT, nom } from '@voxgig/apidef'
 
 import {
   cmp,
@@ -7,10 +7,7 @@ import {
   File,
   Content,
   entityCollection,
-  isAuthSuppressed,
-  isHttpBasicAuth,
-  resolveAuthIn,
-  resolveAuthName,
+  fact,
 } from '@voxgig/sdkgen'
 
 import { dartStringLiteral } from './utility_dart'
@@ -24,12 +21,12 @@ import { dartStringLiteral } from './utility_dart'
 const TestClean = cmp(function TestClean(props: any) {
   const { model } = props.ctx$
 
+  const authFact = fact(model.main[KIT], 'auth')
   const auth = {
-    suppressed: isAuthSuppressed(model),
-    where: resolveAuthIn(model),
-    name: 'header' === resolveAuthIn(model)
-      ? resolveAuthName(model).toLowerCase() : resolveAuthName(model),
-    basic: isHttpBasicAuth(model),
+    suppressed: authFact.suppressed,
+    where: authFact.in,
+    name: 'header' === authFact.in ? authFact.name.toLowerCase() : authFact.name,
+    basic: authFact.basic,
   }
 
   const rank: Record<string, number> = { list: 0, load: 1 }

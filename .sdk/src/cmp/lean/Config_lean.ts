@@ -3,16 +3,12 @@ import {
   File,
   cmp,
   each,
-  isAuthActive,
-  resolveAuthPrefix,
   targetFeatures,
   configDefinition,
 } from '@voxgig/sdkgen'
 
 import {
-  KIT,
   Model,
-  getModelPath,
 } from '@voxgig/apidef'
 
 import {
@@ -29,42 +25,21 @@ const Config = cmp(async function Config(props: any) {
 
   const model: Model = ctx$.model
 
-  const entity = getModelPath(model, `main.${KIT}.entity`)
   const { def: configDef } = configDefinition(model, target.name)
   // Gated by the applicability tags, so this target never imports or
   // registers a feature it has no source for. One rule, one place:
   // helpers/applicability.
   const feature = targetFeatures(model, target)
-  const headers = getModelPath(model, `main.${KIT}.config.headers`) || {}
-
-  const authActive = isAuthActive(model)
-  const authPrefix = resolveAuthPrefix(model)
-
-  let baseUrl = ''
-  try { baseUrl = getModelPath(model, `main.${KIT}.info.servers.0.url`) } catch (_e) { }
-
   const featureConfig: any = {}
   each(feature, (f: any) => { featureConfig[f.name] = f.config || {} })
 
-  const entityOptions: any = {}
-  each(entity, (ent: any) => { entityOptions[ent.name] = {} })
-
-  const options: any = {
-    base: baseUrl,
-    headers,
-    entity: entityOptions,
-  }
-  if (authActive) {
-    options.auth = { prefix: authPrefix }
-  }
-
-  const entityConfig = configDef.entity
-
+  // The options, server defaults and credential placement included, are
+  // configDefinition's, as every other target's config carries them.
   const config = {
     main: { name: model.const.Name },
     feature: featureConfig,
-    options,
-    entity: entityConfig,
+    options: configDef.options,
+    entity: configDef.entity,
   }
 
   File({ name: 'SdkConfig.' + target.ext }, () => {

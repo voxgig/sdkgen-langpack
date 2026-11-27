@@ -1,5 +1,5 @@
 
-import { cmp, Content, isAuthActive, envName, canonKey, opRequestShape, entityIdField, entityOps } from '@voxgig/sdkgen'
+import { cmp, Content, canonKey, opRequestShape, entityIdField, entityOps, seriesList } from '@voxgig/sdkgen'
 
 import {
   KIT,
@@ -7,7 +7,7 @@ import {
   nom,
 } from '@voxgig/apidef'
 
-import { hsVarName } from './utility_haskell'
+import { hsClient, hsVarName } from './utility_haskell'
 
 
 // A type-correct Haskell `Value` literal for a param. List/object params fall
@@ -24,6 +24,7 @@ function hsLit(type: any, placeholder: string = 'example'): string {
 
 const ReadmeQuick = cmp(function ReadmeQuick(props: any) {
   const { target, ctx$: { model } } = props
+  let step = 0
 
   const entity = getModelPath(model, `main.${KIT}.entity`)
 
@@ -40,40 +41,22 @@ const ReadmeQuick = cmp(function ReadmeQuick(props: any) {
       !it.optional && it.name !== entityIdField(e))
   ) as any
 
-  const authActive = isAuthActive(model)
-
   // The blocks below continue this one's main, so it imports what they use.
   const ioref = exampleEntity && entityOps(exampleEntity).includes('remove')
     ? 'import Data.IORef (readIORef)\n' : ''
 
-  Content(`### 1. Create a client
+  const client = hsClient(model)
+
+  Content(`### ${++step}. Create a client
 
 \`\`\`haskell
-`)
-  if (authActive) {
-    Content(`import System.Environment (lookupEnv)
-${ioref}import qualified SdkClient as Sdk
+${client.imports}${ioref}import qualified SdkClient as Sdk
 import VoxgigStruct (Value (..), emptyMap, stringify)
 import SdkHelpers (jo)
 
 main :: IO ()
 main = do
-  mkey <- lookupEnv "${envName(model)}_APIKEY"
-  opts <- jo [("apikey", maybe VNoval VStr mkey)]
-  sdk <- Sdk.newSdk opts
-`)
-  }
-  else {
-    Content(`${ioref}import qualified SdkClient as Sdk
-import VoxgigStruct (Value (..), emptyMap, stringify)
-import SdkHelpers (jo)
-
-main :: IO ()
-main = do
-  sdk <- Sdk.newSdk0
-`)
-  }
-  Content(`\`\`\`
+${client.lines}\`\`\`
 
 Entity operations return the entity, whose record \`eDataGet\` reads, and
 raise on error (via \`Control.Exception.throwIO\`). Wrap a call in
@@ -92,7 +75,7 @@ raise on error (via \`Control.Exception.throwIO\`). Wrap a call in
     const idF = entityIdField(exampleEntity)
 
     if (opnames.includes('list')) {
-      Content(`### 2. List ${eName.toLowerCase()} records
+      Content(`### ${++step}. List ${eName.toLowerCase()} records
 
 \`eList ent match ctrl\` resolves to one ENTITY per record and raises on
 error. Read a record with \`eDataGet\`.
@@ -125,7 +108,7 @@ error. Read a record with \`eDataGet\`.
         `("${it.name}", ${hsLit(it.type,
           it.name === neIdF ? 'example_id' : 'example_' + it.name)})`)
 
-      Content(`### 3. Load ${neArticle} ${neName.toLowerCase()}
+      Content(`### ${++step}. Load ${neArticle} ${neName.toLowerCase()}
 
 ${neName} is nested under ${parentName}, so provide the \`${parentParam}\`.
 \`eLoad\` resolves to the ENTITY and raises on error; \`eDataGet\` gives the
@@ -152,7 +135,7 @@ record.
             it.name === idF ? 'example_id' : 'example_' + it.name)})`).join(', ')}]`
         : '[]'
 
-      Content(`### 3. Load ${article} ${eName.toLowerCase()}
+      Content(`### ${++step}. Load ${article} ${eName.toLowerCase()}
 
 \`eLoad ent match ctrl\` resolves to the ENTITY and raises on error;
 \`eDataGet\` gives the record.
@@ -191,7 +174,8 @@ record.
 
     if (opnames.includes('create') || opnames.includes('update') || opnames.includes('patch') ||
       opnames.includes('remove')) {
-      Content(`### 4. Create, update, and remove
+      Content(`### ${++step}. ${seriesList(['create', 'update', 'patch', 'remove']
+        .filter((o: string) => opnames.includes(o))).replace(/^./, (c: string) => c.toUpperCase())}
 
 `)
       if (opnames.includes('create')) {

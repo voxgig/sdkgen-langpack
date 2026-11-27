@@ -1,5 +1,6 @@
 
 import {
+  KIT,
   Model,
   ModelEntity,
   ModelPoint,
@@ -17,6 +18,7 @@ import {
   cmp,
   snakify,
   isAuthActive, envName, envToken,
+  fact,
   serverVarEnv,
   serverVariables,
   pointParts,
@@ -41,12 +43,14 @@ const TestDirect = cmp(function TestDirect(props: any) {
   const entidEnvVar = `${PROJECTNAME}_TEST_${envToken(entity.name)}_ENTID`
 
   const authActive = isAuthActive(model)
+  const secret = fact(model.main[KIT], 'auth').secret
   const apikeyEnvEntry = authActive
-    ? `\n    '${PROJECTNAME}_APIKEY': '',`
+    ? `\n    '${PROJECTNAME}_APIKEY': '',${secret ? `\n    '${PROJECTNAME}_SECRET': '',` : ''}`
     : ''
   const apikeyLiveField = authActive
     ? `
-      'apikey': env['${PROJECTNAME}_APIKEY'],`
+      'apikey': env['${PROJECTNAME}_APIKEY'],${secret ? `
+      'secret': env['${PROJECTNAME}_SECRET'],` : ''}`
     : ''
 
   // A templated server URL (OpenAPI server variables) makes a LIVE client

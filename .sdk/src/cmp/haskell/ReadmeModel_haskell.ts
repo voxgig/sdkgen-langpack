@@ -1,12 +1,12 @@
 
-import { cmp, each, Content, isAuthActive } from '@voxgig/sdkgen'
+import { cmp, each, Content, fact, introOps, entityOps, entityPath } from '@voxgig/sdkgen'
 
 import {
   KIT,
   getModelPath,
 } from '@voxgig/apidef'
 
-import { hsVarName } from './utility_haskell'
+import { hsOptionRows, hsVarName } from './utility_haskell'
 
 
 const ReadmeModel = cmp(function ReadmeModel(props: any) {
@@ -17,9 +17,8 @@ const ReadmeModel = cmp(function ReadmeModel(props: any) {
 
   // Model-driven op rows for the shared entity record interface: emit a row
   // only for operations at least one active entity actually exposes.
-  const opUnion = new Set<string>()
-  entityList.forEach((e: any) => Object.keys(e.op || {})
-    .forEach((o: string) => { if (e.op[o] && e.op[o].active !== false) opUnion.add(o) }))
+  const opUnion = new Set<string>(introOps(model))
+  const sameOps = fact(model.main[KIT], 'sharedOps')
   const opRowDefs: Record<string, string> = {
     load: '| `eLoad` | `Value -> Value -> IO Entity` | Load a single entity by match criteria. Resolves to the entity. Raises on error. |',
     list: '| `eList` | `Value -> Value -> IO [Entity]` | List entities matching the criteria. Resolves to one entity per record. Raises on error. |',
@@ -29,11 +28,7 @@ const ReadmeModel = cmp(function ReadmeModel(props: any) {
     remove: '| `eRemove` | `Value -> Value -> IO Entity` | Remove an entity. Resolves to the entity, marked as deleted. Raises on error. |',
   }
   const opRows = ['load', 'list', 'create', 'update', 'patch', 'remove']
-    .filter((o) => opUnion.has(o)).map((o) => opRowDefs[o]).join('\n')
-
-  const apikeyOptionRow = isAuthActive(model)
-    ? '| `apikey` | `String` | API key for authentication. |\n'
-    : ''
+    .filter((o) => opUnion.has(o)).map((o) => opRowDefs[o] + '\n').join('')
 
   Content(`### Client constructors
 
@@ -53,13 +48,7 @@ makeClient = do
 
 | Option (map key) | Type | Description |
 | --- | --- | --- |
-${apikeyOptionRow}| \`base\` | \`String\` | Base URL of the API server. |
-| \`prefix\` | \`String\` | URL path prefix prepended to all requests. |
-| \`suffix\` | \`String\` | URL path suffix appended to all requests. |
-| \`headers\` | \`Value\` | Custom headers for all requests. |
-| \`feature\` | \`Value\` | Feature activation flags. |
-| \`system\` | \`Value\` | System overrides (e.g. custom \`fetch\` function). |
-
+${hsOptionRows(model, (name: string) => '`' + name + '`')}
 ### Test client
 
 \`\`\`haskell
@@ -91,12 +80,10 @@ mock transport (\`testSdk0 :: IO Client\` for the no-argument form). Pass
   Content(`
 ### Entity interface
 
-All entities share the same record interface (fields of the \`Entity\` type).
-
-| Field | Signature | Description |
+${0 === entityList.length ? '' : (sameOps ? 'All entities share the same record interface (fields of the `Entity` type).' :
+  'Each entity has only the operations its model declares; see its section below.') + '\n\n'}| Field | Signature | Description |
 | --- | --- | --- |
-${opRows}
-| \`eDataGet\` | \`IO Value\` | Get entity data. |
+${opRows}| \`eDataGet\` | \`IO Value\` | Get entity data. |
 | \`eDataSet\` | \`Value -> IO ()\` | Set entity data. |
 | \`eStream\` | \`String -> Value -> Value -> IO [Value]\` | Run an op as a lazy stream of items. |
 | \`eMake\` | \`IO Entity\` | Create a new instance with the same options. |
@@ -104,10 +91,11 @@ ${opRows}
 
 ### Result shape
 
-Entity operations resolve to the ENTITY, not the raw record \u2014 \`eList\` to
-one entity per record \u2014 and raise on error. The record is reached through
-\`eDataGet\`, which returns the entity's data container. \`eRemove\` resolves to
-the entity marked as deleted (\`eDeleted\`); it keeps the data it held. Wrap calls
+Entity operations resolve to the ENTITY, not the raw record${opUnion.has('list') ?
+  ` \u2014 \`eList\` to
+one entity per record \u2014` : ''} and raise on error. The record is reached through
+\`eDataGet\`, which returns the entity's data container.${opUnion.has('remove') ? ` \`eRemove\` resolves to
+the entity marked as deleted (\`eDeleted\`); it keeps the data it held.` : ''} Wrap calls
 in \`Control.Exception.try\` to handle failures.
 
 The \`direct\` escape hatch never raises — it returns a result \`Value\`
@@ -125,34 +113,33 @@ On error, \`ok\` is \`False\` and \`err\` carries the error value.
 `)
 
   // Entities summary
-  Content(`### Entities
+  if (0 < entityList.length) {
+    Content(`### Entities
 
 `)
+  }
   each(entityList, (ent: any) => {
     const fields = Object.values(ent.fields || {})
-    const opnames = Object.keys(ent.op || {})
-    const ops = ent.op || {}
-    const points = each(ops).map((op: any) =>
-      op.points ? each(op.points) : []
-    ).flat()
-    const path = points.length > 0 ? (points[0] as any).o || '' : ''
+    const opnames = entityOps(ent)
+    const path = entityPath(ent)
 
     Content(`#### ${ent.Name}
 
-| Field | Description |
+${0 === fields.length ? '' : `| Field | Description |
 | --- | --- |
-`)
+`}`)
     each(fields, (field: any) => {
-      Content(`| \`${field.n}\` | ${field.sh || ''} |
+      Content(`| \`${field.n}\` | ${fact(model.main[KIT], 'field')[ent.name]?.[field.n]?.desc.cell ?? ''} |
 `)
     })
 
+    // haskell's entity record holds each operation as an `e<Op>` field.
     Content(`
-Operations: ${opnames.map((n: string) => n.charAt(0).toUpperCase() + n.slice(1)).join(', ')}.
+${0 === opnames.length ? '' : `Operations: ${opnames.map((n: string) => 'e' + n.charAt(0).toUpperCase() + n.slice(1)).join(', ')}.
 
-API path: \`${path}\`
+`}${'' === path ? '' : `API path: \`${path}\`
 
-`)
+`}`)
   })
 
 })

@@ -26,6 +26,7 @@ import {
   cmp,
   each,
   isAuthActive, envName, envToken,
+  fact,
   serverVarEnv,
   serverVariables
 } from '@voxgig/sdkgen'
@@ -56,12 +57,14 @@ const TestEntity = cmp(function TestEntity(props: any) {
   const PROJENVNAME = envName(model)
   const ENTENVNAME = envToken(entity.name)
   const authActive = isAuthActive(model)
+  const secret = fact(model.main[KIT], 'auth').secret
   const apikeyEnvEntry = authActive
-    ? `\n    '${PROJENVNAME}_APIKEY': '',`
+    ? `\n    '${PROJENVNAME}_APIKEY': '',${secret ? `\n    '${PROJENVNAME}_SECRET': '',` : ''}`
     : ''
   const apikeyLiveField = authActive
     ? `
-        'apikey': env['${PROJENVNAME}_APIKEY'],`
+        'apikey': env['${PROJENVNAME}_APIKEY'],${secret ? `
+        'secret': env['${PROJENVNAME}_SECRET'],` : ''}`
     : ''
 
   // A templated server URL (OpenAPI server variables) makes a LIVE client

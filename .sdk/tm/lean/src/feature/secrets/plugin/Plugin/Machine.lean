@@ -1,5 +1,5 @@
--- VENDORED: @voxgig/plugin sdk-20260908-1556-0 (lean/src/Plugin/Machine.lean)
--- Source: https://github.com/voxgig/plugin @ 48392f5e2b6d1434ee9b1a4a9a11f4480aaeb46a  [tag: sdk-20260908-1556-0]
+-- VENDORED: @voxgig/plugin sdk-20261125-1959-0 (lean/src/Plugin/Machine.lean)
+-- Source: https://github.com/voxgig/plugin @ 8605cdc5e68a691130ae9b585baf8c0091a66351  [tag: sdk-20261125-1959-0]
 -- License: MIT (c) voxgig - see repository LICENSE. Do not edit: resync from upstream.
 import Plugin.Host
 
@@ -97,6 +97,7 @@ partial def instApi (h : HostState) (e : InstState) : InstApi := {
   bindChain := fun p f band => instBind h e p none (some f) band
   exportValue := fun k v => do e.exports.set ((← e.exports.get).set k v)
   provides := fun p => do e.provides.set ((← e.provides.get).push p)
+  capability := fun n => instCapability h e n
   acquire := instAcquire h e
   giveback := instGiveback h e
   release := instRelease h e

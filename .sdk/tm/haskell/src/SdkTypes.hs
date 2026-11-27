@@ -114,7 +114,7 @@ data Entity = Entity
   -- | Every operation resolves to the ENTITY, not the raw data — 'eList' to
   -- one per record. The record is reached through 'eDataGet'. 'Value' cannot
   -- carry an entity (it is a closed data union), so the CONTRACT lives in
-  -- these signatures. See AGENTS.md "Entity operations return ENTITIES".
+  -- these signatures.
   , eLoad    :: Value -> Value -> IO Entity
   , eList    :: Value -> Value -> IO [Entity]
   , eCreate  :: Value -> Value -> IO Entity

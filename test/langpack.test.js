@@ -26,7 +26,7 @@ const Path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
 const { stageConsumer, generateInto } = require('@voxgig/sdkgen/testkit')
-const { cmp, each, names, Project, Folder, ReadmeTop, Entity, Readme } = require('@voxgig/sdkgen')
+const { cmp, each, names, fact, Project, Folder, ReadmeTop, Entity, Readme } = require('@voxgig/sdkgen')
 
 const { PKG, TARGETS, CHILD, compile, consumerModel } = require('./stage')
 
@@ -110,6 +110,54 @@ main: kit: flow: BasicSatelliteFlow: {
 `,
 }
 
+// One active entity, with a list and nothing else.
+const LIST_ONLY = `
+main: kit: entity: planet: active: false
+main: kit: entity: comet: {
+  alias: field: {}
+  name: "comet"
+  fields: { "name": { h: 'Name', n: "name", r: false, t: "\`$STRING\`" } }
+  op: list: { name: "list", points: [ {
+    g: {}, m: "GET", o: "/comet", s: [{ lit: "comet" }]
+    t: { req: "\`reqdata\`", res: "\`body\`" }
+  } ] }
+}
+main: kit: flow: BasicCometFlow: {
+  entity: "comet", kind: "basic", name: "BasicCometFlow"
+  step: [ { o: "list" } ]
+}
+`
+
+// The credential and server shapes a constructor's options follow.
+const AUTH_MODELS = {
+  off: '',
+  bearer: "main: kit: config: auth: { active: true, prefix: 'Bearer' }",
+  query: "main: kit: config: auth: { active: true, prefix: '', in: 'query', name: 'api_key' }",
+  basic: "main: kit: config: auth: { active: true, prefix: 'Basic', basic: true }",
+  server: "main: kit: info: servers: [ { url: 'https://{tenant}.example.com/{version}', " +
+    "variables: { tenant: { description: 'The tenant' }, version: { default: 'v1' } } } ]",
+}
+
+// The option names each options table lists: a table headed Option, or one
+// a constructor's Parameters or Options line leads into.
+function optionTables(text) {
+  const tables = []
+  const lines = String(text).split('\n')
+  lines.forEach((line, i) => {
+    const head = /^\| ([^|]+?) \| Type \| Description \|$/.exec(line)
+    const lead = lines.slice(Math.max(0, i - 2), i).join(' ')
+    if (null == head || !(/^Option/.test(head[1]) ||
+      (/^(Name|Key)$/.test(head[1]) && /\*\*(Parameters|Options)\b/.test(lead)))) return
+    const rows = []
+    for (let j = i + 2; j < lines.length && lines[j].startsWith('|'); j++) {
+      const cell = /^\| `(?:options\['([a-z]+)'\]|([a-z]+))` \|/.exec(lines[j])
+      if (null != cell && 'options' !== (cell[1] || cell[2])) rows.push({ name: cell[1] || cell[2], line: lines[j] })
+    }
+    if (0 < rows.length) tables.push(rows)
+  })
+  return tables
+}
+
 // The branch each model is there to show.
 const DOC_MODEL_SHOWS = {
   crud: [['dart/README.md', 'client.Planet().remove('], ['haskell/README.md', 'Sdk.eRemove ']],
@@ -119,7 +167,8 @@ const DOC_MODEL_SHOWS = {
     ['haskell/README.md', '### 3. Load a satellite']],
 }
 
-// The pages a reader sees. ReadmeTop is the only route to each target's
+// The pages a reader sees, written where the root plan facts place them, as
+// the standard Root does. ReadmeTop is the only route to each target's
 // ReadmeTopQuick and ReadmeTopTest.
 function docsRoot() {
   return cmp(function Root(props) {
@@ -131,19 +180,25 @@ function docsRoot() {
     ctx$.stdrep = ctx$.stdrep || {}
     names(ctx$.stdrep, model.Name, 'ProjectName')
 
-    const { target, entity } = model.main.kit
+    const kit = model.main.kit
     Project({}, () => {
-      ReadmeTop({})
-      each(target).filter((t) => false !== t.active).map((t) => {
+      if (fact(kit, 'top')) ReadmeTop({})
+      for (const name of fact(kit, 'active')) {
+        const t = kit.target[name]
         names(t, t.name)
-        Folder({ name: t.name }, () => {
-          each(entity).filter((e) => false !== e.active).map((e) => {
-            names(e, e.name)
-            Entity({ target: t, entity: e })
-          })
-          Readme({ target: t })
-        })
-      })
+        const phase = fact(t, 'phase')
+        const pages = () => {
+          if (phase.entity) {
+            each(kit.entity).filter((e) => false !== e.active).map((e) => {
+              names(e, e.name)
+              Entity({ target: t, entity: e })
+            })
+          }
+          if (phase.readme) Readme({ target: t })
+        }
+        if ('root' === fact(t, 'place')) pages()
+        else Folder({ name: t.name }, pages)
+      }
     })
   })
 }
@@ -514,6 +569,15 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // The corpus comes from the scaffold, not the port's tag, so a case the
+  // vendored port cannot settle can allocate without bound.
+  test('the haskell test runner caps its heap', () => {
+    const make = String(generated.files['haskell/Makefile'])
+    ok(/^\tghc [^\n]*-with-rtsopts=-M\d+[gm]\b[^\n]*-o \$\(BUILDDIR\)\/runner /m.test(make),
+      'haskell: make test links the runner with no heap cap:\n' + make)
+  })
+
+
   // A PATCH beside a PUT is a sixth operation, `patch`, which every target
   // generates as it does `update`: its own entry, under its own name.
   test('every target generates the patch operation', () => {
@@ -826,6 +890,372 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // introOps names what the active entities have, and no default set.
+  test('each introduction names only the operations the entities have', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, LIST_ONLY), root: docsRoot(),
+    })
+    const VERBS = { dart: '`list`', haskell: '`eList`', lean: '`list`' }
+    for (const target of TARGETS) {
+      const intro = String(files[target + '/README.md']).split('\n## ')[0]
+      ok(intro.includes('(' + VERBS[target] + ')'),
+        target + ': the introduction does not name the list operation alone:\n' + intro)
+      ok(!/`e?(?:[Ll]oad|[Cc]reate|[Uu]pdate|[Pp]atch|[Rr]emove)`/.test(intro),
+        target + ': the introduction names an operation no entity has:\n' + intro)
+    }
+  })
+
+
+  // The rows come from sdkgen's clientOptions, less what a runtime does not read.
+  test('each options table lists what the constructor takes', async () => {
+    const LISTS = {
+      off: { dart: [], haskell: [], lean: [] },
+      bearer: { dart: ['apikey'], haskell: ['apikey'], lean: ['apikey'] },
+      query: { dart: ['apikey'], haskell: ['apikey'], lean: ['apikey'] },
+      basic: { dart: ['apikey', 'secret'], haskell: ['apikey', 'secret'], lean: ['apikey', 'secret'] },
+      server: { dart: ['server'], haskell: ['server'], lean: ['server'] },
+    }
+    for (const [shape, extra] of Object.entries(AUTH_MODELS)) {
+      const { files } = await generateInto(consumer, {
+        model: consumerModel(consumer.sdk, extra), root: docsRoot(),
+      })
+      for (const target of TARGETS) {
+        const tables = ['README.md', 'REFERENCE.md']
+          .flatMap((page) => optionTables(files[target + '/' + page]))
+        ok(0 < tables.length, shape + ' ' + target + ': no options table')
+        for (const rows of tables) {
+          const names = rows.map((r) => r.name)
+          ok(names.includes('base'), shape + ' ' + target + ': a table without base: ' + names)
+          deepStrictEqual(names.filter((n) => ['apikey', 'secret', 'server'].includes(n)),
+            LISTS[shape][target], shape + ' ' + target + ': the credential and server rows')
+          deepStrictEqual(rows.filter((r) => /authorization/i.test(r.line)).map((r) => r.line), [],
+            shape + ' ' + target + ': a row names the authorization header')
+        }
+      }
+    }
+  })
+
+
+  // Both lean quick starts construct the client from the same options.
+  test('lean quick starts pass the API key the API needs, from <ENV>_APIKEY', async () => {
+    const APIKEY = '("apikey", .str ((← IO.getEnv "DEMO_APIKEY").getD ""))'
+    for (const [shape, extra] of [['off', AUTH_MODELS.off], ['bearer', AUTH_MODELS.bearer]]) {
+      const { files } = await generateInto(consumer, {
+        model: consumerModel(consumer.sdk, extra), root: docsRoot(),
+      })
+      const starts = ['README.md', 'lean/README.md'].map((path) =>
+        codeBlocks(files[path], 'lean').find((code) => /^def main\b/m.test(code)))
+      for (const code of starts) {
+        ok(null != code, shape + ': a lean quick start is missing')
+        const ctor = (/Sdk\.newSdk (.*)$/m.exec(code) || [])[1]
+        strictEqual(ctor, 'bearer' === shape ? '(← newMap #[' + APIKEY + '])' : '(← emptyMap)',
+          shape + ': the lean client options:\n' + code)
+      }
+    }
+  })
+
+
+  // A README describes its own target, and names no sibling the project may lack.
+  test('the lean README compares its Value to no other SDK', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, ''), root: docsRoot(),
+    })
+    const readme = String(files['lean/README.md'])
+    ok(/vendored voxgig `Value`/.test(readme), 'lean: the README no longer describes its Value')
+    ok(!/\b(Go|Python) SDKs?\b/.test(readme), 'lean: the README names the Go or Python SDK')
+  })
+
+
+  // The per-entity test data exists only where the build phase writes it.
+  test('the lean how-to names a seed file only where the build phase writes one', async () => {
+    const readme = async (extra) => String((await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, extra), root: docsRoot(),
+    })).files['lean/README.md'])
+
+    ok((await readme('')).includes(
+      'IO.FS.readFile "../.sdk/test/entity/planet/PlanetTestData.json"'),
+    'lean: the how-to does not read the planet test data from the path back to .sdk')
+    const off = await readme('main: kit: phase: build: active: false')
+    ok(!off.includes('.sdk/test/entity'), 'lean: the how-to names test data the build did not write')
+    ok(off.includes('match (← Planet.load sdk m (← emptyMap)) with'),
+      'lean: the missing-record how-to does not load a planet')
+
+    const atRoot = String((await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, 'main: kit: phase: top: active: false\n' +
+        'main: kit: target: lean: output: root: true'),
+      root: docsRoot(),
+    })).files['README.md'])
+    ok(atRoot.includes('IO.FS.readFile ".sdk/test/entity/planet/PlanetTestData.json"'),
+      'lean: at the project root, the how-to does not read the test data from .sdk')
+  })
+
+
+  // One package name, whichever route a reader takes to it.
+  test('the haskell install and layout name the package the cabal file declares', async () => {
+    for (const state of ['active', 'pending']) {
+      const { files } = await generateInto(consumer, {
+        model: consumerModel(consumer.sdk, 'active' === state ?
+          'main: kit: target: haskell: publish: registry: active: true' : ''),
+      })
+      const cabal = Object.keys(files).filter((p) => /^haskell\/[^/]+\.cabal$/.test(p))
+      strictEqual(cabal.length, 1, state + ': the cabal files: ' + cabal)
+      const name = (/^name:\s+(\S+)$/m.exec(files[cabal[0]]) || [])[1]
+      strictEqual(cabal[0], 'haskell/' + name + '.cabal', state + ': the cabal file is named for its package')
+      const readme = String(files['haskell/README.md'])
+      ok(readme.includes('└── ' + name + '.cabal '), state + ': the layout names another cabal file')
+      deepStrictEqual(codeBlocks(readme, 'bash').filter((code) => '' === code.trim()), [],
+        state + ': an empty install block')
+      if ('active' === state) {
+        ok(readme.includes('cabal install ' + name + '\n'), 'the install command names another package')
+      }
+    }
+  })
+
+
+  // sdkgen's packageName reads a declared name first, and so does the pubspec.
+  test('a declared dart package name is the one the pubspec and the root README give', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk,
+        "main: kit: target: dart: publish: registry: package: 'acme_demo'"),
+      top: true,
+    })
+    strictEqual((/^name: (\S+)$/m.exec(files['dart/pubspec.yaml']) || [])[1], 'acme_demo',
+      'dart: the pubspec name')
+    ok(/^\| Dart \| `acme_demo` \|/m.test(String(files['README.md'])),
+      'the root README Packages row names another dart package')
+    ok(String(files['dart/README.md']).includes("import 'package:acme_demo/DemoSDK.dart';"),
+      'dart: the README imports another package')
+  })
+
+
+  // A feature a target cannot carry is in no table of that target's.
+  test('the reference feature tables list the features that apply to the target', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk,
+        "main: kit: feature: elsewhere: { active: true, title: 'Elsewhere only', " +
+        'needs: { nonesuch: true } }'),
+      root: docsRoot(),
+    })
+    for (const target of ['dart', 'haskell']) {
+      const ref = String(files[target + '/REFERENCE.md'])
+      ok(/^\| `test` \| [^|]+ \| /m.test(ref), target + ': the reference lists no test feature')
+      ok(!/`elsewhere`/.test(ref), target + ': the reference lists a feature that does not apply')
+    }
+  })
+
+
+  // Text from the spec reaches a table cell escaped, from sdkgen's facts.
+  test('table rows keep their cell count with a pipe and a newline in a description', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk,
+        'main: kit: entity: planet: fields: title: sh: "First line | with a pipe\\nsecond line"\n' +
+        "main: kit: text: entity_desc: planet: 'A planet, as the project says.'"),
+      root: docsRoot(),
+    })
+    const cells = (row) => row.split(/(?<!\\)\|/).length
+    for (const target of ['dart', 'haskell']) {
+      for (const page of ['README.md', 'REFERENCE.md']) {
+        const lines = String(files[target + '/' + page]).split('\n')
+        const broken = []
+        lines.forEach((line, i) => {
+          if (!/^\| ?-+/.test(line) || !lines[i - 1].startsWith('|')) return
+          const want = cells(lines[i - 1])
+          for (let j = i + 1; j < lines.length && lines[j].startsWith('|'); j++) {
+            if (want !== cells(lines[j])) broken.push(lines[j])
+          }
+        })
+        deepStrictEqual(broken, [], target + ' ' + page + ': rows that lost their cell count')
+        ok(String(files[target + '/' + page]).includes('First line \\| with a pipe<br>second line'),
+          target + ' ' + page + ': the description is not in its escaped cell form')
+      }
+      ok(String(files[target + '/README.md']).includes('A planet, as the project says.'),
+        target + ': the README does not take the project\'s entity description')
+    }
+  })
+
+
+  // Operation prose follows each entity's operations, as sdkgen's does.
+  test('the reference prose names only the operations the entities have', async () => {
+    const docs = async (extra) => (await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, extra), root: docsRoot(),
+    })).files
+
+    const only = await docs(LIST_ONLY)
+    for (const [target, op] of [['dart', 'list'], ['haskell', 'eList']]) {
+      const readme = String(only[target + '/README.md'])
+      const iface = readme.split('### Entity interface')[1].split('###')[0]
+      ok(/All entities share the same/.test(iface), target + ': one entity shares its own interface')
+      deepStrictEqual([...iface.matchAll(/^\| `(e?(?:[Ll]oad|[Ll]ist|[Cc]reate|[Uu]pdate|[Pp]atch|[Rr]emove))` \|/gm)]
+        .map((m) => m[1]), [op],
+        target + ': the interface rows for a list-only API')
+      const shape = readme.split('### Result shape')[1].split('###')[0]
+      ok(!/remove|eRemove|deleted/.test(shape), target + ': the result shape describes a remove no entity has')
+      ok(readme.includes('Operations: ' + op + '.\n'), target + ': the Operations line spells another method')
+    }
+    ok(/^### Comet$/m.test(String(only['lean/README.md'])) &&
+      String(only['lean/README.md']).includes('| `list` | `Comet.list sdk match (← emptyMap)` |'),
+    'lean: the README has no section for the comet entity')
+
+    const mixed = await docs(CHILD)
+    for (const target of ['dart', 'haskell']) {
+      ok(/Each entity has only the operations its model declares/.test(String(mixed[target + '/README.md'])),
+        target + ': entities with different operations are said to share one interface')
+      const ref = String(mixed[target + '/REFERENCE.md'])
+      const moon = (ref.split(/^## (?:Moon\b.*|MoonEntity)$/m)[1] || '').split(/^## /m)[0]
+      ok('' !== moon, target + ': no moon section in the reference')
+      ok(/The match must include `planet_id`\./.test(moon) && !/list all records/.test(moon),
+        target + ': the moon list is said to need no argument')
+    }
+  })
+
+
+  // A quick start's steps are numbered without a gap, and the constructor
+  // takes what the API needs from the caller.
+  test('the quick starts number their steps and pass what the constructor needs', async () => {
+    const docs = async (extra) => (await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, extra), root: docsRoot(),
+    })).files
+    const steps = (readme) => [...String(readme).split('## Tutorial')[1].split('\n## ')[0]
+      .matchAll(/^### (\d+)\. (.*)$/gm)].map((m) => m[1] + ' ' + m[2])
+
+    const only = await docs(LIST_ONLY)
+    for (const target of ['dart', 'haskell']) {
+      deepStrictEqual(steps(only[target + '/README.md']), ['1 Create a client', '2 List comet records'],
+        target + ': the list-only tutorial steps')
+    }
+    const crud = await docs('')
+    for (const target of ['dart', 'haskell']) {
+      deepStrictEqual(steps(crud[target + '/README.md']).slice(-1), ['4 Create, update, and patch'],
+        target + ': the last step names the operations it shows')
+    }
+
+    const quick = (files, target) => ['README.md', target + '/README.md']
+      .map((path) => codeBlocks(files[path], target).find((code) => /newSdk|SDK\(/.test(code)))
+    const server = await docs(AUTH_MODELS.server)
+    for (const code of quick(server, 'dart')) {
+      ok(/'server': \{'tenant': '<tenant>'\},/.test(code) && !/'version'/.test(code),
+        'dart: the quick start does not pass the required server variable alone:\n' + code)
+    }
+    for (const code of quick(server, 'haskell')) {
+      ok(code.includes('server <- jo [("tenant", VStr "<tenant>")]') && code.includes('("server", server)'),
+        'haskell: the quick start does not pass the required server variable:\n' + code)
+    }
+    const basic = await docs(AUTH_MODELS.basic)
+    for (const code of quick(basic, 'dart')) {
+      ok(code.includes("'secret': Platform.environment['DEMO_SECRET'],"),
+        'dart: the quick start does not pass the Basic secret:\n' + code)
+    }
+    for (const code of quick(basic, 'haskell')) {
+      ok(code.includes('msecret <- lookupEnv "DEMO_SECRET"') &&
+        code.includes('("secret", maybe VNoval VStr msecret)'),
+      'haskell: the quick start does not pass the Basic secret:\n' + code)
+    }
+  })
+
+
+  // sdkgen's explanation has no row for a pack language's entity state.
+  test('dart and haskell explain their entity state, lean has none to explain', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, ''), root: docsRoot(),
+    })
+    for (const [target, make] of [['dart', '`make()`'], ['haskell', '`eMake`']]) {
+      const state = String(files[target + '/README.md']).split('### Entity state')[1]
+      ok(null != state, target + ': the README has no entity state section')
+      ok(state.split('\n### ')[0].includes('Call ' + make), target + ': the section names no ' + make)
+    }
+    ok(!/### Entity state|Entity instances are stateful/.test(String(files['lean/README.md'])),
+      'lean: the README explains an entity state lean does not have')
+    ok(!/--\s*Built-in features|\b(?:base|test|log), \.\.\./.test(String(files['dart/README.md'])),
+      'dart: the package tree names features the SDK may not have')
+  })
+
+
+  // A how-to names what the tests read, a route the API has, and the
+  // directory the target is in.
+  test('the how-tos name the tests\' variables, a real route and the target\'s directory', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, AUTH_MODELS.basic + '\n' + AUTH_MODELS.server),
+      top: true,
+    })
+    const code = Object.entries(files)
+      .filter(([p]) => p.startsWith('dart/') && !p.endsWith('.md')).map(([, v]) => v).join('\n')
+    const named = [...new Set([...String(files['dart/README.md'])
+      .matchAll(/\bDEMO_[A-Z0-9_]*[A-Z0-9]\b/g)].map((m) => m[0]))]
+    deepStrictEqual(named.filter((n) => !code.includes("'" + n + "'")), [],
+      'dart: the README names variables no generated test reads')
+    for (const n of ['DEMO_TEST_LIVE', 'DEMO_APIKEY', 'DEMO_SECRET', 'DEMO_SERVER_TENANT']) {
+      ok(named.includes(n), 'dart: the live how-to does not name ' + n)
+    }
+    ok(!/_TEST_LIVE/.test(String(files['haskell/README.md'])),
+      'haskell: the README documents a live suite haskell does not have')
+
+    const routes = new Set(['/planet', '/planet/{id}'])
+    for (const path of ['README.md', 'dart/README.md', 'haskell/README.md']) {
+      const used = [...String(files[path]).matchAll(/'path': '([^']*)'|\("path", VStr "([^"]*)"\)/g)]
+        .map((m) => m[1] || m[2])
+      ok(0 < used.length, path + ': no direct example')
+      deepStrictEqual(used.filter((r) => !routes.has(r)), [], path + ': a direct example calls a route the API lacks')
+    }
+
+    const atRoot = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, 'main: kit: phase: top: active: false\n' +
+        'main: kit: target: dart: output: root: true'),
+      root: docsRoot(),
+    })
+    const rootReadme = atRoot.files['README.md']
+    ok(null != rootReadme && null == atRoot.files['dart/README.md'],
+      'dart: a target at the project root does not write its README there')
+    ok(!/\bcd dart\b/.test(String(rootReadme)),
+      'dart: the README enters a dart directory a root target does not have')
+  })
+
+
+  // lean's config carries what the other targets' configs carry.
+  test('the lean config carries the server defaults and the credential placement', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, AUTH_MODELS.query + '\n' + AUTH_MODELS.server),
+    })
+    const config = String(files['lean/src/SdkConfig.lean'])
+    ok(config.includes('\\"server\\":{\\"tenant\\":\\"\\",\\"version\\":\\"v1\\"}'),
+      'lean: the config has no server defaults:\n' + config.slice(0, 600))
+    ok(config.includes('\\"in\\":\\"query\\"') && config.includes('\\"name\\":\\"api_key\\"'),
+      'lean: the config has no credential placement')
+  })
+
+
+  // The option spec is the model's, so an option the model adds is accepted.
+  test('an option added to main.kit.optspec reaches each runtime\'s option spec', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, "main: kit: optspec: region: ''"),
+    })
+    ok(/^\s+'region': '',$/m.test(String(files['dart/lib/Schema.dart'])),
+      'dart: the generated option spec has no region')
+    ok(String(files['haskell/src/SdkSchema.hs']).includes('("region", (CVStr ""))'),
+      'haskell: the generated option spec has no region')
+    ok(/^import '\.\.\/Schema\.dart';$/m.test(String(files['dart/lib/utility/MakeOptionsUtility.dart'])) &&
+      String(files['dart/lib/utility/MakeOptionsUtility.dart']).includes('final optspec = makeOptspec();'),
+    'dart: makeOptions does not validate against the generated spec')
+    ok(String(files['haskell/src/SdkRuntime.hs']).includes('optspec <- optSpec\n') &&
+      !/^optSpecValue\b/m.test(String(files['haskell/src/SdkRuntime.hs'])),
+    'haskell: makeOptions does not validate against the generated spec')
+
+    const dartSpec = String(files['dart/lib/Schema.dart'])
+    ok(['secret', 'in', 'name'].every((key) => new RegExp("^\\s+'" + key + "': '',$", 'm').test(dartSpec)),
+      'dart: the generated option spec refuses the secret or the placement a config declares')
+    const hsSpec = String(files['haskell/src/SdkSchema.hs'])
+    ok(['secret', 'in', 'name'].every((key) => hsSpec.includes('("' + key + '", (CVStr ""))')),
+      'haskell: the generated option spec refuses the secret or the placement a config declares')
+
+    ok(String(files['dart/lib/utility/CleanUtility.dart']).includes("makeOptspec()['clean']"),
+      'dart: the clean defaults are not the generated spec\'s')
+    ok(String(files['haskell/src/SdkRuntime.hs']).includes('clean <- flip getp "clean" =<< optSpec'),
+      'haskell: the clean defaults are not the generated spec\'s')
+    const lean = String(files['lean/src/SdkUtility.lean'])
+    const makeOptions = lean.slice(lean.indexOf('def makeOptions '), lean.indexOf('def makeContext '))
+    ok(!/\bvalidate\b/.test(makeOptions), 'lean: makeOptions validates the options')
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {
@@ -851,6 +1281,17 @@ describe('sdkgen-langpack', () => {
     deepStrictEqual([...new Set(said)], [], 'pages that say an operation returns a record')
   })
 })
+
+
+// A bundled feature installs itself active, so a project switches one off in
+// its own copy of the feature's model; an overlay of `active: false` would
+// not unify with the copy's `active: true`.
+function switchOff(consumer, name) {
+  const file = Path.join(consumer.sdk, 'model', 'feature', name + '.aontu')
+  const src = Fs.readFileSync(file, 'utf8')
+  ok(/^ {2}active: true$/m.test(src), name + ': the installed feature model does not declare itself active')
+  Fs.writeFileSync(file, src.replace(/^ {2}active: true$/m, '  active: false'))
+}
 
 
 // THE DART SECRETS SEAM, and the two hazards only dart has.
@@ -898,6 +1339,7 @@ describe('sdkgen-langpack: dart secrets', () => {
         'plugin: { vault: active: true aws: active: true } }'),
     })).files
 
+    switchOff(consumer, 'secrets')
     plain = (await generateInto(consumer, {
       model: consumerModel(consumer.sdk),
     })).files
@@ -1016,10 +1458,11 @@ describe('sdkgen-langpack: dart secrets', () => {
   // model is compiled twice on purpose: the add actions read `actx.model`
   // and nothing recompiles it mid-process, so the copy `setModel` installs
   // has to carry the activation the later generate compiles again.
-  async function generateSecrets(extra) {
+  async function generateSecrets(extra, off) {
     const consumer = stageConsumer({ recordLog: true })
     try {
       await consumer.add('feature', 'secrets')
+      if (off) switchOff(consumer, 'secrets')
       consumer.setModel(consumerModel(consumer.sdk, extra))
       await consumer.addPackage(PKG)
       consumer.compile()
@@ -1177,8 +1620,7 @@ describe('sdkgen-langpack: dart secrets', () => {
     // keeps `feature.trim: false`, so `target add` leaves every feature's
     // source in place and this generate-time exclude is the trim), the
     // markers are blank, and lakefile and Makefile carry nothing of it.
-    const { files: off } = await generateSecrets(
-      'main: kit: feature: secrets: { active: false }')
+    const { files: off } = await generateSecrets('', true)
     deepStrictEqual(Object.keys(off).filter((p) => /src\/feature\/secrets\//.test(p)), [],
       'lean: an inactive model still ships the secrets container')
     const offclean = (files, label) => {
@@ -1196,11 +1638,90 @@ describe('sdkgen-langpack: dart secrets', () => {
     offclean(off, 'an inactive model')
 
     // And this suite's own shared consumer, which HAS the feature installed
-    // but never activates it in its model: the same three files must be
+    // and switched off in its copy of the model: the same three files must be
     // clean there too. (In sdkgen this was the whole-suite consumer, which
     // had no feature added at all; here the stronger case is the one that
     // has the sources on disk and still must emit none of them.)
     offclean(plain, 'a model without the feature')
+  })
+})
+
+
+// A generated source comment states its rule, and names no document a project
+// may not have and no list of features a project may not carry.
+describe('generated source comments', () => {
+  test('no fragment, template or component cites the agent guide or lists the wrapping features', () => {
+    const files = []
+    const walk = (dir) => {
+      for (const e of Fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = Path.join(dir, e.name)
+        if (e.isDirectory()) walk(p)
+        else files.push(p)
+      }
+    }
+    walk(Path.join(PKG, '.sdk', 'tm'))
+    walk(Path.join(PKG, '.sdk', 'src', 'cmp'))
+    const found = []
+    for (const file of files) {
+      const src = Fs.readFileSync(file, 'utf8')
+      if (src.includes('VENDORED:')) continue
+      if (/AGENTS\.md|retry\/cache\/netsim|\(retry, timeout, ratelimit|no retry,\s+(?:--\s+|\/\/\s+)?ratelimit/.test(src)) {
+        found.push(Path.relative(PKG, file))
+      }
+    }
+    deepStrictEqual(found, [], 'sources that cite the agent guide or list the wrapping features')
+  })
+})
+
+
+// Where the credential travels, read from the config's auth at run time.
+describe('credential placement in the templates', () => {
+  const TM = Path.join(PKG, '.sdk', 'tm')
+
+  test('dart: Basic is a header scheme, and the key goes where auth.in says', () => {
+    const src = Fs.readFileSync(Path.join(TM, 'dart/lib/utility/PrepareAuthUtility.dart'), 'utf8')
+    ok(src.includes("if ('header' == where && true == vs.getpath(options, 'auth.basic'))"),
+      'dart: the Basic branch is not gated on the header placement')
+    ok(src.includes("vs.setprop(spec.query, name, apikey.toString())") &&
+      src.includes('_setCookie(spec.headers, name, apikey.toString())'),
+    'dart: prepareAuth places no credential in the query or a cookie')
+    ok(!/HEADER_auth|'authorization'/.test(src), 'dart: prepareAuth names the authorization header itself')
+
+    const suite = Fs.readFileSync(Path.join(TM, 'dart/test/pipeline_test.dart'), 'utf8')
+    ok(suite.includes("test('Basic under query placement sets no authorization header'"),
+      'dart: the pipeline suite does not run Basic under query placement')
+  })
+
+  test('lean: a templated base needs its variables, and Basic joins the key and the secret in a header', () => {
+    const util = Fs.readFileSync(Path.join(TM, 'lean/src/SdkUtility.lean'), 'utf8')
+    ok(util.includes('def resolveServer (config opts : Value) (testmode : Bool) : SIO Unit := do') &&
+      util.includes("else if testmode then url := url.replace ph (\"test-\" ++ name)"),
+    'lean: no server-variable rule in SdkUtility')
+    ok(util.includes('if place == "header" && (← gp (← gp options "auth") "basic") == .bool true then do'),
+      'lean: prepareAuth has no Basic branch gated on the header placement')
+    const runtime = Fs.readFileSync(Path.join(TM, 'lean/src/SdkRuntime.lean'), 'utf8')
+    ok(runtime.includes('SdkUtility.resolveServer config opts testmode'),
+      'lean: a client is constructed without resolving its server variables')
+
+    const suite = Fs.readFileSync(Path.join(TM, 'lean/test/TPipeline.lean'), 'utf8')
+    for (const name of ['resolveServer: a live client refuses a variable with no value',
+      'prepareAuth: Basic under query placement sets no authorization header']) {
+      ok(suite.includes('"' + name + '"'), 'lean: the pipeline suite does not check ' + name)
+    }
+  })
+
+  test('haskell: Basic joins the key and the secret in a header, and the key goes where auth.in says', () => {
+    const src = Fs.readFileSync(Path.join(TM, 'haskell/src/SdkRuntime.hs'), 'utf8')
+    ok(src.includes('else if "header" == place && isTrueV basicV') &&
+      src.includes('b64 = base64Encode (apikeyStr ++ ":" ++ pass)'),
+    'haskell: prepareAuth has no Basic branch gated on the header placement')
+
+    const suite = Fs.readFileSync(Path.join(TM, 'haskell/test/TPipeline.hs'), 'utf8')
+    for (const name of ['prepare_auth.basic_header_joins_key_and_secret',
+      'prepare_auth.basic_in_query_sets_no_authorization_header',
+      'prepare_auth.query_placement_named_key_no_header']) {
+      ok(suite.includes('runTest c "' + name + '"'), 'haskell: the pipeline suite does not run ' + name)
+    }
   })
 })
 
@@ -1301,5 +1822,32 @@ describe('the test mock in the templates', () => {
   test('every target the pack provides has its mock guarded', () => {
     deepStrictEqual(Object.keys(WRAP).sort(), [...TARGETS].sort())
     deepStrictEqual(Object.keys(SPLIT).sort(), [...TARGETS].sort())
+  })
+})
+
+
+// Each struct corpus runner fails at run time on a validate group the corpus
+// holds and its table leaves out; the three tables must also agree.
+describe('the struct corpus runners in the templates', () => {
+  const TM = Path.join(PKG, '.sdk', 'tm')
+
+  const groups = (file, start, end, re) => {
+    const src = Fs.readFileSync(Path.join(TM, file), 'utf8')
+    const from = src.indexOf(start)
+    ok(-1 < from, file + ': no validate group table')
+    const body = src.slice(from, src.indexOf(end, from))
+    return [...body.matchAll(re)].map((m) => m[1] + ':' + m[2].toLowerCase()).sort()
+  }
+
+  test('dart, haskell and lean run the same validate groups with the same null flags', () => {
+    const dart = groups('dart/test/struct_test.dart', 'const _validateGroups = {', '};',
+      /'(\w+)': (true|false)/g)
+    const haskell = groups('haskell/test/StructCorpus.hs', 'validateGroups =', ']',
+      /\("(\w+)", (True|False)\)/g)
+    const lean = groups('lean/test/StructCorpus.lean', 'def validateGroups', ']',
+      /\("(\w+)", (true|false)\)/g)
+    ok(0 < dart.length, 'dart: the validate group table is empty')
+    deepStrictEqual(haskell, dart, 'haskell and dart run different validate groups')
+    deepStrictEqual(lean, dart, 'lean and dart run different validate groups')
   })
 })

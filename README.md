@@ -10,7 +10,9 @@ voxgig-sdkgen package add @voxgig/sdkgen-langpack
 npm run generate
 ```
 
-That installs all three targets. To take just one:
+That installs all three targets. The pack needs `@voxgig/sdkgen` 4.48.0 or
+later, so a project updates sdkgen before it updates the pack. To take just
+one:
 
 ```bash
 voxgig-sdkgen target add @voxgig/sdkgen-langpack/dart
@@ -127,7 +129,7 @@ groups' files trimmed from the tree, the secrets suite registered, and a
 `model/feature/secrets.aontu` in `@voxgig/sdkgen` carries the `path` lists and
 the `def: dart:` and `def: lean:` maps; packs consume core feature models
 rather than copying them. Those entries ship from 4.10.0 on;
-`engines.sdkgen` here requires `>=4.44.3`, comfortably past that. Against an
+`engines.sdkgen` here requires `>=4.48.0`, comfortably past that. Against an
 sdkgen older than 4.10.0 the feature emits no plugin definitions at all, and
 each target's secrets test says so by name.
 

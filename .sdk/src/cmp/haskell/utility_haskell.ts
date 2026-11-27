@@ -7,14 +7,25 @@ import {
 
 import {
   canonKey,
+  clientOptions,
   entityIdField,
+  fact,
   opRequestShape,
   requiredItems,
 } from '@voxgig/sdkgen'
 
+import { KIT } from '@voxgig/apidef'
+
 
 function projectPath(suffix?: string): string {
   return Path.normalize(Path.join(__dirname, '../../..', suffix ?? ''))
+}
+
+
+// The cabal package name, which the manifest, its file and the docs share.
+function pkgName(model: any): string {
+  const org = (model.origin || 'voxgig-sdk').replace(/-sdk$/, '')
+  return `${org}-${model.name}-sdk`.toLowerCase().replace(/[^a-z0-9-]/g, '-')
 }
 
 
@@ -182,12 +193,57 @@ function hsTestCall(ent: any, op: string, indent: string): { argExpr: string, se
 }
 
 
+// The client options SdkRuntime reads, which has no `extend`.
+const HS_OPTIONS = ['server', 'apikey', 'secret', 'base', 'prefix', 'suffix', 'headers', 'feature', 'system']
+
+const HS_OPTION_KIND: Record<string, string> = { string: 'String', map: 'Value', list: 'Value' }
+
+// One table row per option, `| <key> | <type> | <description> |`.
+function hsOptionRows(model: any, key: (name: string) => string): string {
+  return clientOptions(model).filter((o: any) => HS_OPTIONS.includes(o.name))
+    .map((o: any) => '| ' + key(o.name) + ' | `' + HS_OPTION_KIND[o.kind] + '` | ' + o.desc + ' |\n').join('')
+}
+
+
+// The do-block lines that construct `sdk` with what the API needs from its
+// caller, and the import they need.
+function hsClient(model: any): { imports: string, lines: string } {
+  const kit = model.main[KIT]
+  const auth = fact(kit, 'auth')
+  const lines: string[] = []
+  const opts: string[] = []
+  if (auth.apikey) {
+    lines.push('mkey <- lookupEnv ' + hsString(fact(kit, 'env').apikey))
+    opts.push('("apikey", maybe VNoval VStr mkey)')
+  }
+  if (auth.secret) {
+    lines.push('msecret <- lookupEnv ' + hsString(fact(kit, 'env').secret))
+    opts.push('("secret", maybe VNoval VStr msecret)')
+  }
+  const svars = fact(kit, 'server').filter((v: any) => v.required)
+  if (0 < svars.length) {
+    lines.push('server <- jo [' + svars.map((v: any) =>
+      '(' + hsString(v.name) + ', VStr ' + hsString('<' + v.name + '>') + ')').join(', ') + ']')
+    opts.push('("server", server)')
+  }
+  lines.push(...(0 === opts.length ? ['sdk <- Sdk.newSdk0'] :
+    ['opts <- jo [' + opts.join(', ') + ']', 'sdk <- Sdk.newSdk opts']))
+  return {
+    imports: auth.apikey ? 'import System.Environment (lookupEnv)\n' : '',
+    lines: lines.map((line) => '  ' + line + '\n').join(''),
+  }
+}
+
+
 export {
   clean,
   formatHsValue,
+  hsClient,
+  hsOptionRows,
   hsLit,
   hsString,
   hsTestCall,
   hsVarName,
+  pkgName,
   projectPath,
 }

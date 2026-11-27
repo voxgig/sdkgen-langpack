@@ -1,5 +1,5 @@
--- VENDORED: @voxgig/sekreto sdk-20260908-1556-0 (lean/src/Sekreto.lean)
--- Source: https://github.com/voxgig/sekreto @ 1267ee2e5f49566bc92695bc9eb3a60ef4924998  [tag: sdk-20260908-1556-0]
+-- VENDORED: @voxgig/sekreto sdk-20261125-1959-0 (lean/src/Sekreto.lean)
+-- Source: https://github.com/voxgig/sekreto @ ee837130bf444ca46a5a46181bdd6743e118898c  [tag: sdk-20261125-1959-0]
 -- License: MIT (c) voxgig - see repository LICENSE. Do not edit: resync from upstream.
 /-
 sekreto - one interface for secrets, wherever they live.
@@ -16,7 +16,8 @@ qualifies.
 
 Four kinds are built in - `env`, `memory`, `dotenv` and `file` - and a
 chain of them needs nothing further. Every kind that opens a socket,
-signs a request or spawns a process is a voxgig/plugin definition under
+signs a request, spawns a process or does cryptography is a voxgig/plugin
+definition under
 `plugins/`, imported and passed by the calling project:
 
     import SekretoPlugins.Hashicorp

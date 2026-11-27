@@ -854,6 +854,54 @@ void tests() {
       stdutil.prepareAuth(ctx);
       equal(null, ctx.spec.headers['authorization']);
     });
+
+    test('a key in the query goes under its name, in no header', (t) {
+      final ctx = authCtx({
+        'apikey': 'K',
+        'auth': {'prefix': '', 'in': 'query', 'name': 'api_key'}
+      }, {});
+      stdutil.prepareAuth(ctx);
+      equal('K', ctx.spec.query['api_key']);
+      equal(null, ctx.spec.headers['authorization']);
+    });
+
+    test('Basic under query placement sets no authorization header', (t) {
+      final ctx = authCtx({
+        'apikey': 'K',
+        'secret': 'S',
+        'auth': {
+          'prefix': 'Basic',
+          'basic': true,
+          'in': 'query',
+          'name': 'api_key'
+        }
+      }, {});
+      stdutil.prepareAuth(ctx);
+      equal(null, ctx.spec.headers['authorization']);
+      equal('K', ctx.spec.query['api_key']);
+    });
+
+    test('a key in a cookie replaces its own piece of the cookie header', (t) {
+      final ctx = authCtx({
+        'apikey': 'K',
+        'auth': {'prefix': '', 'in': 'cookie', 'name': 'session'}
+      }, {
+        'cookie': 'a=1; session=old'
+      });
+      stdutil.prepareAuth(ctx);
+      equal('a=1; session=K', ctx.spec.headers['cookie']);
+      equal(null, ctx.spec.headers['authorization']);
+    });
+
+    test('a named header carries the key under its lower-cased name', (t) {
+      final ctx = authCtx({
+        'apikey': 'K',
+        'auth': {'prefix': '', 'name': 'X-Api-Key'}
+      }, {});
+      stdutil.prepareAuth(ctx);
+      equal('K', ctx.spec.headers['x-api-key']);
+      equal(null, ctx.spec.headers['authorization']);
+    });
   });
 
   describe('pipeline:result helpers', () {

@@ -11,14 +11,22 @@ import {
 } from '@voxgig/sdkgen'
 
 
+import {
+  KIT,
+} from '@voxgig/apidef'
+
 import type {
   Model,
 } from '@voxgig/apidef'
 
 
-// pub.dev package names must be lowercase identifiers ([a-z0-9_], starting
-// with a letter). The import path (`lib/`) is unaffected.
-function dartPackageName(model: any): string {
+// The name the target's model declares, which sdkgen's packageName reads too;
+// else the project's name as a pub.dev identifier ([a-z0-9_], from a letter).
+function dartPackageName(model: any, target: string): string {
+  const declared = model?.main?.[KIT]?.target?.[target]?.publish?.registry?.package
+  if (null != declared && '' !== declared) {
+    return String(declared)
+  }
   let name = `${model.name}_sdk`.toLowerCase().replace(/[^a-z0-9_]/g, '_')
   if (!/^[a-z]/.test(name)) {
     name = 'sdk_' + name
@@ -37,7 +45,7 @@ const Package = cmp(async function Package(props: any) {
   const kw = keywords(model)
 
   File({ name: 'pubspec.yaml' }, () => {
-    Content(`name: ${dartPackageName(model)}
+    Content(`name: ${dartPackageName(model, target.name)}
 description: >-
   ${pkgDescription(model, target.name)}
 version: ${packageVersion(model, target.name)}

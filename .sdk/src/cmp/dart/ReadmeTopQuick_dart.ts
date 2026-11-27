@@ -1,5 +1,5 @@
 
-import { cmp, Content, isAuthActive, envName, canonKey, canonScalarKey, entityIdField, opRequestShape, safeVarName, exampleVarName, matchArg, idLiteral } from '@voxgig/sdkgen'
+import { cmp, Content, canonKey, canonScalarKey, entityIdField, entityOps, opRequestShape, safeVarName, exampleVarName, matchArg, idLiteral } from '@voxgig/sdkgen'
 
 import {
   KIT,
@@ -8,6 +8,7 @@ import {
 } from '@voxgig/apidef'
 
 import { dartPackageName } from './Package_dart'
+import { dartClient } from './utility_dart'
 
 
 // A type-correct, executable Dart literal for a param: numeric/boolean/
@@ -33,18 +34,14 @@ const ReadmeTopQuick = cmp(function ReadmeTopQuick(props: any) {
   const { target, ctx$: { model } } = props
 
   const entity = getModelPath(model, `main.${KIT}.entity`)
-  const pkg = dartPackageName(model)
+  const pkg = dartPackageName(model, target.name)
 
   const exampleEntity = Object.values(entity).find((e: any) => e.active !== false) as any
 
-  const authActive = isAuthActive(model)
-  const importIO = authActive ? `import 'dart:io';\n` : ''
-  const ctor = authActive
-    ? `${model.const.Name}SDK({\n    'apikey': Platform.environment['${envName(model)}_APIKEY'],\n  })`
-    : `${model.const.Name}SDK()`
+  const { imports, ctor } = dartClient(model, '  ')
 
   Content(`\`\`\`dart
-${importIO}import 'package:${pkg}/${model.const.Name}SDK.dart';
+${imports}import 'package:${pkg}/${model.const.Name}SDK.dart';
 
 Future<void> main() async {
   final client = ${ctor};
@@ -54,7 +51,7 @@ Future<void> main() async {
   if (exampleEntity) {
     const eName = nom(exampleEntity, 'Name')
     const eVar = exampleVarName(eName.toLowerCase(), 'dart')
-    const opnames = Object.keys(exampleEntity.op || {})
+    const opnames = entityOps(exampleEntity)
     // Model-driven id key: null when the entity has no id-like field, in which
     // case the load example takes no match argument.
     const idF = entityIdField(exampleEntity)

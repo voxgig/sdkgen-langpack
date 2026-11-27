@@ -1,5 +1,5 @@
 
-import { cmp, Content, isAuthActive, envName, canonKey, entityIdField, opRequestShape } from '@voxgig/sdkgen'
+import { cmp, Content, canonKey, entityIdField, entityOps, opRequestShape } from '@voxgig/sdkgen'
 
 import {
   KIT,
@@ -7,7 +7,7 @@ import {
   nom,
 } from '@voxgig/apidef'
 
-import { hsVarName } from './utility_haskell'
+import { hsClient, hsVarName } from './utility_haskell'
 
 
 // A type-correct Haskell `Value` literal for a param.
@@ -27,38 +27,21 @@ const ReadmeTopQuick = cmp(function ReadmeTopQuick(props: any) {
 
   const exampleEntity = Object.values(entity).find((e: any) => e.active !== false) as any
 
-  const authActive = isAuthActive(model)
+  const client = hsClient(model)
 
   Content(`\`\`\`haskell
-`)
-  if (authActive) {
-    Content(`import System.Environment (lookupEnv)
-import qualified SdkClient as Sdk
+${client.imports}import qualified SdkClient as Sdk
 import VoxgigStruct (Value (..), emptyMap, stringify)
 import SdkHelpers (jo)
 
 main :: IO ()
 main = do
-  mkey <- lookupEnv "${envName(model)}_APIKEY"
-  opts <- jo [("apikey", maybe VNoval VStr mkey)]
-  sdk <- Sdk.newSdk opts
-`)
-  }
-  else {
-    Content(`import qualified SdkClient as Sdk
-import VoxgigStruct (Value (..), emptyMap, stringify)
-import SdkHelpers (jo)
-
-main :: IO ()
-main = do
-  sdk <- Sdk.newSdk0
-`)
-  }
+${client.lines}`)
 
   if (exampleEntity) {
     const eName = nom(exampleEntity, 'Name')
     const eFn = hsVarName(exampleEntity.name)
-    const opnames = Object.keys(exampleEntity.op || {})
+    const opnames = entityOps(exampleEntity)
     const idF = entityIdField(exampleEntity)
 
     if (opnames.includes('list')) {

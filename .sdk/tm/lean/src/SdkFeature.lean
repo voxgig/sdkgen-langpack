@@ -3,9 +3,9 @@
    A feature observes and modifies the operation pipeline in two ways:
 
    - by WRAPPING THE TRANSPORT: `init` replaces the client's fetcher with one
-     that calls the previous fetcher (retry, timeout, ratelimit, cache, proxy,
-     netsim, test all do this), so features compose as a middleware chain in
-     add order;
+     that calls the previous fetcher (the features whose model declares
+     `transport: 'wrap'`, and `test`), so features compose as a middleware
+     chain in add order;
    - by HANDLING A HOOK: a pipeline stage (PrePoint, PreSpec, PreRequest,
      PreResponse, PreResult, PreDone, PreUnexpected) dispatched to every active
      feature.

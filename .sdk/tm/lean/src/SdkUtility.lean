@@ -78,8 +78,8 @@ def isErrV (v : Value) : SIO Bool := do
 def CLEAN_MAXDEPTH : Nat := 32
 
 /-- The `clean` block of the option spec (main.kit.optspec.clean in the sdkgen
-    base model), held here because this pack's targets read no generated
-    Schema module. Numbers are strings, like every optspec value. -/
+    base model), held here because lean reads no generated Schema module.
+    Numbers are strings, like every optspec value. -/
 def cleanOptSpec : SIO Value :=
   newMap #[("active", .bool true),
            ("keys", .str "key,secret,token,password,passwd,authorization,cookie,credential,signature"),
@@ -393,7 +393,8 @@ def defaultOptions : SIO Value := do
   -- `allow.op` and `allow.method` carry the ts optspec's own defaults,
   -- because makePoint and makeSpec enforce them; the other optspec slots are
   -- not defaulted here, so nothing below is a value a caller could mistake
-  -- for an enforced one.
+  -- for an enforced one. lean validates no option against `main.kit.optspec`:
+  -- every option it declares is taken as given.
   newMap #[("base", .str "http://localhost:8000"), ("prefix", .str ""),
            ("suffix", .str ""), ("headers", hdr), ("entity", ent),
            ("allow", ← allowDefaults), ("clean", ← cleanOptSpec)]
@@ -758,32 +759,67 @@ def authPrefix (ctx : Value) : SIO String := do
     let copts ← gp (← gp ctx "config") "options"
     gpS (← gp copts "auth") "prefix"
 
-/-- apikey (with the configured auth prefix) becomes the authorization header. -/
+/-- Where the credential travels: `auth.in` (a header, the query or a cookie),
+    under `auth.name`; a header name travels lower-cased. -/
+def authPlace (options : Value) : SIO (String × String) := do
+  let auth ← gp options "auth"
+  let given ← gpS auth "in"
+  let place := if given.toLower == "query" || given.toLower == "cookie" then given.toLower else "header"
+  let named ← gpS auth "name"
+  let name := if named == "" then "Authorization" else named
+  pure (place, if place == "header" then name.toLower else name)
+
+/-- A cookie has no header of its own: the credential is one `name=value`
+    piece of the cookie header, beside the caller's other cookies. -/
+def setCookie (headers : Value) (name : String) (val : Option String) : SIO Unit := do
+  let kept := cookieKeep (← gpS headers "cookie") #[name]
+  let all := match val with
+    | some v => kept.push (name ++ "=" ++ v)
+    | none => kept
+  if all.isEmpty then dp headers "cookie"
+  else sp headers "cookie" (.str ("; ".intercalate all.toList))
+
+def placeCredential (specV : Value) (place name : String) (val : Option String) : SIO Unit := do
+  if place == "query" then
+    let query ← gpMap specV "query"
+    match val with
+    | some v => sp query name (.str v)
+    | none => dp query name
+  else
+    let headers ← gpMap specV "headers"
+    if place == "cookie" then setCookie headers name val
+    else match val with
+      | some v => sp headers name (.str v)
+      | none => dp headers name
+
+/-- The apikey, with the configured auth prefix, goes where `authPlace` says;
+    under HTTP Basic, a header scheme, it is joined to the secret. -/
 def prepareAuth (ctx : Value) : SIO (Value × Option Value) := do
   let specV ← gp ctx "spec"
   match specV with
   | .map _ => do
-    let headers ← gpMap specV "headers"
     let options ← gp ctx "options"
+    let (place, name) ← authPlace options
     -- `auth: null` is the documented way to suppress auth outright: NO
-    -- authorization header, whatever the apikey says. Without this the
-    -- withheld credential goes on the wire.
-    --
-    -- The ports that run options through validate against an optspec carrying
-    -- an `auth` default can use absence as the signal (validate guarantees the
-    -- key is present otherwise). lean's makeOptions has no optspec, so `auth`
-    -- is ABSENT in the ordinary case and absence must stay the ordinary case.
-    -- getpropRaw is the only reader that tells a STORED null from an absent
-    -- key - gp collapses both to .noval - so the stored null alone suppresses.
+    -- credential, whatever the apikey says. lean's makeOptions has no
+    -- optspec, so `auth` may be ABSENT in the ordinary case; getpropRaw is
+    -- the only reader that tells a STORED null from an absent key.
     let authRaw ← getpropRaw options "auth"
     let apikey ← gpS options "apikey"
     if authRaw == .null || apikey == "" then do
-      dp headers "authorization"
+      placeCredential specV place name none
       pure (specV, none)
     else do
       let pfx ← authPrefix ctx
-      let authval := if pfx != "" then pfx ++ " " ++ apikey else apikey
-      sp headers "authorization" (.str authval)
+      let prefixed (c : String) := if pfx != "" then pfx ++ " " ++ c else c
+      if place == "header" && (← gp (← gp options "auth") "basic") == .bool true then do
+        -- The password may be empty (RFC 7617). The joined, encoded pair is a
+        -- wire form neither credential's own registration covers.
+        let b64 := base64Encode (apikey ++ ":" ++ (← gpS options "secret"))
+        cleanAdd ctx (.str b64)
+        placeCredential specV place name (some (prefixed b64))
+      else
+        placeCredential specV place name (some (if place == "header" then prefixed apikey else apikey))
       pure (specV, none)
   | _ => do
     let e ← mkErr "auth_no_spec" "Expected context spec property to be defined."
@@ -1208,6 +1244,27 @@ partial def placeholders : List Char → List String
     | _ => placeholders rest
   | _ :: rest => placeholders rest
   | [] => []
+
+/-- A templated base takes each `{name}` from `options.server`, where the
+    config gives each variable's default. A name with no value is
+    `test-<name>` in test mode, and otherwise refuses the client: the URL
+    cannot work. -/
+def resolveServer (config opts : Value) (testmode : Bool) : SIO Unit := do
+  let base ← gpS opts "base"
+  let server ← gp opts "server"
+  let mut url := base
+  for ph in placeholders base.toList do
+    let name := String.ofList (ph.toList.drop 1).dropLast
+    if name.all (fun c => c.isAlphanum || c == '_') then
+      let val ← gpS server name
+      if val != "" then url := url.replace ph val
+      else if testmode then url := url.replace ph ("test-" ++ name)
+      else
+        let sdk ← gpS (← gp config "main") "name"
+        throw (IO.userError ((if sdk == "" then "SDK" else sdk) ++ ": the server variable '" ++
+          name ++ "' is required: the API base URL is '" ++ base ++ "' - pass server = { \"" ++
+          name ++ "\": \"...\" } in the SDK options"))
+  sp opts "base" (.str url)
 
 /-- base/prefix/path/suffix joined, `{param}` substituted, query appended. -/
 def makeUrl (ctx : Value) : SIO (Value × Option Value) := do

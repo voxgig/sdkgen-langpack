@@ -13,7 +13,6 @@ main: kit: target: lean: {
   superseded: []
 
   phase: {
-    entity:     { active: false }
     feature:    { active: false }
     readme:     { active: true }
     agentguide: { active: true }

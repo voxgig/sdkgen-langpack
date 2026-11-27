@@ -6,9 +6,13 @@ import {
 } from '@voxgig/struct'
 
 import {
+  clientOptions,
   each,
+  fact,
   targetFeatures,
 } from '@voxgig/sdkgen'
+
+import { KIT } from '@voxgig/apidef'
 
 
 function projectPath(suffix?: string): string {
@@ -16,9 +20,7 @@ function projectPath(suffix?: string): string {
 }
 
 
-// A Lean 4 string literal. Lean strings are UTF-8, so non-ASCII passes through;
-// only the structural characters need escaping. (Backticks are ordinary in Lean
-// strings, so the config's `body`-style transform exprs embed verbatim.)
+// A Lean 4 string literal: non-ASCII text and backticks pass through as is.
 function leanString(s: string): string {
   let out = '"'
   for (const ch of String(s)) {
@@ -140,8 +142,39 @@ function leanSecrets(model: any, target: any): {
 }
 
 
+// What the lean runtime reads: no `extend` or `system`.
+const LEAN_OPTIONS = ['server', 'apikey', 'secret', 'base', 'prefix', 'suffix', 'headers', 'feature']
+
+const LEAN_OPTION_KIND: Record<string, string> = { string: 'String', map: 'Value', list: 'Value' }
+
+function leanOptionRows(model: any): string {
+  return clientOptions(model).filter((o: any) => LEAN_OPTIONS.includes(o.name))
+    .map((o: any) => '| `' + o.name + '` | `' + LEAN_OPTION_KIND[o.kind] + '` | ' + o.desc + ' |\n').join('')
+}
+
+
+// The options an example constructs its client with: what the API needs
+// from the caller, read from the environment.
+function leanClientOptions(model: any): string {
+  const kit = model.main[KIT]
+  const auth = fact(kit, 'auth')
+  const env = (name: string) => `.str ((← IO.getEnv ${leanString(name)}).getD "")`
+  const pairs: string[] = []
+  if (auth.apikey) pairs.push(`("apikey", ${env(fact(kit, 'env').apikey)})`)
+  if (auth.secret) pairs.push(`("secret", ${env(fact(kit, 'env').secret)})`)
+  const svars = fact(kit, 'server').filter((v: any) => v.required)
+  if (0 < svars.length) {
+    pairs.push(`("server", ← newMap #[${svars.map((v: any) =>
+      `(${leanString(v.name)}, .str ${leanString('<' + v.name + '>')})`).join(', ')}])`)
+  }
+  return 0 === pairs.length ? '(← emptyMap)' : `(← newMap #[${pairs.join(', ')}])`
+}
+
+
 export {
   clean,
+  leanClientOptions,
+  leanOptionRows,
   leanSecrets,
   leanString,
   leanVarName,

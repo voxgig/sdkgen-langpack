@@ -43,9 +43,9 @@ class ProjectNameEntityBase {
     featureHook(entctx, 'PostConstructEntity');
   }
 
-  // Every operation resolves to the entity; `remove` additionally marks
-  // it. The instance KEEPS the data it held — a caller can still read what
-  // was deleted — but it is no longer a live record. See AGENTS.md.
+  // Every operation resolves to the entity; a remove additionally marks it
+  // deleted. The instance KEEPS the data it held — a caller can still read
+  // what was deleted — but it is no longer a live record.
   bool _deleted = false;
 
   void markDeleted() {
@@ -91,8 +91,9 @@ class ProjectNameEntityBase {
 
   // Streaming operation. Runs `action` through the full pipeline and returns
   // a Stream over the result items, so the `streaming` feature's incremental
-  // output is reachable from a generated entity (a normal op call
-  // materialises the whole result). `callopts` parameterises the call:
+  // output, when that feature is active, is reachable from a generated entity
+  // (a normal op call materialises the whole result). `callopts` parameterises
+  // the call:
   //   - inbound (download): yields items/chunks from the streaming feature
   //     when active, else falls back to the materialised items;
   //   - outbound (upload): an async-iterable/Stream `body` is attached to the

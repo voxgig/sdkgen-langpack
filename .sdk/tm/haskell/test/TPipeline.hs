@@ -599,6 +599,53 @@ tests c = do
     spv <- readIORef (cSpec ctx); h <- getp spv "headers"; av <- getp h "authorization"
     pure (isNoval av)
 
+  runTest c "prepare_auth.query_placement_named_key_no_header" $ do
+    cl <- client; ctx <- mkCtx cl "load"
+    ap <- jo [("prefix", VStr ""), ("in", VStr "query"), ("name", VStr "api_key")]
+    o <- jo [("apikey", VStr "K"), ("auth", ap)]; writeIORef (clOptions cl) o
+    hm <- emptyMap; qm <- emptyMap; sp <- newSpec =<< jo [("headers", hm), ("query", qm)]; writeIORef (cSpec ctx) sp
+    _ <- prepareAuthUtil ctx
+    spv <- readIORef (cSpec ctx); h <- getp spv "headers"; q <- getp spv "query"
+    av <- getp h "authorization"; kv <- getp q "api_key"
+    pure (isNoval av && vstring kv == "K")
+
+  runTest c "prepare_auth.basic_header_joins_key_and_secret" $ do
+    cl <- client; ctx <- mkCtx cl "load"
+    ap <- jo [("prefix", VStr "Basic"), ("basic", VBool True)]
+    o <- jo [("apikey", VStr "user"), ("secret", VStr "pass"), ("auth", ap)]; writeIORef (clOptions cl) o
+    hm <- emptyMap; sp <- newSpec =<< jo [("headers", hm)]; writeIORef (cSpec ctx) sp
+    _ <- prepareAuthUtil ctx
+    spv <- readIORef (cSpec ctx); h <- getp spv "headers"; av <- getp h "authorization"
+    pure (vstring av == "Basic dXNlcjpwYXNz")
+
+  runTest c "prepare_auth.basic_in_query_sets_no_authorization_header" $ do
+    cl <- client; ctx <- mkCtx cl "load"
+    ap <- jo [("prefix", VStr "Basic"), ("basic", VBool True), ("in", VStr "query"), ("name", VStr "api_key")]
+    o <- jo [("apikey", VStr "user"), ("secret", VStr "pass"), ("auth", ap)]; writeIORef (clOptions cl) o
+    hm <- emptyMap; qm <- emptyMap; sp <- newSpec =<< jo [("headers", hm), ("query", qm)]; writeIORef (cSpec ctx) sp
+    _ <- prepareAuthUtil ctx
+    spv <- readIORef (cSpec ctx); h <- getp spv "headers"; q <- getp spv "query"
+    av <- getp h "authorization"; kv <- getp q "api_key"
+    pure (isNoval av && vstring kv == "user")
+
+  runTest c "prepare_auth.cookie_placement_keeps_other_cookies" $ do
+    cl <- client; ctx <- mkCtx cl "load"
+    ap <- jo [("prefix", VStr ""), ("in", VStr "cookie"), ("name", VStr "session")]
+    o <- jo [("apikey", VStr "K"), ("auth", ap)]; writeIORef (clOptions cl) o
+    hm <- jo [("cookie", VStr "a=1; session=old")]; sp <- newSpec =<< jo [("headers", hm)]; writeIORef (cSpec ctx) sp
+    _ <- prepareAuthUtil ctx
+    spv <- readIORef (cSpec ctx); h <- getp spv "headers"; cv <- getp h "cookie"; av <- getp h "authorization"
+    pure (isNoval av && vstring cv == "a=1; session=K")
+
+  runTest c "prepare_auth.named_header_lower_cased" $ do
+    cl <- client; ctx <- mkCtx cl "load"
+    ap <- jo [("prefix", VStr ""), ("name", VStr "X-Api-Key")]
+    o <- jo [("apikey", VStr "K"), ("auth", ap)]; writeIORef (clOptions cl) o
+    hm <- emptyMap; sp <- newSpec =<< jo [("headers", hm)]; writeIORef (cSpec ctx) sp
+    _ <- prepareAuthUtil ctx
+    spv <- readIORef (cSpec ctx); h <- getp spv "headers"; kv <- getp h "x-api-key"; av <- getp h "authorization"
+    pure (isNoval av && vstring kv == "K")
+
   runTest c "result_headers.no_headers_empty_map" $ do
     cl <- client; ctx <- mkCtx cl "load"
     r <- newResponse =<< jo [("status", VNum 200)]; writeIORef (cResponse ctx) r

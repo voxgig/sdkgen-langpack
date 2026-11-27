@@ -525,6 +525,10 @@ def opRemove (c : Value) (e : String) (m co : Value) : SIO Value := do runOp c e
     does before its first operation. -/
 def mkClientBase (options config : Value) (mode : String) : SIO Value := do
   let opts ← SdkUtility.makeOptions config options
+  let active (v : Value) : SIO Bool := do pure ((← gp v "active") == .bool true)
+  let testmode := mode == "test" || (← active (← gp opts "test")) ||
+    (← active (← gp (← gp opts "feature") "test"))
+  SdkUtility.resolveServer config opts testmode
   newMap #[("options", opts), ("config", config), ("mode", .str mode)]
 
 /-- Build a client Value from options + config JSON strings. -/

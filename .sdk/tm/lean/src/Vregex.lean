@@ -1,3 +1,6 @@
+-- VENDORED: @voxgig/struct 0.1.1 (lean/src/Vregex.lean)
+-- Source: https://github.com/voxgig/struct @ 358af9d51c90b589a295a70b2165dbe4629eaf8e  [tag: sdk-20261125-1959-0]
+-- License: MIT (c) voxgig - see repository LICENSE. Do not edit: resync from upstream.
 /- Minimal backtracking regex engine for the Lean port of voxgig/struct.
    Supports the RE2 subset the corpus exercises: literals, '.', anchors ^ $,
    \b and \B, character classes [..] / [^..] with ranges and \d \w \s \D \W \S,
