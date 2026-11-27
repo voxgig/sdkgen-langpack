@@ -950,6 +950,22 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // The per-entity test data exists only where the build phase writes it.
+  test('the lean how-to names a seed file only where the build phase writes one', async () => {
+    const readme = async (extra) => String((await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, extra), root: docsRoot(),
+    })).files['lean/README.md'])
+
+    ok((await readme('')).includes(
+      'IO.FS.readFile "../.sdk/test/entity/planet/PlanetTestData.json"'),
+    'lean: the how-to does not read the planet test data from the path back to .sdk')
+    const off = await readme('main: kit: phase: build: active: false')
+    ok(!off.includes('.sdk/test/entity'), 'lean: the how-to names test data the build did not write')
+    ok(off.includes('match (← Planet.load sdk m (← emptyMap)) with'),
+      'lean: the missing-record how-to does not load a planet')
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {
