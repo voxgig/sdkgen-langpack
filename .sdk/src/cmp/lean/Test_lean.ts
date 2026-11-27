@@ -5,13 +5,11 @@ import {
   cmp,
   each,
   entityCollection,
-  isAuthSuppressed,
-  isHttpBasicAuth,
-  resolveAuthIn,
-  resolveAuthName,
+  fact,
 } from '@voxgig/sdkgen'
 
 import {
+  KIT,
   Model,
 } from '@voxgig/apidef'
 
@@ -256,12 +254,12 @@ ${fill(e, 'load', 'm', 'created', '        ')}        let back ← ${ns}.load cl
   // The secret-redaction sweep's candidate operations: every entity op this
   // SDK offers, list and load first. Lean has no reflection, so they are
   // listed at generation time.
+  const authFact = fact(model.main[KIT], 'auth')
   const auth = {
-    suppressed: isAuthSuppressed(model),
-    where: resolveAuthIn(model),
-    name: 'header' === resolveAuthIn(model)
-      ? resolveAuthName(model).toLowerCase() : resolveAuthName(model),
-    basic: isHttpBasicAuth(model),
+    suppressed: authFact.suppressed,
+    where: authFact.in,
+    name: 'header' === authFact.in ? authFact.name.toLowerCase() : authFact.name,
+    basic: authFact.basic,
   }
   const rank: Record<string, number> = { list: 0, load: 1 }
   const candidates: string[] = []
