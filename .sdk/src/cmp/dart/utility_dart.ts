@@ -10,9 +10,12 @@ import {
 import {
   canonScalarKey,
   entityIdField,
+  fact,
   opRequestShape,
   requiredItems,
 } from '@voxgig/sdkgen'
+
+import { KIT } from '@voxgig/apidef'
 
 
 // Escape a string for a single-quoted Dart string literal. `$` must be
@@ -175,7 +178,30 @@ function dartTestCall(ent: any, op: string, indent: string): { arg: string, seed
   return { arg: 0 < call.length ? '{' + pairs(call) + '}' : '', seed }
 }
 
+// The client an example constructs: what the API needs from its caller.
+function dartClient(model: any, pad: string): { imports: string, ctor: string } {
+  const kit = model.main[KIT]
+  const auth = fact(kit, 'auth')
+  const env = fact(kit, 'env')
+  const fields: string[] = []
+  if (auth.apikey) fields.push(`'apikey': Platform.environment['${env.apikey}'],`)
+  if (auth.secret) fields.push(`'secret': Platform.environment['${env.secret}'],`)
+  const svars = fact(kit, 'server').filter((v: any) => v.required)
+  if (0 < svars.length) {
+    fields.push(`'server': {${svars.map((v: any) => dartString(v.name) + ': ' +
+      dartString('<' + v.name + '>')).join(', ')}},`)
+  }
+  const Name = model.const.Name
+  return {
+    imports: auth.apikey ? `import 'dart:io';\n` : '',
+    ctor: 0 === fields.length ? `${Name}SDK()` :
+      `${Name}SDK({\n${fields.map((f) => pad + '  ' + f).join('\n')}\n${pad}})`,
+  }
+}
+
+
 export {
+  dartClient,
   dartStringLiteral,
   clean,
   dartLit,

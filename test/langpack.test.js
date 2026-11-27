@@ -1085,6 +1085,45 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // A quick start's steps are numbered without a gap, and the constructor
+  // takes what the API needs from the caller.
+  test('the quick starts number their steps and pass what the constructor needs', async () => {
+    const docs = async (extra) => (await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, extra), root: docsRoot(),
+    })).files
+    const steps = (readme) => [...String(readme).split('## Tutorial')[1].split('\n## ')[0]
+      .matchAll(/^### (\d+)\. (.*)$/gm)].map((m) => m[1] + ' ' + m[2])
+
+    const only = await docs(LIST_ONLY)
+    for (const target of ['dart', 'haskell']) {
+      deepStrictEqual(steps(only[target + '/README.md']), ['1 Create a client', '2 List comet records'],
+        target + ': the list-only tutorial steps')
+    }
+    const crud = await docs('')
+    for (const target of ['dart', 'haskell']) {
+      deepStrictEqual(steps(crud[target + '/README.md']).slice(-1), ['4 Create, update, and patch'],
+        target + ': the last step names the operations it shows')
+    }
+
+    const quick = (files, target) => ['README.md', target + '/README.md']
+      .map((path) => codeBlocks(files[path], target).find((code) => /newSdk|SDK\(/.test(code)))
+    const server = await docs(AUTH_MODELS.server)
+    for (const code of quick(server, 'dart')) {
+      ok(/'server': \{'tenant': '<tenant>'\},/.test(code) && !/'version'/.test(code),
+        'dart: the quick start does not pass the required server variable alone:\n' + code)
+    }
+    for (const code of quick(server, 'haskell')) {
+      ok(code.includes('server <- jo [("tenant", VStr "<tenant>")]') && code.includes('("server", server)'),
+        'haskell: the quick start does not pass the required server variable:\n' + code)
+    }
+    const basic = await docs(AUTH_MODELS.basic)
+    for (const code of quick(basic, 'dart')) {
+      ok(code.includes("'secret': Platform.environment['DEMO_SECRET'],"),
+        'dart: the quick start does not pass the Basic secret:\n' + code)
+    }
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {

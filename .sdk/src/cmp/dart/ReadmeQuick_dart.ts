@@ -1,5 +1,5 @@
 
-import { cmp, each, Content, isAuthActive, envName, canonKey, canonScalarKey, opRequestShape, entityIdField, entityDataIdField, entityOps, safeVarName, exampleVarName, matchArg, idLiteral } from '@voxgig/sdkgen'
+import { cmp, each, Content, canonKey, canonScalarKey, opRequestShape, entityIdField, entityDataIdField, entityOps, safeVarName, exampleVarName, matchArg, idLiteral, seriesList } from '@voxgig/sdkgen'
 
 import {
   KIT,
@@ -8,6 +8,7 @@ import {
 } from '@voxgig/apidef'
 
 import { dartPackageName } from './Package_dart'
+import { dartClient } from './utility_dart'
 
 
 function listMatchArg(ent: any): string {
@@ -18,6 +19,7 @@ function listMatchArg(ent: any): string {
 
 const ReadmeQuick = cmp(function ReadmeQuick(props: any) {
   const { target, ctx$: { model } } = props
+  let step = 0
 
   const entity = getModelPath(model, `main.${KIT}.entity`)
   const pkg = dartPackageName(model, target.name)
@@ -35,16 +37,12 @@ const ReadmeQuick = cmp(function ReadmeQuick(props: any) {
       !it.optional && it.name !== entityIdField(e))
   ) as any
 
-  const authActive = isAuthActive(model)
-  const importIO = authActive ? `import 'dart:io';\n` : ''
-  const ctor = authActive
-    ? `${model.const.Name}SDK({\n  'apikey': Platform.environment['${envName(model)}_APIKEY'],\n})`
-    : `${model.const.Name}SDK()`
+  const { imports, ctor } = dartClient(model, '')
 
-  Content(`### 1. Create a client
+  Content(`### ${++step}. Create a client
 
 \`\`\`dart
-${importIO}import 'package:${pkg}/${model.const.Name}SDK.dart';
+${imports}import 'package:${pkg}/${model.const.Name}SDK.dart';
 
 final client = ${ctor};
 \`\`\`
@@ -73,7 +71,7 @@ final client = ${ctor};
     }
 
     if (opnames.includes('list')) {
-      Content(`### 2. List ${eName.toLowerCase()} records
+      Content(`### ${++step}. List ${eName.toLowerCase()} records
 
 \`list()\` returns a \`List\` of entities, one per record, and throws on error —
 iterate it and read each record with \`.data()\`.
@@ -111,7 +109,7 @@ try {
         `'${it.name}': ${dartLit(it.type,
           it.name === neIdF ? 'example_id' : 'example_' + it.name)}`)
 
-      Content(`### 3. Load ${neArticle} ${neName.toLowerCase()}
+      Content(`### ${++step}. Load ${neArticle} ${neName.toLowerCase()}
 
 ${neName} is nested under ${parentName}, so provide the \`${parentParam}\`.
 \`load()\` returns the entity and throws on error; \`.data()\` reads its record.
@@ -139,7 +137,7 @@ try {
             it.name === idF ? 'example_id' : 'example_' + it.name)}`).join(', ')}}`
         : ''
 
-      Content(`### 3. Load ${article} ${eName.toLowerCase()}
+      Content(`### ${++step}. Load ${article} ${eName.toLowerCase()}
 
 \`load()\` returns the entity and throws on error; \`.data()\` reads its record.
 
@@ -178,7 +176,8 @@ try {
 
     if (opnames.includes('create') || opnames.includes('update') || opnames.includes('patch') ||
       opnames.includes('remove')) {
-      Content(`### 4. Create, update, and remove
+      Content(`### ${++step}. ${seriesList(['create', 'update', 'patch', 'remove']
+        .filter((o: string) => opnames.includes(o))).replace(/^./, (c: string) => c.toUpperCase())}
 
 \`\`\`dart
 `)

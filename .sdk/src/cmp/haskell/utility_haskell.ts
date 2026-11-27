@@ -9,9 +9,12 @@ import {
   canonKey,
   clientOptions,
   entityIdField,
+  fact,
   opRequestShape,
   requiredItems,
 } from '@voxgig/sdkgen'
+
+import { KIT } from '@voxgig/apidef'
 
 
 function projectPath(suffix?: string): string {
@@ -203,9 +206,36 @@ function hsOptionRows(model: any, key: (name: string) => string): string {
 }
 
 
+// The do-block lines that construct `sdk` with what the API needs from its
+// caller, and the import they need.
+function hsClient(model: any): { imports: string, lines: string } {
+  const kit = model.main[KIT]
+  const auth = fact(kit, 'auth')
+  const lines: string[] = []
+  const opts: string[] = []
+  if (auth.apikey) {
+    lines.push('mkey <- lookupEnv ' + hsString(fact(kit, 'env').apikey))
+    opts.push('("apikey", maybe VNoval VStr mkey)')
+  }
+  const svars = fact(kit, 'server').filter((v: any) => v.required)
+  if (0 < svars.length) {
+    lines.push('server <- jo [' + svars.map((v: any) =>
+      '(' + hsString(v.name) + ', VStr ' + hsString('<' + v.name + '>') + ')').join(', ') + ']')
+    opts.push('("server", server)')
+  }
+  lines.push(...(0 === opts.length ? ['sdk <- Sdk.newSdk0'] :
+    ['opts <- jo [' + opts.join(', ') + ']', 'sdk <- Sdk.newSdk opts']))
+  return {
+    imports: auth.apikey ? 'import System.Environment (lookupEnv)\n' : '',
+    lines: lines.map((line) => '  ' + line + '\n').join(''),
+  }
+}
+
+
 export {
   clean,
   formatHsValue,
+  hsClient,
   hsOptionRows,
   hsLit,
   hsString,
