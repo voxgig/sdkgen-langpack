@@ -1,5 +1,5 @@
--- VENDORED: @voxgig/omni sdk-20260908-1556-0 (haskell/src/Omni.hs)
--- Source: https://github.com/voxgig/omni @ e9cb45a308a4da47ffdbc1b3149b9c59199190b2  [tag: sdk-20261016-0845-0]
+-- VENDORED: @voxgig/omni sdk-20261125-1959-0 (haskell/src/Omni.hs)
+-- Source: https://github.com/voxgig/omni @ ef55ad0fa48470146a81a1d652c859b03ebab6fc  [tag: sdk-20261125-1959-0]
 -- License: MIT (c) voxgig - see repository LICENSE. Do not edit: resync from upstream.
 -- | Omni: the shared multi-language test runner (Haskell port).
 --
@@ -321,15 +321,28 @@ parseString ('\\' : escape : rest) out = case escape of
   'n' -> parseString rest ('\n' : out)
   'r' -> parseString rest ('\r' : out)
   't' -> parseString rest ('\t' : out)
-  'u' ->
-    -- Exactly four hex digits: anything else is a parse error, not
-    -- garbage arithmetic on arbitrary characters.
-    let (hex, more) = splitAt 4 rest
-     in if 4 == length hex && all ishex hex
-          then parseString more (toEnum (readhex hex) : out)
-          else Left "omni: bad JSON unicode escape"
+  'u' -> case hex4 rest of
+    Nothing -> Left badunicode
+    Just (code, more)
+      | code >= 0xD800 && code <= 0xDBFF -> case more of
+          '\\' : 'u' : lowtext -> case hex4 lowtext of
+            Nothing -> Left badunicode
+            Just (low, after)
+              | low >= 0xDC00 && low <= 0xDFFF ->
+                  parseString after (toEnum (0x10000 + (code - 0xD800) * 0x400 + (low - 0xDC00)) : out)
+              | otherwise -> Left lonesurrogate
+          _ -> Left lonesurrogate
+      | code >= 0xDC00 && code <= 0xDFFF -> Left lonesurrogate
+      | otherwise -> parseString more (toEnum code : out)
   _ -> Left "omni: bad JSON escape"
   where
+    badunicode = "omni: bad JSON unicode escape"
+    lonesurrogate = "omni: bad JSON unicode escape (lone surrogate)"
+    -- Exactly four hex digits: anything else is a parse error, not
+    -- garbage arithmetic on arbitrary characters.
+    hex4 text =
+      let (hex, more) = splitAt 4 text
+       in if 4 == length hex && all ishex hex then Just (readhex hex, more) else Nothing
     ishex ch = isDigit ch || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
     readhex = foldl (\acc ch -> acc * 16 + digit ch) 0
     digit ch

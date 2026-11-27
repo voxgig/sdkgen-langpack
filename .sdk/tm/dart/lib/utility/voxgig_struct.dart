@@ -1,3 +1,6 @@
+// VENDORED: @voxgig/struct 0.2.2 (dart/lib/voxgig_struct.dart)
+// Source: https://github.com/voxgig/struct @ 358af9d51c90b589a295a70b2165dbe4629eaf8e  [tag: sdk-20261125-1959-0]
+// License: MIT (c) voxgig - see repository LICENSE. Do not edit: resync from upstream.
 // Copyright (c) 2025-2026 Voxgig Ltd. MIT LICENSE.
 //
 // Voxgig Struct — Dart port.
@@ -35,6 +38,7 @@ class _Sentinel {
 
 final SKIP = _Sentinel('skip');
 final DELETE = _Sentinel('delete');
+final _heldnull = _Sentinel('heldnull');
 
 const S_MKEYPRE = 'key:pre';
 const S_MKEYPOST = 'key:post';
@@ -127,6 +131,7 @@ final _R_INJECT_FULL = RegExp(r'^`(\$[A-Z]+|[^`]*)[0-9]*`$');
 final _R_INJECT_PART = RegExp(r'`([^`]*)`');
 final _R_META_PATH = RegExp(r'^([^$]+)\$([=~])(.+)$');
 final _R_TRANSFORM_NAME = RegExp(r'`\$([A-Z]+)`');
+final _R_CHECKER_NAME = RegExp(r'^\$[A-Z]+$');
 
 // ---------------------------------------------------------------------------
 // Low-level helpers
@@ -163,13 +168,19 @@ String jsString(dynamic v) {
 String _mapKey(dynamic k) =>
     k is String ? k : (k is num ? numToString(k) : jsString(k));
 
-int? _toInt(dynamic k) {
-  if (k is bool) return null;
-  if (k is int) return k;
-  if (k is double) return k.floor();
-  if (k is String) return int.tryParse(k.trim());
-  return null;
+final _R_LIST_KEY = RegExp(r'^(0|-?[1-9][0-9]*)$');
+
+// A list key's index, possibly negative: an integral number, or the string
+// String(n) prints for one ("01", "+1", " 1", "1.0" and "-0" are not).
+int? _listIndex(dynamic key) {
+  if (key is int) return key;
+  if (key is! num && key is! String) return null;
+  final k = key is String ? key : numToString(key as num);
+  return _R_LIST_KEY.hasMatch(k) ? int.tryParse(k) : null;
 }
+
+// Only a string or a number names a property.
+bool _readkey(dynamic key) => key is String || key is num;
 
 int _clz32(int n0) {
   var n = n0 & 0xFFFFFFFF;
@@ -265,25 +276,25 @@ List<String> keysof([dynamic v]) {
 dynamic getprop(dynamic val, dynamic key, [dynamic alt]) {
   if (val == null || key == null) return alt;
   dynamic out = alt;
-  if (val is Map) {
+  if (val is Map && _readkey(key)) {
     var sk = _mapKey(key);
     if (val.containsKey(sk)) out = val[sk];
   } else if (val is List) {
-    var ki = _toInt(key);
+    var ki = _listIndex(key);
     if (ki != null && ki >= 0 && ki < val.length) out = val[ki];
   }
-  if (out == null) return alt;
+  if (out == null || identical(out, _noarg)) return alt;
   return out;
 }
 
 dynamic _lookup(dynamic val, dynamic key) {
   if (val == null || key == null) return null;
-  if (val is Map) {
+  if (val is Map && _readkey(key)) {
     var sk = _mapKey(key);
     return val.containsKey(sk) ? val[sk] : null;
   }
   if (val is List) {
-    var ki = _toInt(key);
+    var ki = _listIndex(key);
     return (ki != null && ki >= 0 && ki < val.length) ? val[ki] : null;
   }
   return null;
@@ -291,19 +302,15 @@ dynamic _lookup(dynamic val, dynamic key) {
 
 bool haskey([dynamic val, dynamic key]) => getprop(val, key) != null;
 
-final _R_INTKEY = RegExp(r'^-?[0-9]+$');
-
 dynamic getelem(dynamic val, dynamic key, [dynamic alt]) {
   if (val == null || key == null) return alt;
   dynamic out;
   if (val is List) {
-    var ks = key is String ? key : (key is num ? numToString(key) : '');
-    if (_R_INTKEY.hasMatch(ks)) {
-      var len = val.length;
-      var nk0 = int.parse(ks);
-      var nk = nk0 < 0 ? len + nk0 : nk0;
-      if (nk >= 0 && nk < len) out = val[nk];
-    }
+    var len = val.length;
+    var ki = _listIndex(key);
+    // A negative key counts from the end.
+    if (ki != null && ki < 0) ki = len + ki;
+    if (ki != null && ki >= 0 && ki < len) out = val[ki];
   }
   if (out == null) {
     return isfunc(alt) ? alt() : alt;
@@ -314,7 +321,7 @@ dynamic getelem(dynamic val, dynamic key, [dynamic alt]) {
 dynamic _getpropRaw(dynamic v, String k) {
   if (v is Map) return v.containsKey(k) ? v[k] : null;
   if (v is List) {
-    var i = int.tryParse(k);
+    var i = _listIndex(k);
     return (i != null && i >= 0 && i < v.length) ? v[i] : null;
   }
   return null;
@@ -356,10 +363,11 @@ dynamic filter(dynamic val, bool Function(List<dynamic>) check) {
 
 dynamic setprop(dynamic parent, dynamic key, dynamic val) {
   if (!iskey(key)) return parent;
+  if (iscondensed(parent)) throw StructError(_CONDENSE_IMMUTABLE);
   if (parent is Map) {
     parent[_mapKey(key)] = val;
   } else if (parent is List) {
-    var ki = _toInt(key is num ? key.floor() : key);
+    var ki = _listIndex(key);
     if (ki == null) return parent;
     var len = parent.length;
     if (ki >= 0) {
@@ -378,10 +386,11 @@ dynamic setprop(dynamic parent, dynamic key, dynamic val) {
 
 dynamic delprop(dynamic parent, dynamic key) {
   if (!iskey(key)) return parent;
+  if (iscondensed(parent)) throw StructError(_CONDENSE_IMMUTABLE);
   if (parent is Map) {
     parent.remove(_mapKey(key));
   } else if (parent is List) {
-    var ki = _toInt(key);
+    var ki = _listIndex(key);
     if (ki != null && ki >= 0 && ki < parent.length) parent.removeAt(ki);
   }
   return parent;
@@ -487,7 +496,17 @@ dynamic re_replace(dynamic p, dynamic input, dynamic repl) {
       return (repl(groups)).toString();
     });
   }
-  return s;
+  // String replacement with JS-style refs: $& (whole), $1..$9, $$ (literal $).
+  var template = repl is String ? repl : jsString(repl);
+  return s.replaceAllMapped(_rx(p), (m) {
+    return template.replaceAllMapped(RegExp(r'\$(\$|&|[1-9])'), (t) {
+      var ref = t.group(1)!;
+      if (ref == r'$') return r'$';
+      if (ref == '&') return m.group(0) ?? '';
+      var gi = int.parse(ref);
+      return gi <= m.groupCount ? (m.group(gi) ?? '') : '';
+    });
+  });
 }
 
 dynamic re_escape(dynamic s) => escre(s);
@@ -646,16 +665,17 @@ String jsonEncode(dynamic v, {bool sort = false, int? indent}) {
 }
 
 bool _hasCycle(dynamic v) {
-  var seen = <dynamic>[];
+  // Identity set: O(1) membership. `add` returns false if already present,
+  // which is exactly the previous "seen before" test (same add-never-remove
+  // semantics as the old linear-scan list, but O(n) overall instead of O(n^2)).
+  var seen = Set<dynamic>.identity();
   bool go(dynamic v) {
     if (v is List) {
-      if (seen.any((s) => identical(s, v))) return true;
-      seen.add(v);
+      if (!seen.add(v)) return true;
       return v.any(go);
     }
     if (v is Map) {
-      if (seen.any((s) => identical(s, v))) return true;
-      seen.add(v);
+      if (!seen.add(v)) return true;
       return v.values.any(go);
     }
     return false;
@@ -962,17 +982,15 @@ dynamic merge(dynamic objs, [dynamic maxdepth]) {
           grow(cur, pi);
           dst[pi] = pi > 0 ? getprop(dst[pi - 1], key) : dst[pi];
           var tval = dst[pi];
-          if (tval == null) {
-            cur[pi] = islist(val) ? <dynamic>[] : <String, dynamic>{};
-            return val;
-          } else if ((islist(val) && islist(tval)) ||
-              (ismap(val) && ismap(tval))) {
+          if ((islist(val) && islist(tval)) || (ismap(val) && ismap(tval))) {
             cur[pi] = tval;
-            return val;
           } else {
-            cur[pi] = val;
-            return null;
+            // Otherwise the override wins: it is copied, taking nothing from
+            // the destination, so no later merge writes into it.
+            cur[pi] = islist(val) ? <dynamic>[] : <String, dynamic>{};
+            dst[pi] = null;
           }
+          return val;
         }
       }
 
@@ -982,7 +1000,9 @@ dynamic merge(dynamic objs, [dynamic maxdepth]) {
         var target = ci - 1 < cur.length ? cur[ci - 1] : null;
         var value = ci < cur.length ? cur[ci] : null;
         setprop(target, key, value);
-        return value;
+        // walk writes this back into the override, so it is the override's
+        // own child, leaving the override unchanged.
+        return _lookup(parent, key);
       }
 
       out = walk(obj, before: before, after: after);
@@ -1023,13 +1043,33 @@ dynamic _idef(dynamic injdef, String field) {
 dynamic getpath(dynamic store, dynamic path, [dynamic injdef]) {
   List<dynamic>? parts;
   if (path is List) {
-    parts = List<dynamic>.from(path);
+    parts = <dynamic>[];
+    for (final part in path) {
+      // A number reads as it prints; a part neither string nor number misses.
+      if (part is num) {
+        parts.add(numToString(part));
+      } else if (part is String) {
+        parts.add(part);
+      } else {
+        return null;
+      }
+    }
   } else if (path is String) {
     parts = path.split(S_DT);
   } else if (path is num && path is! bool) {
-    parts = [strkey(path)];
+    parts = [numToString(path)];
   } else {
     return null;
+  }
+
+  if (iscondensed(store)) {
+    // Reads only the nodes on the path. A base changes what the path resolves
+    // against, so that read walks the expanded copy instead.
+    if (_idef(injdef, 'base') == null) {
+      return _condenseMaterialise(
+          store, _condenseResolve(store, store[_S_condroot], parts));
+    }
+    store = expand(store);
   }
 
   var hasInj = injdef != null;
@@ -1074,7 +1114,9 @@ dynamic getpath(dynamic store, dynamic path, [dynamic injdef]) {
         } else {
           part = raw;
         }
-        part = part is String ? part.replaceAll('\$\$', '\$') : strkey(part);
+        part = part is String
+            ? (part.contains('\$') ? part.replaceAll('\$\$', '\$') : part)
+            : strkey(part);
         if (part == S_MT) {
           var ascends = 0;
           while (pi + 1 < parts.length && parts[pi + 1] == S_MT) {
@@ -1115,6 +1157,7 @@ dynamic getpath(dynamic store, dynamic path, [dynamic injdef]) {
 }
 
 dynamic setpath(dynamic store, dynamic path, dynamic val, [dynamic injdef]) {
+  if (iscondensed(store)) throw StructError(_CONDENSE_IMMUTABLE);
   var ptype = typify(path);
   dynamic parts;
   if ((T_list & ptype) > 0) {
@@ -1172,6 +1215,8 @@ class Inj {
   Inj? prior;
   dynamic extra;
   dynamic root;
+  // Current map node names keys of its own (not $ commands).
+  bool named = false;
 }
 
 Inj? _dummy;
@@ -1201,6 +1246,7 @@ Inj _newInj(dynamic val, dynamic parent) {
   i.prior = null;
   i.extra = null;
   i.root = null;
+  i.named = false;
   return i;
 }
 
@@ -1262,7 +1308,12 @@ dynamic _injSetval(Inj inj, dynamic val, [int ancestor = 1]) {
     target = getelem(inj.nodes, -ancestor);
     key = getelem(inj.path, -ancestor);
   }
-  if (val == null) return delprop(target, key);
+  if (val == null) {
+    // A list keeps the removed slot as a hole until inject's loop ends.
+    if (ancestor < 2 && islist(target)) return setprop(target, key, SKIP);
+    return delprop(target, key);
+  }
+  if (identical(val, _heldnull)) return setprop(target, key, null);
   return setprop(target, key, val);
 }
 
@@ -1294,6 +1345,8 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
 
   _injDescend(inj);
 
+  inj.named = false;
+
   dynamic rv;
   if (isnode(val)) {
     List<dynamic> nodekeys;
@@ -1302,6 +1355,7 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
       var normal = ks.where((k) => !k.contains(S_DS)).toList()..sort();
       var trans = ks.where((k) => k.contains(S_DS)).toList()..sort();
       nodekeys = [...normal, ...trans];
+      inj.named = normal.isNotEmpty;
     } else {
       nodekeys = List.generate((val as List).length, (i) => i.toString());
     }
@@ -1324,12 +1378,13 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
       }
       nki = childinj.keyi + 1;
     }
+    if (val is List && val.any(isSkip)) val.removeWhere(isSkip);
     rv = val;
   } else if (val is String) {
     inj.mode = S_MVAL;
     var nv = _injectstr(val, store, inj);
     if (!isSkip(nv)) _injSetval(inj, nv);
-    rv = nv;
+    rv = identical(nv, _heldnull) ? null : nv;
   } else {
     rv = val;
   }
@@ -1338,13 +1393,15 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
     var mkey = inj.key;
     var mparent = inj.parent;
     var mval = getprop(mparent, mkey);
-    inj.modify!(mval, mkey, mparent, inj);
+    inj.modify!(isSkip(mval) ? null : mval, mkey, mparent, inj);
   }
 
   inj.ival = rv;
 
-  if (inj.prior == null && inj.root != null && haskey(inj.root, S_DTOP)) {
-    return getprop(inj.root, S_DTOP);
+  // Literal presence: a root list directive can leave a null there, and a root
+  // a transform removed, such as a $REF that names nothing, gives no value.
+  if (inj.prior == null && inj.root != null) {
+    return _lookup(inj.root, S_DTOP);
   }
   if (inj.key == S_DTOP && inj.parent != null && haskey(inj.parent, S_DTOP)) {
     return getprop(inj.parent, S_DTOP);
@@ -1403,7 +1460,7 @@ dynamic _injectstr(String val, dynamic store, [Inj? inj]) {
 // ---------------------------------------------------------------------------
 
 dynamic _transformDelete(dynamic inj, dynamic val, dynamic ref, dynamic store) {
-  delprop((inj as Inj).parent, inj.key);
+  _injSetval(inj as Inj, null);
   return null;
 }
 
@@ -1634,13 +1691,33 @@ dynamic _transformPack(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
 dynamic _transformRef(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
   if (inj.mode != S_MVAL) return null;
-  var nodes = inj.nodes;
+  // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x
+  // is a sibling.
   var refpath = _lookup(inj.parent, 1);
   inj.keyi = size(inj.keys);
   var specFunc = getprop(store, S_DSPEC);
   if (!isfunc(specFunc)) return null;
   var spec = specFunc();
-  var refv = getpath(spec, refpath);
+  var dpath = slice(inj.path, 1, -2);
+  var refinj = <String, dynamic>{
+    'dpath': dpath,
+    'dparent': getpath(spec, dpath),
+  };
+  var refv = getpath(spec, refpath, refinj);
+
+  // A reference chain that comes back to a path it has named names nothing.
+  var seen = <dynamic>[refpath];
+  var next = refv;
+  while (islist(next) && _lookup(next, 0) == '`\$REF`') {
+    var nextpath = _lookup(next, 1);
+    if (seen.contains(nextpath)) {
+      refv = null;
+      break;
+    }
+    seen.add(nextpath);
+    next = getpath(spec, nextpath, refinj);
+  }
+
   var hasSub = false;
   if (isnode(refv)) {
     walk(refv, after: (k, v, p, pp) {
@@ -1648,27 +1725,22 @@ dynamic _transformRef(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
       return v;
     });
   }
-  var tref = clone(refv);
-  var cpath = slice(inj.path, 0, size(inj.path) - 3);
-  var tpath = slice(inj.path, 0, size(inj.path) - 1);
-  var tcur = getpath(store, cpath);
-  var tval = getpath(store, tpath);
-  dynamic rval;
-  if (refv != null && (!hasSub || tval != null)) {
-    var cs = _injChild(inj, 0, [getelem(tpath, -1)]);
-    cs.path = tpath;
-    cs.nodes = slice(inj.nodes, 0, size(inj.nodes) - 1);
-    cs.parent = getelem(nodes, -2);
-    cs.ival = tref;
-    cs.dparent = tcur;
-    inject(tref, store, cs);
-    rval = cs.ival;
+
+  // A recursive reference stops where the data does.
+  var tval = getpath(store, slice(inj.path, 0, size(inj.path) - 1));
+  var rval = !hasSub || tval != null ? clone(refv) : null;
+
+  // The enclosing loop injects the referenced spec in this list's place, so
+  // neither this pass nor this element leaves a value for modify to check.
+  var grandparent = _injSetval(inj, rval, 2);
+  var prior = inj.prior;
+  if (prior != null) {
+    prior.modify = null;
+    if (islist(grandparent) || rval != null) {
+      prior.keyi = prior.keyi - 1;
+    }
   }
-  _injSetval(inj, rval, 2);
-  if (islist(inj.parent) && inj.prior != null) {
-    inj.prior!.keyi = inj.prior!.keyi - 1;
-  }
-  return val;
+  return SKIP;
 }
 
 String _jsstr(dynamic v) {
@@ -1876,12 +1948,13 @@ class StructError implements Exception {
 
 String _invalidTypeMsg(
     dynamic path, String needtype, int vt, dynamic v, String whence) {
-  var vs = v == null ? 'no value' : stringify(v);
+  final novalue = v == null || identical(v, _noarg);
+  var vs = novalue ? 'no value' : stringify(v);
   return 'Expected ' +
       (size(path) > 1 ? 'field ' + pathify(path, 1) + ' to be ' : '') +
       needtype +
       ', but found ' +
-      (v != null ? typename(vt) + S_VIZ : '') +
+      (novalue ? '' : typename(vt) + S_VIZ) +
       vs +
       '.';
 }
@@ -1894,11 +1967,10 @@ dynamic _validateString(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var t = typify(out);
   if ((T_string & t) == 0) {
     _pushErr(inj, _invalidTypeMsg(inj.path, S_string, t, out, 'V1010'));
-    return null;
+    return _keepnull(inj, out);
   }
   if (out == S_MT) {
     _pushErr(inj, 'Empty string at ' + pathify(inj.path, 1));
-    return null;
   }
   return out;
 }
@@ -1912,16 +1984,30 @@ dynamic _validateType(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var typev0 = idx >= 0 ? (1 << (31 - idx)) : 0;
   var typev = tname == S_nil ? (typev0 | T_null) : typev0;
   var out = _lookup(inj.dparent, inj.key);
-  var t = typify(out);
+  // One null: a missing field types as no value, which $NULL refuses.
+  var t = _has(inj.dparent, inj.key) ? typify(out) : T_noval;
   if ((t & typev) == 0) {
     _pushErr(inj, _invalidTypeMsg(inj.path, tname, t, out, 'V1001'));
-    return null;
+  }
+  return _keepnull(inj, out);
+}
+
+dynamic _validateAny(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
+  var inj = inj0 as Inj;
+  return _keepnull(inj, _lookup(inj.dparent, inj.key));
+}
+
+// A null the data holds comes back as _heldnull, which _injSetval writes: it
+// deletes the slot for null, and a list would shift down.
+dynamic _keepnull(Inj inj, dynamic out) {
+  if (out == null &&
+      inj.mode == S_MVAL &&
+      inj.full &&
+      _has(inj.dparent, inj.key)) {
+    return _heldnull;
   }
   return out;
 }
-
-dynamic _validateAny(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
-    _lookup((inj0 as Inj).dparent, inj0.key);
 
 dynamic _validateChild(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
@@ -1941,10 +2027,7 @@ dynamic _validateChild(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
       delprop(parent, key);
       return null;
     } else if (!ismap(tval)) {
-      _pushErr(
-          inj,
-          _invalidTypeMsg(slice(path, 0, size(path) - 1), S_object,
-              typify(tval), tval, 'V0220'));
+      // _validation reports the mismatch, once.
       return null;
     } else {
       for (var ckey in keysof(tval)) {
@@ -1963,10 +2046,6 @@ dynamic _validateChild(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
       (parent as List).clear();
       return null;
     } else if (!islist(inj.dparent)) {
-      _pushErr(
-          inj,
-          _invalidTypeMsg(slice(path, 0, size(path) - 1), S_list,
-              typify(inj.dparent), inj.dparent, 'V0230'));
       inj.keyi = size(parent);
       return inj.dparent;
     } else {
@@ -1978,60 +2057,88 @@ dynamic _validateChild(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
       while (pl.length > n) {
         pl.removeLast();
       }
-      inj.keyi = 0;
-      return getprop(inj.dparent, 0);
+
+      // NOTE: modifying inj! This extends the child value loop in inject
+      // to cover every cloned child.
+      for (var ckeyi = size(keys); ckeyi < size(parent); ckeyi++) {
+        setprop(keys, size(keys), strkey(ckeyi));
+      }
+
+      // Restart the child value loop at the first element (the loop
+      // increments keyi on resume) so that the first element is also
+      // validated against the child template.
+      inj.keyi = -1;
+
+      // SKIP leaves the cloned child template in place at the first
+      // element so the resumed loop can validate it.
+      return SKIP;
     }
   }
   return null;
 }
 
-dynamic _validateOne(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+dynamic _validateRest(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
-  if (inj.mode != S_MVAL) return null;
   var parent = inj.parent;
-  if (!islist(parent) || inj.keyi != 0) {
-    _pushErr(
-        inj,
-        'The \$ONE validator at field ' +
-            pathify(inj.path, 1, 1) +
-            ' must be the first element of an array.');
+  var keys = inj.keys;
+  var path = inj.path;
+
+  if (inj.mode == S_MKEYPRE) {
+    var resttm = _lookup(parent, inj.key);
+    var tval = getprop(inj.dparent, getelem(path, -2));
+
+    if (ismap(tval)) {
+      for (var ckey in keysof(tval)) {
+        if (!(keys as List).contains(ckey)) {
+          setprop(parent, ckey, clone(resttm));
+          setprop(keys, size(keys), ckey);
+        }
+      }
+    }
+
+    _injSetval(inj, null);
     return null;
   }
-  inj.keyi = size(inj.keys);
-  _injSetval(inj, inj.dparent, 2);
-  inj.path = slice(inj.path, 0, size(inj.path) - 1);
-  inj.key = getelem(inj.path, -1);
-  var tvals = slice(parent, 1);
-  if (size(tvals) == 0) {
-    _pushErr(
-        inj,
-        'The \$ONE validator at field ' +
-            pathify(inj.path, 1, 1) +
-            ' must have at least one argument.');
+
+  var prior = inj.prior;
+  if (inj.mode != S_MVAL ||
+      prior == null ||
+      !islist(prior.parent) ||
+      inj.keyi != 0) {
+    _pushErr(inj,
+        _restmsg(slice(path, 1), ' must be the last element of an array.'));
     return null;
   }
-  var matched = false;
-  for (var tv in (tvals as List)) {
-    if (matched) break;
-    var terrs = <dynamic>[];
-    var vstore = merge([<String, dynamic>{}, store], 1);
-    setprop(vstore, S_DTOP, inj.dparent);
-    var vcurrent = validate(
-        inj.dparent, tv, {'extra': vstore, 'errs': terrs, 'meta': inj.meta});
-    _injSetval(inj, vcurrent, -2);
-    if (size(terrs) == 0) matched = true;
+
+  inj.keyi = size(keys);
+  prior.modify = null;
+
+  var tuple = prior.parent;
+  var slot = _listIndex(prior.key) ?? -1;
+  var dlist = prior.dparent;
+  var numitems = islist(dlist) ? size(dlist) : 0;
+
+  if (numitems <= slot) {
+    _injSetval(inj, null, 2);
+    return SKIP;
   }
-  if (!matched) {
-    var valdesc = tvals.map((x) => stringify(x)).join(', ');
-    valdesc = valdesc.replaceAllMapped(
-        _R_TRANSFORM_NAME, (m) => m.group(1)!.toLowerCase());
-    _pushErr(
-        inj,
-        _invalidTypeMsg(inj.path, (size(tvals) > 1 ? 'one of ' : '') + valdesc,
-            typify(inj.dparent), inj.dparent, 'V0210'));
+
+  var itemtm = _lookup(parent, 1);
+  for (var i = slot; i < numitems; i++) {
+    setprop(tuple, i, clone(itemtm));
   }
-  return null;
+  for (var i = size(prior.keys); i < numitems; i++) {
+    setprop(prior.keys, size(prior.keys), strkey(i));
+  }
+
+  prior.keyi = prior.keyi - 1;
+  return SKIP;
 }
+
+String _restmsg(dynamic path, String problem) =>
+    'The \$REST validator at field ' + pathify(path) + problem;
 
 dynamic _validateExact(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
@@ -2048,41 +2155,314 @@ dynamic _validateExact(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
             ' must be the first element of an array.');
     return null;
   }
+  var cval = _slotval(inj);
+  var has = _slothas(inj);
   inj.keyi = size(inj.keys);
-  _injSetval(inj, inj.dparent, 2);
+
+  // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the
+  // detached list.
+  _setslot(inj, cval, has);
+
   inj.path = slice(inj.path, 0, size(inj.path) - 1);
-  inj.key = getelem(inj.path, -1);
-  var tvals = slice(parent, 1);
-  if (size(tvals) == 0) {
+  var tvals = slice(parent, 1) as List;
+  if (tvals.isEmpty) {
     _pushErr(
         inj,
         'The \$EXACT validator at field ' +
             pathify(inj.path, 1, 1) +
             ' must have at least one argument.');
-    return null;
+    return SKIP;
   }
-  var matched = false;
-  for (var tv in (tvals as List)) {
-    if (!matched && veq(tv, inj.dparent)) matched = true;
+  for (var tv in tvals) {
+    if (has && veq(tv, cval)) return SKIP;
   }
-  if (!matched) {
-    var valdesc = tvals.map((x) => stringify(x)).join(', ');
-    valdesc = valdesc.replaceAllMapped(
-        _R_TRANSFORM_NAME, (m) => m.group(1)!.toLowerCase());
+  _pushErr(
+      inj,
+      _invalidTypeMsg(
+          inj.path,
+          (size(inj.path) > 1 ? '' : 'value ') +
+              'exactly equal to ' +
+              (tvals.length == 1 ? '' : 'one of ') +
+              _valdesc(tvals),
+          typify(cval),
+          cval,
+          'V0110'));
+  return SKIP;
+}
+
+// Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+// count is an integer, or a map holding min, max or both.
+dynamic _validateNof(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatecount(inj0 as Inj, store, '\$NOF', true);
+
+// Every spec admits the value: ['`$ALL`', spec, ...].
+dynamic _validateAll(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatecount(inj0 as Inj, store, '\$ALL', false);
+
+// The counting list directives. Without a count, every spec has to admit.
+dynamic _validatecount(Inj inj, dynamic store, String name, bool counted) {
+  if (inj.mode != S_MVAL) return null;
+  var parent = inj.parent;
+  if (!islist(parent) || inj.keyi != 0) {
     _pushErr(
         inj,
-        _invalidTypeMsg(
-            inj.path,
-            (size(inj.path) > 1 ? '' : 'value ') +
-                'exactly equal to ' +
-                (size(tvals) == 1 ? '' : 'one of ') +
-                valdesc,
-            typify(inj.dparent),
-            inj.dparent,
-            'V0110'));
+        'The ' +
+            name +
+            ' validator at field ' +
+            pathify(inj.path, 1, 1) +
+            ' must be the first element of an array.');
+    return null;
   }
-  return null;
+
+  var cval = _slotval(inj);
+  var has = _slothas(inj);
+  inj.keyi = size(inj.keys);
+
+  // Replace the directive's list with the data value. Each return is SKIP, so
+  // that inject leaves the detached list alone and validates nothing in it.
+  _setslot(inj, cval, has);
+
+  inj.path = slice(inj.path, 0, size(inj.path) - 1);
+
+  var count = counted ? _lookup(parent, 1) : null;
+  var tvals = slice(parent, counted ? 2 : 1) as List;
+  var numtvals = tvals.length;
+  var field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1);
+
+  if (numtvals == 0) {
+    _pushErr(
+        inj,
+        field +
+            (counted ? ' must have a count and' : ' must have') +
+            ' at least one argument.');
+    return SKIP;
+  }
+
+  List<dynamic> nc = counted
+      ? _nofcount(count, numtvals)
+      : <dynamic>[numtvals, numtvals, 'all'];
+  num lo = nc[0];
+  num hi = nc[1];
+  var countdesc = nc[2];
+
+  if (countdesc == null) {
+    _pushErr(inj, field + ' has an invalid count: ' + stringify(count) + '.');
+    return SKIP;
+  }
+
+  var admitted = 0;
+  for (var ti = 0; ti < numtvals; ti++) {
+    var left = numtvals - ti;
+
+    // Stop once the specs left cannot change the verdict.
+    if (hi < admitted ||
+        admitted + left < lo ||
+        (lo <= admitted && admitted + left <= hi)) {
+      break;
+    }
+
+    if (_admits(cval, has, tvals[ti], inj, store)) {
+      admitted++;
+    }
+  }
+
+  if (admitted < lo || hi < admitted) {
+    _pushErr(
+        inj,
+        _invalidTypeMsg(inj.path, '$countdesc of ' + _valdesc(tvals),
+            typify(cval), cval, 'V0310'));
+  }
+
+  return SKIP;
 }
+
+// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+// bound is as for a $NOF count. A string's length is in code points.
+dynamic _validateLen(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatebound(inj0 as Inj, store, '\$LEN');
+
+// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+// bound holds min or gt, max or lt, or one of each.
+dynamic _validateRange(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatebound(inj0 as Inj, store, '\$RANGE');
+
+dynamic _validateLike(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatebound(inj0 as Inj, store, '\$LIKE');
+
+// The bounding list directives: a bound or pattern, then at most one spec that
+// also admits.
+dynamic _validatebound(Inj inj, dynamic store, String name) {
+  if (inj.mode != S_MVAL) return null;
+  var parent = inj.parent;
+  if (!islist(parent) || inj.keyi != 0) {
+    _pushErr(
+        inj,
+        'The ' +
+            name +
+            ' validator at field ' +
+            pathify(inj.path, 1, 1) +
+            ' must be the first element of an array.');
+    return null;
+  }
+
+  var cval = _slotval(inj);
+  var has = _slothas(inj);
+  inj.keyi = size(inj.keys);
+
+  // As for the counting directives: SKIP keeps inject off the detached list.
+  _setslot(inj, cval, has);
+
+  inj.path = slice(inj.path, 0, size(inj.path) - 1);
+
+  var field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1);
+  var nargs = size(parent) - 1;
+  var islen = '\$LEN' == name;
+  var islike = '\$LIKE' == name;
+  var argname = islike ? 'pattern' : 'bound';
+
+  if (nargs < 1 || 2 < nargs) {
+    _pushErr(inj, field + ' must have a ' + argname + ' and at most one spec.');
+    return SKIP;
+  }
+
+  var bound = _lookup(parent, 1);
+  var like = islike ? _likere(bound) : null;
+  var likedesc = like == null ? null : 'like /' + bound + '/';
+  List<dynamic> lb = islen
+      ? _lenbound(bound)
+      : <dynamic>[0, 0, islike ? likedesc : _rangedesc(bound)];
+  num lo = lb[0];
+  num hi = lb[1];
+  String? desc = lb[2];
+
+  if (desc == null) {
+    _pushErr(inj,
+        field + ' has an invalid ' + argname + ': ' + stringify(bound) + '.');
+    return SKIP;
+  }
+
+  var ctype = typify(cval);
+  var spec = _lookup(parent, 2);
+
+  if (nargs == 2 && !_admits(cval, has, spec, inj, store)) {
+    _pushErr(inj,
+        _invalidTypeMsg(inj.path, _valdesc([spec]), ctype, cval, 'V0410'));
+    return SKIP;
+  }
+
+  if (0 ==
+      ((islen ? T_string | T_list | T_map : islike ? T_string : T_number) &
+          ctype)) {
+    var needtype =
+        islen ? 'string, list or map' : islike ? S_string : 'number';
+    _pushErr(inj, _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420'));
+    return SKIP;
+  }
+
+  var len = islen ? (cval is String ? cval.runes.length : size(cval)) : 0;
+  var inbound = islen
+      ? lo <= len && (hi == -1 || len <= hi)
+      : islike
+          ? re_test(like, cval) as bool
+          : _inrange(bound, cval);
+
+  if (!inbound) {
+    var needtype = (size(inj.path) > 1 ? '' : 'value ') + desc;
+    _pushErr(inj, _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0430'));
+  }
+
+  return SKIP;
+}
+
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are null when the bound is invalid.
+List<dynamic> _lenbound(dynamic bound) {
+  var nc = _nofcount(bound, -1);
+  if (nc[2] == null) return <dynamic>[0, 0, null];
+  num lo = nc[0];
+  num hi = nc[1];
+
+  var desc = 'of length ' +
+      (lo == hi
+          ? numToString(lo)
+          : hi == -1
+              ? 'at least ' + numToString(lo)
+              : lo == 0
+                  ? 'at most ' + numToString(hi)
+                  : numToString(lo) + ' to ' + numToString(hi));
+
+  return <dynamic>[lo, hi, desc];
+}
+
+// A $LIKE pattern compiled by the port's own regex engine; null unless it
+// compiles.
+RegExp? _likere(dynamic pattern) {
+  if (pattern is! String) return null;
+  try {
+    return re_compile(pattern) as RegExp;
+  } on FormatException {
+    return null;
+  }
+}
+
+// The words for a $RANGE bound, which are null when the bound is invalid.
+String? _rangedesc(dynamic bound) {
+  if (!ismap(bound)) return null;
+
+  var min = _lookup(bound, 'min');
+  var max = _lookup(bound, 'max');
+  var gt = _lookup(bound, 'gt');
+  var lt = _lookup(bound, 'lt');
+  var hasmin = _has(bound, 'min');
+  var hasmax = _has(bound, 'max');
+  var hasgt = _has(bound, 'gt');
+  var haslt = _has(bound, 'lt');
+  var lower = hasmin ? min : gt;
+  var upper = hasmax ? max : lt;
+  bool isnum(bool has, dynamic n) => !has || 0 < (T_number & typify(n));
+
+  var valid = size(bound) > 0 &&
+      size(bound) == [hasmin, hasmax, hasgt, haslt].where((h) => h).length &&
+      (!hasmin || !hasgt) &&
+      (!hasmax || !haslt) &&
+      isnum(hasmin, min) &&
+      isnum(hasmax, max) &&
+      isnum(hasgt, gt) &&
+      isnum(haslt, lt) &&
+      (!(hasmin || hasgt) || !(hasmax || haslt) || lower <= upper);
+
+  if (!valid) return null;
+
+  return join([
+    hasmin
+        ? 'at least ' + stringify(min)
+        : hasgt
+            ? 'greater than ' + stringify(gt)
+            : null,
+    hasmax
+        ? 'at most ' + stringify(max)
+        : haslt
+            ? 'less than ' + stringify(lt)
+            : null,
+  ], ' and ');
+}
+
+// A number within a valid $RANGE bound.
+bool _inrange(dynamic bound, dynamic val) {
+  var min = _lookup(bound, 'min');
+  var max = _lookup(bound, 'max');
+  var gt = _lookup(bound, 'gt');
+  var lt = _lookup(bound, 'lt');
+  return (min == null || min <= val) &&
+      (max == null || val <= max) &&
+      (gt == null || gt < val) &&
+      (lt == null || val < lt);
+}
+
+// The specs as a message lists them, each `$NAME` as its lower-case name.
+String _valdesc(List tvals) =>
+    join(tvals.map((x) => stringify(x)).toList(), ', ').replaceAllMapped(
+        _R_TRANSFORM_NAME, (m) => m.group(1)!.toLowerCase());
 
 bool veq(dynamic a, dynamic b) {
   if (a == null && b == null) return true;
@@ -2126,14 +2506,14 @@ void _validation(dynamic pval, dynamic key, dynamic parent, dynamic inj0) {
     } else {
       var ckeys = keysof(cval);
       var pkeys = keysof(pval);
-      if (pkeys.isNotEmpty && getprop(pval, S_BOPEN) != true) {
-        // A child key is "unexpected" only when the shape does not CONTAIN it.
-        // Test presence, not `_lookup(...) == null`: a key that is present in
-        // the shape but maps to a null value (e.g. a record whose optional
-        // `serial_number` is null, merged into the shape by a `$AND` select)
-        // must NOT be rejected as unexpected.
-        var badkeys = ckeys.where((ck) =>
-            !(pval is Map && pval.containsKey(_mapKey(ck)))).toList();
+      // Only a spec written as {} is open, even if named keys resolved away.
+      if ((pkeys.isNotEmpty || inj.named) && getprop(pval, S_BOPEN) != true) {
+        // Literal presence: the shape declares ck even when its value is null.
+        // Canonical uses `NONE === _lookup`; `_lookup(...) == null` conflates
+        // present-null with absent and drops null-field records from open selects.
+        var badkeys = ckeys
+            .where((ck) => !(pval is Map && pval.containsKey(_mapKey(ck))))
+            .toList();
         if (badkeys.isNotEmpty) {
           _pushErr(
               inj,
@@ -2151,6 +2531,23 @@ void _validation(dynamic pval, dynamic key, dynamic parent, dynamic inj0) {
     if (!islist(pval)) {
       _pushErr(inj,
           _invalidTypeMsg(inj.path, typename(ptype), ctype, cval, 'V0030'));
+    } else if (size(pval) > 0) {
+      // Closed list, so reject items past the end of the shape.
+      var badkeys = <String>[];
+      for (var i = size(pval); i < size(cval); i++) {
+        badkeys.add(strkey(i));
+      }
+      if (badkeys.isNotEmpty) {
+        _pushErr(
+            inj,
+            'Unexpected keys at field ' +
+                pathify(inj.path, 1) +
+                S_VIZ +
+                badkeys.join(', '));
+      }
+    } else {
+      // Empty spec list [] means list can be open (any items).
+      merge([pval, cval]);
     }
   } else if (exactB) {
     if (!veq(cval, pval)) {
@@ -2219,8 +2616,13 @@ dynamic validate(dynamic data, dynamic spec, [dynamic injdef]) {
   }
   base['\$ANY'] = _validateAny;
   base['\$CHILD'] = _validateChild;
-  base['\$ONE'] = _validateOne;
   base['\$EXACT'] = _validateExact;
+  base['\$NOF'] = _validateNof;
+  base['\$ALL'] = _validateAll;
+  base['\$LEN'] = _validateLen;
+  base['\$RANGE'] = _validateRange;
+  base['\$LIKE'] = _validateLike;
+  base['\$REST'] = _validateRest;
   var store = merge([
     base,
     extra == null ? <String, dynamic>{} : extra,
@@ -2228,17 +2630,209 @@ dynamic validate(dynamic data, dynamic spec, [dynamic injdef]) {
   ], 1);
   var meta = getprop(injdef, 'meta', <String, dynamic>{});
   setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, false));
-  var out = transform(data, spec, {
-    'meta': meta,
-    'extra': store,
-    'modify': _validation,
-    'handler': _validateHandler,
-    'errs': errs,
-  });
+
+  // A spec that names an unknown checker validates nothing.
+  var numerrs = size(errs);
+  _checknames(spec, store, <dynamic>[], errs);
+
+  var out = numerrs < size(errs)
+      ? clone(data)
+      : transform(data, spec, {
+          'meta': meta,
+          'extra': store,
+          'modify': _validation,
+          'handler': _validateHandler,
+          'errs': errs,
+        });
   if (size(errs) > 0 && !collect) {
     throw StructError(join(errs, ' | '));
   }
   return out;
+}
+
+// Names a validate spec may use besides its checkers: transform's that it
+// keeps, and $OPEN.
+const _VALIDATE_NAMES = [
+  '\$TOP',
+  '\$SPEC',
+  '\$BT',
+  '\$DS',
+  '\$WHEN',
+  '\$ANNO',
+  '\$REF',
+  '\$FORMAT',
+  '\$APPLY',
+  '\$OPEN',
+];
+
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+void _checknames(dynamic spec, dynamic store, List<dynamic> path, dynamic errs,
+    [bool last = false]) {
+  var name = _refname(spec);
+  if (name != null) {
+    if (_unknownname(name, store)) {
+      setprop(errs, size(errs),
+          'Unknown validator ' + name + ' at field ' + pathify(path) + '.');
+    } else if (name == '\$REST') {
+      setprop(errs, size(errs),
+          _restmsg(path, ' must be the last element of an array.'));
+    }
+    return;
+  }
+
+  var head = islist(spec) ? _refname(_lookup(spec, 0)) : null;
+  if (head == '\$EXACT') return;
+
+  if (head == '\$REST') {
+    if (!last) {
+      setprop(errs, size(errs),
+          _restmsg(path, ' must be the last element of an array.'));
+    } else if (size(spec) != 2) {
+      setprop(errs, size(errs), _restmsg(path, ' must have exactly one spec.'));
+    }
+    _checknames(_lookup(spec, 1), store, [...path, 1], errs);
+    return;
+  }
+
+  const restkey = '`\$REST`';
+  if (ismap(spec) && _has(spec, restkey) && _has(spec, '`\$CHILD`')) {
+    setprop(errs, size(errs), _restmsg(path, ' cannot be used with \$CHILD.'));
+  }
+
+  var lastkey = islist(spec) ? strkey(size(spec) - 1) : null;
+  for (var key in keysof(spec)) {
+    if (ismap(spec) && key != restkey) _checknames(key, store, path, errs);
+    _checknames(
+        _lookup(spec, key), store, [...path, key], errs, key == lastkey);
+  }
+}
+
+// The name a whole-string reference gives, when it is a checker name in any
+// case.
+String? _refname(dynamic val) {
+  var m = val is String ? _R_INJECT_FULL.firstMatch(val) : null;
+  return m != null && _R_CHECKER_NAME.hasMatch(m.group(1)!.toUpperCase())
+      ? m.group(1)
+      : null;
+}
+
+// Unknown: undefined and upper case, or a defined name in another case. Null
+// disables a name.
+bool _unknownname(String name, dynamic store) {
+  bool known(String n) =>
+      _VALIDATE_NAMES.contains(n) || _lookup(store, n) != null;
+  var upper = name.toUpperCase();
+  return !known(name) && (upper == name || known(upper));
+}
+
+// Whether key is present in val, a null value included.
+bool _has(dynamic val, dynamic key) {
+  if (val is Map) return _readkey(key) && val.containsKey(_mapKey(key));
+  if (val is List) {
+    var ki = _listIndex(key);
+    return ki != null && ki >= 0 && ki < val.length;
+  }
+  return false;
+}
+
+// The data value at a list directive's slot. The directive's own dparent was
+// read with getprop, which reports a stored null as absent. A trial hands an
+// absent value down as _noarg, which holds no value.
+dynamic _slotval(Inj inj) {
+  final prior = inj.prior;
+  final val = prior == null ? inj.dparent : _lookup(prior.dparent, prior.key);
+  return identical(val, _noarg) ? null : val;
+}
+
+// Whether the slot holds a value: with one null, _slotval cannot say.
+bool _slothas(Inj inj) {
+  final prior = inj.prior;
+  final val = prior == null ? inj.dparent : _lookup(prior.dparent, prior.key);
+  if (identical(val, _noarg)) return false;
+  return prior == null ? val != null : _has(prior.dparent, prior.key);
+}
+
+// Set the slot that holds a list directive, as setval(val, 2) does. An absent
+// value deletes the slot; _injSetval deletes on null too, and here a null is
+// a value.
+void _setslot(Inj inj, dynamic val, bool has) {
+  if (has && val == null) {
+    setprop(getelem(inj.nodes, -2), getelem(inj.path, -2), null);
+  } else {
+    _injSetval(inj, val, 2);
+  }
+}
+
+// Every member val has is in out, unchanged, compared as JSON by veq. A member
+// only out has is a default the spec supplied, and is ignored.
+bool _keeps(dynamic val, dynamic out) {
+  if (!isnode(val) || islist(val) != islist(out) || !isnode(out)) {
+    return veq(val, out);
+  }
+  for (var k in keysof(val)) {
+    if (!_has(out, k) || !_keeps(_lookup(val, k), _lookup(out, k))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// A spec admits a value when validating the value against it finds no error
+// and gives back the value as it is. An absent value has nothing to give
+// back, and goes down as _noarg so that the nested validation reads it as no
+// value.
+bool _admits(dynamic val, bool has, dynamic spec, Inj inj, dynamic store) {
+  final tval = has ? val : _noarg;
+  var terrs = <dynamic>[];
+  var vstore = merge([<String, dynamic>{}, store], 1);
+  setprop(vstore, S_DTOP, tval);
+  var out = validate(
+      tval, spec, {'extra': vstore, 'errs': terrs, 'meta': inj.meta});
+  return size(terrs) == 0 && (!has || _keeps(val, out));
+}
+
+// The bounds of a $NOF count, and the words for it, which are null when the
+// count is invalid. Without a max, the bound is the number of specs.
+List<dynamic> _nofcount(dynamic count, int numtvals) {
+  bool isnat(dynamic n) => n is num && _isInteger(n) && n >= 0;
+
+  if (isnat(count)) {
+    return <dynamic>[
+      count,
+      count,
+      count == 0 ? 'none' : 'exactly ' + numToString(count)
+    ];
+  }
+
+  var min = _lookup(count, 'min');
+  var max = _lookup(count, 'max');
+  var hasmin = _has(count, 'min');
+  var hasmax = _has(count, 'max');
+
+  var valid = ismap(count) &&
+      size(count) > 0 &&
+      size(count) == (hasmin ? 1 : 0) + (hasmax ? 1 : 0) &&
+      (!hasmin || isnat(min)) &&
+      (!hasmax || isnat(max)) &&
+      (!hasmin || !hasmax || min <= max);
+
+  if (!valid) return <dynamic>[0, 0, null];
+
+  num lo = hasmin ? min : 0;
+  num hi = hasmax ? max : numtvals;
+
+  var desc = !hasmax
+      ? 'at least ' + numToString(lo)
+      : hi == 0
+          ? 'none'
+          : !hasmin
+              ? 'at most ' + numToString(hi)
+              : lo == hi
+                  ? 'exactly ' + numToString(lo)
+                  : numToString(lo) + ' to ' + numToString(hi);
+
+  return <dynamic>[lo, hi, desc];
 }
 
 // ---------------------------------------------------------------------------
@@ -2353,6 +2947,11 @@ bool _numCmp(dynamic a, dynamic b, String op) {
 
 dynamic _selectCmp(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
+  // The list form of $LIKE is validate's checker; the key form is this
+  // operator.
+  if (inj.mode == S_MVAL && ref == '\$LIKE') {
+    return _validateLike(inj, val, ref, store);
+  }
   if (inj.mode == S_MKEYPRE) {
     var term = getprop(inj.parent, inj.key);
     var gkey = getelem(inj.path, -2);
@@ -2425,10 +3024,7 @@ dynamic select(dynamic children0, dynamic query) {
     '\$LIKE': _selectCmp,
   };
   var q = clone(query);
-  walk(q, after: (k, v, p, pp) {
-    if (ismap(v)) setprop(v, S_BOPEN, getprop(v, S_BOPEN, true));
-    return v;
-  });
+  _openquery(q);
   for (var child in (children as List)) {
     var errs = <dynamic>[];
     var injdef = {
@@ -2440,6 +3036,360 @@ dynamic select(dynamic children0, dynamic query) {
     if (size(errs) == 0) results.add(child);
   }
   return results;
+}
+
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+void _openquery(dynamic q) {
+  if (ismap(q)) {
+    setprop(q, S_BOPEN, getprop(q, S_BOPEN, true));
+    for (var key in keysof(q)) {
+      _openquery(_lookup(q, key));
+    }
+  } else if (islist(q)) {
+    var head = _lookup(q, 0);
+    var exact = S_BEXACT == head;
+    var bounded =
+        '`\$NOF`' == head || '`\$LEN`' == head || '`\$RANGE`' == head;
+    for (var i = 0; i < size(q); i++) {
+      if (0 == i || !(exact || (bounded && 1 == i))) {
+        _openquery(_lookup(q, i));
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// condense
+// ---------------------------------------------------------------------------
+
+const _CONDENSE_VERSION = 1;
+const _CONDENSE_MAP = 0;
+const _CONDENSE_LIST = 1;
+const _CONDENSE_STR = 2;
+const _CONDENSE_NUM = 3;
+const _CONDENSE_TRUE = 4;
+const _CONDENSE_FALSE = 5;
+const _CONDENSE_NULL = 6;
+
+const _S_condense = '\$condense';
+const _S_condsym = 'sym';
+const _S_condnode = 'node';
+const _S_condroot = 'root';
+
+const _CONDENSE_IMMUTABLE = 'struct: condensed structures are immutable - '
+    'expand() first, then modify the copy';
+
+// Code-point order, the order the format sorts symbols in. String.compareTo
+// orders by code unit, which would put U+10000 before U+FFFF.
+int _condenseCmp(String a, String b) {
+  final ra = a.runes.iterator;
+  final rb = b.runes.iterator;
+  while (true) {
+    final hasa = ra.moveNext();
+    final hasb = rb.moveNext();
+    if (!hasa || !hasb) return hasa ? 1 : (hasb ? -1 : 0);
+    if (ra.current != rb.current) return ra.current < rb.current ? -1 : 1;
+  }
+}
+
+// The version has to match, not merely be a number: a later format read with
+// this one's schema would decode wrongly without failing.
+bool iscondensed([dynamic val]) {
+  if (val is! Map) return false;
+  final v = val[_S_condense];
+  return v is num &&
+      v == _CONDENSE_VERSION &&
+      val[_S_condsym] is List &&
+      val[_S_condnode] is List &&
+      val[_S_condroot] is num;
+}
+
+void _condenseCollect(dynamic val, Set<String> acc) {
+  if (val is Map) {
+    val.forEach((k, v) {
+      acc.add(k.toString());
+      _condenseCollect(v, acc);
+    });
+  } else if (val is List) {
+    for (final x in val) {
+      _condenseCollect(x, acc);
+    }
+  } else if (val is String) {
+    acc.add(val);
+  }
+}
+
+// An integral number keys as its integer, so 1 and 1.0 share one node.
+String _condenseNumKey(num n) {
+  final d = n.toDouble();
+  return d == d.truncateToDouble() && d.abs() < 9007199254740992.0
+      ? d.toInt().toString()
+      : d.toString();
+}
+
+dynamic condense(dynamic val) {
+  final symset = <String>{};
+  _condenseCollect(val, symset);
+  final sym = symset.toList()..sort(_condenseCmp);
+  final symid = <String, int>{};
+  for (var i = 0; i < sym.length; i++) {
+    symid[sym[i]] = i;
+  }
+
+  final node = <dynamic>[];
+  final seen = <String, int>{};
+
+  int intern(List<dynamic> enc) {
+    final enckey =
+        enc.map((x) => x is num ? _condenseNumKey(x) : '$x').join(',');
+    final hit = seen[enckey];
+    if (hit != null) return hit;
+    seen[enckey] = node.length;
+    node.add(enc);
+    return node.length - 1;
+  }
+
+  // Post-order, so a subtree is interned before its parent refers to it, and
+  // map pairs in ascending symbol id, so that a lookup can bisect them.
+  int build(dynamic n) {
+    if (n is Map) {
+      final enc = <dynamic>[_CONDENSE_MAP];
+      final keys = n.keys.map((k) => k.toString()).toList()
+        ..sort(_condenseCmp);
+      for (final k in keys) {
+        enc.add(symid[k]);
+        enc.add(build(n[k]));
+      }
+      return intern(enc);
+    }
+    if (n is List) {
+      final enc = <dynamic>[_CONDENSE_LIST];
+      for (final x in n) {
+        enc.add(build(x));
+      }
+      return intern(enc);
+    }
+    if (n is String) return intern(<dynamic>[_CONDENSE_STR, symid[n]]);
+    if (n is num) return intern(<dynamic>[_CONDENSE_NUM, n]);
+    if (n == true) return intern(<dynamic>[_CONDENSE_TRUE]);
+    if (n == false) return intern(<dynamic>[_CONDENSE_FALSE]);
+    return intern(<dynamic>[_CONDENSE_NULL]);
+  }
+
+  final root = build(val);
+
+  return <String, dynamic>{
+    _S_condense: _CONDENSE_VERSION,
+    _S_condsym: List<dynamic>.from(sym),
+    _S_condnode: node,
+    _S_condroot: root,
+  };
+}
+
+int? _condenseIndex(dynamic idx) {
+  if (idx is int) return idx;
+  if (idx is double &&
+      idx.isFinite &&
+      idx == idx.truncateToDouble() &&
+      idx.abs() < 4294967296.0) {
+    return idx.toInt();
+  }
+  return null;
+}
+
+bool _condenseFound(dynamic idx) => idx is num && 0 <= idx;
+
+dynamic _condenseSym(dynamic cond, dynamic id) {
+  final sym = cond is Map ? cond[_S_condsym] : null;
+  final i = _condenseIndex(id);
+  return sym is List && i != null && 0 <= i && i < sym.length ? sym[i] : null;
+}
+
+// Node idx as the list of its encoding, or null when there is no such node.
+List<dynamic>? _condenseEnc(dynamic cond, dynamic idx) {
+  final node = cond is Map ? cond[_S_condnode] : null;
+  final i = _condenseIndex(idx);
+  if (node is! List || i == null || i < 0 || i >= node.length) return null;
+  final enc = node[i];
+  if (enc == null) return null;
+  return enc is List ? enc : <dynamic>[];
+}
+
+dynamic _condenseKind(List<dynamic> enc) => enc.isEmpty ? null : enc[0];
+
+int _condenseSymId(dynamic cond, String key) {
+  final sym = cond is Map ? cond[_S_condsym] : null;
+  if (sym is! List) return -1;
+  var lo = 0;
+  var hi = sym.length - 1;
+  while (lo <= hi) {
+    final mid = (lo + hi) >> 1;
+    final s = sym[mid];
+    if (s == key) return mid;
+    if (s is String && _condenseCmp(s, key) < 0) {
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return -1;
+}
+
+dynamic _condenseChild(dynamic cond, dynamic idx, dynamic key) {
+  final enc = _condenseEnc(cond, idx);
+  if (enc == null || !_readkey(key)) return -1;
+  final kind = _condenseKind(enc);
+
+  if (kind == _CONDENSE_MAP) {
+    final symid = _condenseSymId(cond, jsString(key));
+    if (symid < 0) return -1;
+    var lo = 0;
+    var hi = (enc.length - 1) ~/ 2 - 1;
+    while (lo <= hi) {
+      final mid = (lo + hi) >> 1;
+      final k = enc[1 + mid * 2];
+      if (k == symid) return enc[2 + mid * 2];
+      if (k is num && k < symid) {
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return -1;
+  }
+
+  // The plain list read's rule: condensing must not change which value a path
+  // selects.
+  if (kind == _CONDENSE_LIST) {
+    final i = _listIndex(key);
+    return i != null && i >= 0 && i < enc.length - 1 ? enc[1 + i] : -1;
+  }
+
+  return -1;
+}
+
+// Walk a path from node idx: the node index reached, or -1.
+dynamic _condenseResolve(dynamic cond, dynamic idx, dynamic path) {
+  final List<dynamic> parts = path is List
+      ? path
+      : path is String
+          ? (path == S_MT ? <dynamic>[] : path.split(S_DT))
+          : (path == null || identical(path, _noarg))
+              ? <dynamic>[]
+              : <dynamic>[jsString(path)];
+  dynamic at = idx;
+  for (final part in parts) {
+    if (at is num && at < 0) return -1;
+    if (part == S_MT) continue;
+    at = _condenseChild(cond, at, part);
+  }
+  return at;
+}
+
+// A fresh tree each call: no materialisation shares a container with another,
+// even where the condensed form shares the node.
+dynamic _condenseMaterialise(dynamic cond, dynamic idx) {
+  dynamic rebuild(dynamic i) {
+    final enc = _condenseEnc(cond, i);
+    if (enc == null) return null;
+    final kind = _condenseKind(enc);
+    if (kind == _CONDENSE_MAP) {
+      final out = <String, dynamic>{};
+      for (var j = 1; j < enc.length; j += 2) {
+        out[jsString(_condenseSym(cond, enc[j]))] =
+            rebuild(j + 1 < enc.length ? enc[j + 1] : null);
+      }
+      return out;
+    }
+    if (kind == _CONDENSE_LIST) {
+      final out = <dynamic>[];
+      for (var j = 1; j < enc.length; j++) {
+        out.add(rebuild(enc[j]));
+      }
+      return out;
+    }
+    if (kind == _CONDENSE_STR) {
+      return enc.length > 1 ? _condenseSym(cond, enc[1]) : null;
+    }
+    if (kind == _CONDENSE_NUM) return enc.length > 1 ? enc[1] : null;
+    if (kind == _CONDENSE_TRUE) return true;
+    if (kind == _CONDENSE_FALSE) return false;
+    return null;
+  }
+
+  return idx is num && idx < 0 ? null : rebuild(idx);
+}
+
+dynamic expand(dynamic cond) =>
+    iscondensed(cond) ? _condenseMaterialise(cond, cond[_S_condroot]) : cond;
+
+List<String> _condenseKeys(dynamic cond, dynamic idx) {
+  final enc = _condenseEnc(cond, idx);
+  if (enc == null) return <String>[];
+  final kind = _condenseKind(enc);
+  if (kind == _CONDENSE_MAP) {
+    final out = <String>[];
+    for (var j = 1; j < enc.length; j += 2) {
+      out.add(jsString(_condenseSym(cond, enc[j])));
+    }
+    return out;
+  }
+  if (kind == _CONDENSE_LIST) {
+    return List<String>.generate(enc.length - 1, (j) => j.toString());
+  }
+  return <String>[];
+}
+
+int _condenseSize(dynamic cond, dynamic idx) {
+  final enc = _condenseEnc(cond, idx);
+  if (enc == null) return 0;
+  final kind = _condenseKind(enc);
+  if (kind == _CONDENSE_MAP) return (enc.length - 1) ~/ 2;
+  if (kind == _CONDENSE_LIST) return enc.length - 1;
+  return 0;
+}
+
+/// A cursor into a condensed structure. [ref] hands out ONE shared
+/// materialisation per node, through a memo every view reached by [at]
+/// shares; mutating it changes what every other [ref] of that node sees.
+class CondenseView {
+  final dynamic _cond;
+  final dynamic _start;
+  final Map<String, dynamic> _memo;
+
+  CondenseView._(this._cond, this._start, this._memo);
+
+  dynamic get([dynamic path]) =>
+      _condenseMaterialise(_cond, _condenseResolve(_cond, _start, path));
+
+  List<String> keys([dynamic path]) =>
+      _condenseKeys(_cond, _condenseResolve(_cond, _start, path));
+
+  bool has([dynamic path]) =>
+      _condenseFound(_condenseResolve(_cond, _start, path));
+
+  CondenseView at([dynamic path]) =>
+      CondenseView._(_cond, _condenseResolve(_cond, _start, path), _memo);
+
+  dynamic value() => _condenseMaterialise(_cond, _start);
+
+  int size() => _condenseSize(_cond, _start);
+
+  bool exists() => _condenseFound(_start);
+
+  dynamic ref() {
+    final k = jsString(_start);
+    if (!_memo.containsKey(k)) _memo[k] = _condenseMaterialise(_cond, _start);
+    return _memo[k];
+  }
+}
+
+CondenseView condenseview(dynamic cond,
+    [dynamic idx, Map<String, dynamic>? memo]) {
+  final start = idx ?? (iscondensed(cond) ? cond[_S_condroot] : -1);
+  return CondenseView._(cond, start, memo ?? <String, dynamic>{});
 }
 
 // ---------------------------------------------------------------------------

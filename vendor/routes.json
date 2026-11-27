@@ -33,9 +33,14 @@
   "landed in sdkgen AFTER this pack forked and was stranded by the",
   "migration: the trees were removed from sdkgen (correctly — dart lives",
   "here) and never added here. Recovered at the same tag, through this",
-  "table rather than by hand."
+  "table rather than by hand.",
+  "",
+  "The struct ports had no route at all: committed copies, older than any",
+  "tag here, while the corpus a project runs moved with sdkgen's checkpoint.",
+  "Routed when this table moved to sdk-20261125-1959-0, the checkpoint",
+  "sdkgen vendors its own twenty targets at."
  ],
- "tag": "sdk-20261016-0845-0",
+ "tag": "sdk-20261125-1959-0",
  "repo": {
   "omni": {
    "url": "https://github.com/voxgig/omni",
@@ -48,6 +53,10 @@
   "sekreto": {
    "url": "https://github.com/voxgig/sekreto",
    "local": "~/Projects/voxgig/sekreto"
+  },
+  "struct": {
+   "url": "https://github.com/voxgig/struct",
+   "local": "~/Projects/voxgig/struct"
   }
  },
  "lang": {
@@ -60,7 +69,7 @@
    "lib": "omni",
    "port": "dart",
    "lang": "dart",
-   "version": "sdk-20260908-1556-0",
+   "version": "0.2.0",
    "dir": [
     "tm/dart/test/vendor/omni"
    ],
@@ -74,7 +83,7 @@
    "lib": "omni",
    "port": "haskell",
    "lang": "haskell",
-   "version": "sdk-20260908-1556-0",
+   "version": "sdk-20261125-1959-0",
    "dir": [
     "tm/haskell/test/vendor/omni"
    ],
@@ -86,7 +95,7 @@
    "lib": "omni",
    "port": "lean",
    "lang": "lean",
-   "version": "sdk-20260908-1556-0",
+   "version": "sdk-20261125-1959-0",
    "dir": [
     "tm/lean/test/vendor/omni"
    ],
@@ -98,7 +107,7 @@
    "lib": "plugin",
    "port": "dart",
    "lang": "dart",
-   "version": "sdk-20260908-1556-0",
+   "version": "sdk-20261125-1959-0",
    "dir": [
     "tm/dart/lib/feature/secrets/plugin"
    ],
@@ -124,7 +133,7 @@
    "lib": "sekreto",
    "port": "dart",
    "lang": "dart",
-   "version": "sdk-20260908-1556-0",
+   "version": "0.1.0",
    "dir": [
     "tm/dart/lib/feature/secrets/sekreto",
     "tm/dart/lib/feature/secrets/sekreto/src",
@@ -158,6 +167,35 @@
      "to": "'../../plugin/plugin.dart'"
     }
    ]
+  },
+  {
+   "lib": "struct",
+   "port": "dart",
+   "lang": "dart",
+   "version": "0.2.2",
+   "file": {
+    "dart/lib/voxgig_struct.dart": "tm/dart/lib/utility/voxgig_struct.dart"
+   }
+  },
+  {
+   "lib": "struct",
+   "port": "haskell",
+   "lang": "haskell",
+   "version": "0.1.1",
+   "file": {
+    "haskell/src/VoxgigStruct.hs": "tm/haskell/src/VoxgigStruct.hs",
+    "haskell/src/Vregex.hs": "tm/haskell/src/Vregex.hs"
+   }
+  },
+  {
+   "lib": "struct",
+   "port": "lean",
+   "lang": "lean",
+   "version": "0.1.1",
+   "file": {
+    "lean/src/VoxgigStruct.lean": "tm/lean/src/VoxgigStruct.lean",
+    "lean/src/Vregex.lean": "tm/lean/src/Vregex.lean"
+   }
   }
  ]
 }
