@@ -853,6 +853,17 @@ describe('sdkgen-langpack', () => {
 })
 
 
+// A bundled feature installs itself active, so a project switches one off in
+// its own copy of the feature's model; an overlay of `active: false` would
+// not unify with the copy's `active: true`.
+function switchOff(consumer, name) {
+  const file = Path.join(consumer.sdk, 'model', 'feature', name + '.aontu')
+  const src = Fs.readFileSync(file, 'utf8')
+  ok(/^ {2}active: true$/m.test(src), name + ': the installed feature model does not declare itself active')
+  Fs.writeFileSync(file, src.replace(/^ {2}active: true$/m, '  active: false'))
+}
+
+
 // THE DART SECRETS SEAM, and the two hazards only dart has.
 //
 // This test moved here from sdkgen's `generate.test.ts` with the dart target
@@ -898,6 +909,7 @@ describe('sdkgen-langpack: dart secrets', () => {
         'plugin: { vault: active: true aws: active: true } }'),
     })).files
 
+    switchOff(consumer, 'secrets')
     plain = (await generateInto(consumer, {
       model: consumerModel(consumer.sdk),
     })).files
@@ -1016,10 +1028,11 @@ describe('sdkgen-langpack: dart secrets', () => {
   // model is compiled twice on purpose: the add actions read `actx.model`
   // and nothing recompiles it mid-process, so the copy `setModel` installs
   // has to carry the activation the later generate compiles again.
-  async function generateSecrets(extra) {
+  async function generateSecrets(extra, off) {
     const consumer = stageConsumer({ recordLog: true })
     try {
       await consumer.add('feature', 'secrets')
+      if (off) switchOff(consumer, 'secrets')
       consumer.setModel(consumerModel(consumer.sdk, extra))
       await consumer.addPackage(PKG)
       consumer.compile()
@@ -1177,8 +1190,7 @@ describe('sdkgen-langpack: dart secrets', () => {
     // keeps `feature.trim: false`, so `target add` leaves every feature's
     // source in place and this generate-time exclude is the trim), the
     // markers are blank, and lakefile and Makefile carry nothing of it.
-    const { files: off } = await generateSecrets(
-      'main: kit: feature: secrets: { active: false }')
+    const { files: off } = await generateSecrets('', true)
     deepStrictEqual(Object.keys(off).filter((p) => /src\/feature\/secrets\//.test(p)), [],
       'lean: an inactive model still ships the secrets container')
     const offclean = (files, label) => {
@@ -1196,7 +1208,7 @@ describe('sdkgen-langpack: dart secrets', () => {
     offclean(off, 'an inactive model')
 
     // And this suite's own shared consumer, which HAS the feature installed
-    // but never activates it in its model: the same three files must be
+    // and switched off in its copy of the model: the same three files must be
     // clean there too. (In sdkgen this was the whole-suite consumer, which
     // had no feature added at all; here the stronger case is the one that
     // has the sources on disk and still must emit none of them.)
