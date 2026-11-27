@@ -82,8 +82,7 @@
       // has just been absorbed into this instance and is reached through
       // data(). `done` still runs: it completes the pipeline and raises on
       // failure, and when throwing is disabled it hands back the error
-      // payload, which passes through unchanged. See AGENTS.md "Entity
-      // operations return ENTITIES".
+      // payload, which passes through unchanged.
       return (null != ctx.result && true == ctx.result.ok) ? this : out;
     } catch (err) {
       // What a hook throws here must not escape the cleaning below.

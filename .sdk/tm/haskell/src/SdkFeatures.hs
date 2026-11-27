@@ -1187,9 +1187,9 @@ makeClientBase config makeFeature options = do
   writeIORef (cOptions rootctx) opts
   -- Add features in the resolved order (makeOptions records an explicit array
   -- order, else defaults to test-first). Ordering matters: the `test` feature
-  -- installs the base mock transport and the transport features
-  -- (retry/cache/netsim/proxy/ratelimit) wrap whatever is current, so `test`
-  -- must be added before them to sit at the base of the wrapper chain.
+  -- installs the base mock transport and the features whose model declares
+  -- `transport: 'wrap'` wrap whatever is current, so `test` must be added
+  -- before them to sit at the base of the wrapper chain.
   featureOpts <- do fmV <- toMap <$> getp opts "feature"; case fmV of VMap _ -> pure fmV; _ -> emptyMap
   orderV <- getpathS opts "__derived__.featureorder"
   order <- case orderV of VList ref -> readIORef ref; _ -> pure []
@@ -1270,8 +1270,8 @@ direct client fetchargs = do
 -- a top-level `errors` array, so status alone would report a failed query as
 -- ok.
 --
--- NOTE: like direct, this bypasses the feature pipeline — no retry, ratelimit
--- or paging features apply.
+-- NOTE: like direct, this bypasses the feature pipeline: no feature hook runs
+-- on this path.
 graphql :: Client -> String -> Value -> Value -> IO Value
 graphql client query variables ctrl = do
   allowed <- opAllowed client "graphql"

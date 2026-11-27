@@ -1,6 +1,6 @@
 // Offline feature-test harness for the generated SDK.
 //
-// Feature behaviour (retry, cache, rbac, telemetry, ...) is unit-tested by
+// The behaviour of each feature this SDK carries is unit-tested by
 // driving each feature class through a faithful miniature of the real
 // operation pipeline against a configurable mock transport — the same hook
 // order and short-circuit rules as the generated entity op code, but with

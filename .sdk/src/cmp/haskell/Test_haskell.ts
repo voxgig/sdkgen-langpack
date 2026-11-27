@@ -91,7 +91,7 @@ ${parents('list').length ? `    entmap <- getp existing "${e.name}"
     rec0 <- keysof entmap >>= \\ids -> case ids of { (i : _) -> getp entmap i; [] -> emptyMap }
 ` + fill('em1', 'rec0', 'list', '    ') : ''}    lst <- eList ent em1 em2
     -- \`list\` resolves to one ENTITY per record; the record is reached
-    -- through eDataGet. See AGENTS.md "Entity operations return ENTITIES".
+    -- through eDataGet.
     ok <- mapM (\\en -> ismap <$> eDataGet en) lst
     pure (all id ok)
 `

@@ -1,9 +1,8 @@
 /- ProjectName SDK feature catalog: the concrete features.
 
    Each constructor returns a `Feature` closing over its own state refs. A
-   feature either wraps the transport (retry, timeout, ratelimit, cache, proxy,
-   netsim, test) or handles pipeline hooks (idempotency, rbac, metrics,
-   telemetry, debug, audit, clienttrack, paging, streaming) — or both.
+   feature wraps the transport (those whose model declares `transport: 'wrap'`,
+   and `test`), handles pipeline hooks, or both.
 
    Observable state is recorded in the client's `track` buckets under the
    feature's own name, so behaviour is assertable from tests. -/

@@ -1532,6 +1532,33 @@ describe('sdkgen-langpack: dart secrets', () => {
 })
 
 
+// A generated source comment states its rule, and names no document a project
+// may not have and no list of features a project may not carry.
+describe('generated source comments', () => {
+  test('no fragment, template or component cites the agent guide or lists the wrapping features', () => {
+    const files = []
+    const walk = (dir) => {
+      for (const e of Fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = Path.join(dir, e.name)
+        if (e.isDirectory()) walk(p)
+        else files.push(p)
+      }
+    }
+    walk(Path.join(PKG, '.sdk', 'tm'))
+    walk(Path.join(PKG, '.sdk', 'src', 'cmp'))
+    const found = []
+    for (const file of files) {
+      const src = Fs.readFileSync(file, 'utf8')
+      if (src.includes('VENDORED:')) continue
+      if (/AGENTS\.md|retry\/cache\/netsim|\(retry, timeout, ratelimit|no retry,\s+(?:--\s+|\/\/\s+)?ratelimit/.test(src)) {
+        found.push(Path.relative(PKG, file))
+      }
+    }
+    deepStrictEqual(found, [], 'sources that cite the agent guide or list the wrapping features')
+  })
+})
+
+
 // Where the credential travels, read from the config's auth at run time.
 describe('credential placement in the templates', () => {
   const TM = Path.join(PKG, '.sdk', 'tm')
