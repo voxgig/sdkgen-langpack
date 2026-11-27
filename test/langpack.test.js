@@ -1004,6 +1004,22 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // A feature a target cannot carry is in no table of that target's.
+  test('the reference feature tables list the features that apply to the target', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk,
+        "main: kit: feature: elsewhere: { active: true, title: 'Elsewhere only', " +
+        'needs: { nonesuch: true } }'),
+      root: docsRoot(),
+    })
+    for (const target of ['dart', 'haskell']) {
+      const ref = String(files[target + '/REFERENCE.md'])
+      ok(/^\| `test` \| [^|]+ \| /m.test(ref), target + ': the reference lists no test feature')
+      ok(!/`elsewhere`/.test(ref), target + ': the reference lists a feature that does not apply')
+    }
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {

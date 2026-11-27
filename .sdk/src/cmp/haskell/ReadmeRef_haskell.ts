@@ -1,5 +1,5 @@
 
-import { cmp, each, Content, canonKey, File, entityIdField, opRequestShape } from '@voxgig/sdkgen'
+import { cmp, each, Content, canonKey, File, entityIdField, opRequestShape, featureDocs } from '@voxgig/sdkgen'
 
 import {
   KIT,
@@ -70,7 +70,6 @@ const ReadmeRef = cmp(function ReadmeRef(props: any) {
   const { model } = props.ctx$
 
   const entity = getModelPath(model, `main.${KIT}.entity`)
-  const feature = getModelPath(model, `main.${KIT}.feature`)
 
   const publishedEntities = each(entity).filter((e: any) => e.active !== false)
 
@@ -357,7 +356,7 @@ The entity name.
 
 
     // Features section
-    const activeFeatures = each(feature).filter((f: any) => f.active)
+    const activeFeatures = featureDocs(model, target)
     if (activeFeatures.length > 0) {
       Content(`
 ---
@@ -369,7 +368,7 @@ The entity name.
 `)
 
       activeFeatures.map((f: any) => {
-        Content(`| \`${f.name}\` | ${f.version || '0.0.1'} | ${f.title || ''} |
+        Content(`| \`${f.name}\` | ${f.version} | ${f.titleCell} |
 `)
       })
 
