@@ -142,8 +142,8 @@ function leanSecrets(model: any, target: any): {
 }
 
 
-// What SdkUtility's makeOptions reads: no `extend`, `system`, `secret` or `server`.
-const LEAN_OPTIONS = ['apikey', 'base', 'prefix', 'suffix', 'headers', 'feature']
+// What the lean runtime reads: no `extend` or `system`.
+const LEAN_OPTIONS = ['server', 'apikey', 'secret', 'base', 'prefix', 'suffix', 'headers', 'feature']
 
 const LEAN_OPTION_KIND: Record<string, string> = { string: 'String', map: 'Value', list: 'Value' }
 
@@ -157,8 +157,16 @@ function leanOptionRows(model: any): string {
 // from the caller, read from the environment.
 function leanClientOptions(model: any): string {
   const kit = model.main[KIT]
-  const pairs = fact(kit, 'auth').apikey ?
-    [`("apikey", .str ((← IO.getEnv "${fact(kit, 'env').apikey}").getD ""))`] : []
+  const auth = fact(kit, 'auth')
+  const env = (name: string) => `.str ((← IO.getEnv ${leanString(name)}).getD "")`
+  const pairs: string[] = []
+  if (auth.apikey) pairs.push(`("apikey", ${env(fact(kit, 'env').apikey)})`)
+  if (auth.secret) pairs.push(`("secret", ${env(fact(kit, 'env').secret)})`)
+  const svars = fact(kit, 'server').filter((v: any) => v.required)
+  if (0 < svars.length) {
+    pairs.push(`("server", ← newMap #[${svars.map((v: any) =>
+      `(${leanString(v.name)}, .str ${leanString('<' + v.name + '>')})`).join(', ')}])`)
+  }
   return 0 === pairs.length ? '(← emptyMap)' : `(← newMap #[${pairs.join(', ')}])`
 }
 

@@ -903,8 +903,8 @@ describe('sdkgen-langpack', () => {
       off: { dart: [], haskell: [], lean: [] },
       bearer: { dart: ['apikey'], haskell: ['apikey'], lean: ['apikey'] },
       query: { dart: ['apikey'], haskell: ['apikey'], lean: ['apikey'] },
-      basic: { dart: ['apikey', 'secret'], haskell: ['apikey', 'secret'], lean: ['apikey'] },
-      server: { dart: ['server'], haskell: ['server'], lean: [] },
+      basic: { dart: ['apikey', 'secret'], haskell: ['apikey', 'secret'], lean: ['apikey', 'secret'] },
+      server: { dart: ['server'], haskell: ['server'], lean: ['server'] },
     }
     for (const [shape, extra] of Object.entries(AUTH_MODELS)) {
       const { files } = await generateInto(consumer, {
@@ -1198,6 +1198,19 @@ describe('sdkgen-langpack', () => {
       'dart: a target at the project root does not write its README there')
     ok(!/\bcd dart\b/.test(String(rootReadme)),
       'dart: the README enters a dart directory a root target does not have')
+  })
+
+
+  // lean's config carries what the other targets' configs carry.
+  test('the lean config carries the server defaults and the credential placement', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, AUTH_MODELS.query + '\n' + AUTH_MODELS.server),
+    })
+    const config = String(files['lean/src/SdkConfig.lean'])
+    ok(config.includes('\\"server\\":{\\"tenant\\":\\"\\",\\"version\\":\\"v1\\"}'),
+      'lean: the config has no server defaults:\n' + config.slice(0, 600))
+    ok(config.includes('\\"in\\":\\"query\\"') && config.includes('\\"name\\":\\"api_key\\"'),
+      'lean: the config has no credential placement')
   })
 
 
@@ -1639,6 +1652,24 @@ describe('credential placement in the templates', () => {
     const suite = Fs.readFileSync(Path.join(TM, 'dart/test/pipeline_test.dart'), 'utf8')
     ok(suite.includes("test('Basic under query placement sets no authorization header'"),
       'dart: the pipeline suite does not run Basic under query placement')
+  })
+
+  test('lean: a templated base needs its variables, and Basic joins the key and the secret in a header', () => {
+    const util = Fs.readFileSync(Path.join(TM, 'lean/src/SdkUtility.lean'), 'utf8')
+    ok(util.includes('def resolveServer (config opts : Value) (testmode : Bool) : SIO Unit := do') &&
+      util.includes("else if testmode then url := url.replace ph (\"test-\" ++ name)"),
+    'lean: no server-variable rule in SdkUtility')
+    ok(util.includes('if place == "header" && (← gp (← gp options "auth") "basic") == .bool true then do'),
+      'lean: prepareAuth has no Basic branch gated on the header placement')
+    const runtime = Fs.readFileSync(Path.join(TM, 'lean/src/SdkRuntime.lean'), 'utf8')
+    ok(runtime.includes('SdkUtility.resolveServer config opts testmode'),
+      'lean: a client is constructed without resolving its server variables')
+
+    const suite = Fs.readFileSync(Path.join(TM, 'lean/test/TPipeline.lean'), 'utf8')
+    for (const name of ['resolveServer: a live client refuses a variable with no value',
+      'prepareAuth: Basic under query placement sets no authorization header']) {
+      ok(suite.includes('"' + name + '"'), 'lean: the pipeline suite does not check ' + name)
+    }
   })
 
   test('haskell: Basic joins the key and the secret in a header, and the key goes where auth.in says', () => {
