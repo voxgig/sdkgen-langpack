@@ -112,6 +112,78 @@
     }
    }
   },
+  "plugin/lean": {
+   "repo": "https://github.com/voxgig/plugin",
+   "commit": "8605cdc5e68a691130ae9b585baf8c0091a66351",
+   "version": "sdk-20261125-1959-0",
+   "tag": "sdk-20261125-1959-0",
+   "file": {
+    "tm/lean/src/feature/secrets/plugin/Plugin.lean": {
+     "sha256": "234a35ba34870e6f437b6f83c2b9abbc0529a9508018de02f5d67a2105eea40f",
+     "upstream": "lean/src/Plugin.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Capability.lean": {
+     "sha256": "85e9297e6629c1d13a6d541793320e3f4b643fb80e57bba7eaa5e07ec9e9e224",
+     "upstream": "lean/src/Plugin/Capability.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Config.lean": {
+     "sha256": "3c39941331b539fdf4efdf361d17f6ff695d573c7e30cc9dd1ae3d75f36c7ce0",
+     "upstream": "lean/src/Plugin/Config.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Defs.lean": {
+     "sha256": "872cba35cf133f719d5755da4d5ffa7cb5f725036716c46105ec3f8c8172c9e5",
+     "upstream": "lean/src/Plugin/Defs.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Depend.lean": {
+     "sha256": "36c5383cebc09dd07050313b839a107c32b6acead46115b61064745235dc79a8",
+     "upstream": "lean/src/Plugin/Depend.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Env.lean": {
+     "sha256": "8bd4e622a3da28bc4a90d1334e7fc7d5ea55a35bfe127c1bb717e82e343b6a90",
+     "upstream": "lean/src/Plugin/Env.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Export.lean": {
+     "sha256": "70f1cf6a0b075e43424e4b409bdcffabcfa7d7b9ab8663913b152a0d1a956f5e",
+     "upstream": "lean/src/Plugin/Export.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Graph.lean": {
+     "sha256": "69c4ae50420ec5b7f1e2f4456ce4252bb3e1756c46eacb94a2fbef2b371a1e8f",
+     "upstream": "lean/src/Plugin/Graph.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Host.lean": {
+     "sha256": "ac2de88f589fff6b8dc614172cd1d3f8b40d6bfd17e85dc8c8b61d326de9f53a",
+     "upstream": "lean/src/Plugin/Host.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Machine.lean": {
+     "sha256": "360e35c4514f55813fb1a16cd0f62790e8a48e5ad680736771abb2c983bcb147",
+     "upstream": "lean/src/Plugin/Machine.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Order.lean": {
+     "sha256": "6342dc717be22b04ba0590b8e7667a83f4f80ca6a56d3a8f7ad5f65e46594fd6",
+     "upstream": "lean/src/Plugin/Order.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Ref.lean": {
+     "sha256": "01b0b77d9266993501e00cd20b006b48de71c5336124b7cf5aefafe499a2d3b3",
+     "upstream": "lean/src/Plugin/Ref.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Resolve.lean": {
+     "sha256": "111b37532fc6b0c336b628305ef14a2b9214fa5d4b19b6022b68faea3edb1f38",
+     "upstream": "lean/src/Plugin/Resolve.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Types.lean": {
+     "sha256": "3d4d2e4ea4d179c269f1009bbd8cda9f4fbbf9643510d578e215fac26b04b6bf",
+     "upstream": "lean/src/Plugin/Types.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Value.lean": {
+     "sha256": "fd6ea866f428e898cfc58a56a12362e565e0f54c51441701b506d9b5190a9379",
+     "upstream": "lean/src/Plugin/Value.lean"
+    },
+    "tm/lean/src/feature/secrets/plugin/Plugin/Version.lean": {
+     "sha256": "e718e07265dac59f4c0af0db6baa2d3633c79e72ac48b0aec15a6b3e597cb40c",
+     "upstream": "lean/src/Plugin/Version.lean"
+    }
+   }
+  },
   "sekreto/dart": {
    "repo": "https://github.com/voxgig/sekreto",
    "commit": "ee837130bf444ca46a5a46181bdd6743e118898c",
@@ -205,6 +277,102 @@
        "to": "'../../plugin/plugin.dart'"
       }
      ]
+    }
+   }
+  },
+  "sekreto/lean": {
+   "repo": "https://github.com/voxgig/sekreto",
+   "commit": "ee837130bf444ca46a5a46181bdd6743e118898c",
+   "version": "sdk-20261125-1959-0",
+   "tag": "sdk-20261125-1959-0",
+   "file": {
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Aws.lean": {
+     "sha256": "3bf0bca9f5f277ad0b34a8c76ebc7dd7835814ff9f0d949758d805ffa60de723",
+     "upstream": "lean/plugins/SekretoPlugins/Aws.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Azuresecrets.lean": {
+     "sha256": "7a1663ea6405ae0e448a34140435e7a1fb5067a5f93baffaaeabb3e60ec705bd",
+     "upstream": "lean/plugins/SekretoPlugins/Azuresecrets.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Boru.lean": {
+     "sha256": "7d91c5a05591b106f11670b7084c1771417b853e4129a07d5d3f1cf0124742b1",
+     "upstream": "lean/plugins/SekretoPlugins/Boru.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Clock.lean": {
+     "sha256": "a4c2a53cde840e0279163c603d7471eb6c9b8c8b833f4e027a0156dc1ceef0bd",
+     "upstream": "lean/plugins/SekretoPlugins/Clock.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Crypto.lean": {
+     "sha256": "0b5bc79b05cb2b8a49361ba5ea2298b0a6ac4e80dcb39711a0a5183c82760c71",
+     "upstream": "lean/plugins/SekretoPlugins/Crypto.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Doppler.lean": {
+     "sha256": "7a372436f4a7ce34b03c169bbb4019d7bc24ed4b73b334aabe176b665c9519e4",
+     "upstream": "lean/plugins/SekretoPlugins/Doppler.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Gcpsecrets.lean": {
+     "sha256": "1013d1b408a3512a7fcc9f48a441c26f8bca1fbbe92f10b7c55bdfe8060e2b1a",
+     "upstream": "lean/plugins/SekretoPlugins/Gcpsecrets.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Hashicorp.lean": {
+     "sha256": "deab2e5f226b7d262ba26eb44d23f4408bc16424d00463e068bcb96aac133334",
+     "upstream": "lean/plugins/SekretoPlugins/Hashicorp.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Httpjson.lean": {
+     "sha256": "60803d3b08eaf67de6e879adfa85771d7d993659e91ea39a17ad443ed62eab29",
+     "upstream": "lean/plugins/SekretoPlugins/Httpjson.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Infisical.lean": {
+     "sha256": "368892c6baa0ac6dcb59560e75ea2b2ee29dcab189a664f4015f7d0c223493f1",
+     "upstream": "lean/plugins/SekretoPlugins/Infisical.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Onepassword.lean": {
+     "sha256": "760abf2c45d30b57aede956b1bf4f530466f52d3d0badc5c69e57009e8327634",
+     "upstream": "lean/plugins/SekretoPlugins/Onepassword.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Proc.lean": {
+     "sha256": "c034ca82222d91c4f4580116a4d7094b0b25d9ab62a8c9f4a5fcf03e06f4d63a",
+     "upstream": "lean/plugins/SekretoPlugins/Proc.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Secretspec.lean": {
+     "sha256": "d97f40ed8b922b165dde618c1bba92d7f287f738b372cdcbfc38f3dcbabab165",
+     "upstream": "lean/plugins/SekretoPlugins/Secretspec.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Sigv4.lean": {
+     "sha256": "2ac8dac07e3adb037baccf4400bf926f8e1c29e912c0620334c14dffc668e14b",
+     "upstream": "lean/plugins/SekretoPlugins/Sigv4.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/Sekreto.lean": {
+     "sha256": "f8cd503b5f6d45140c85d43725a5f948b845821565fe5b9001aac55dcb4a2c57",
+     "upstream": "lean/src/Sekreto.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/Sekreto/Addr.lean": {
+     "sha256": "2b7e3131091fe3e01dbfa0097f9e2e3368efb84055b2f4c9426bead4dabca487",
+     "upstream": "lean/src/Sekreto/Addr.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/Sekreto/Builtin.lean": {
+     "sha256": "fbc0b505bf7e1e0f132f6d36d933204cc58d688c9b7731afba6d9dbc09c4c9f0",
+     "upstream": "lean/src/Sekreto/Builtin.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/Sekreto/Chain.lean": {
+     "sha256": "02acd4a5e33f8aabd9290593d409085283ce946801e25a5b8a52ed63ff9e4d8b",
+     "upstream": "lean/src/Sekreto/Chain.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/Sekreto/Core.lean": {
+     "sha256": "3736fbe5819111f5e36e63d851d0bc7647d50667671d22348f71bfa6d5a9d917",
+     "upstream": "lean/src/Sekreto/Core.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/Sekreto/Json.lean": {
+     "sha256": "7d2269347aceccc30e636018584df26433577f155ae557f029603c1e25f0e51e",
+     "upstream": "lean/src/Sekreto/Json.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/Sekreto/Provider.lean": {
+     "sha256": "5082e299c512a12c3b114b271ea7c0f88d0ad22bdd1e1cc52a62c275f4a44dda",
+     "upstream": "lean/src/Sekreto/Provider.lean"
+    },
+    "tm/lean/src/feature/secrets/sekreto/Sekreto/Text.lean": {
+     "sha256": "a7517782eeb993c60a1f2125b64fce63209b314f1ea78e4096af236d75c94e33",
+     "upstream": "lean/src/Sekreto/Text.lean"
     }
    }
   },

@@ -1,5 +1,5 @@
--- VENDORED: @voxgig/sekreto sdk-20260908-1556-0 (lean/src/Sekreto/Provider.lean)
--- Source: https://github.com/voxgig/sekreto @ 1267ee2e5f49566bc92695bc9eb3a60ef4924998  [tag: sdk-20260908-1556-0]
+-- VENDORED: @voxgig/sekreto sdk-20261125-1959-0 (lean/src/Sekreto/Provider.lean)
+-- Source: https://github.com/voxgig/sekreto @ ee837130bf444ca46a5a46181bdd6743e118898c  [tag: sdk-20261125-1959-0]
 -- License: MIT (c) voxgig - see repository LICENSE. Do not edit: resync from upstream.
 /-
 What a provider is, what its declarative form looks like, and how a
@@ -162,6 +162,16 @@ structure ProviderSpec where
   /-- infisical: the environment slug and secret path. -/
   environment : String := ""
   path : String := ""
+  /-- minivault: the passphrase that unwraps `vaultkey`. -/
+  passphrase : String := ""
+  /-- minivault: which key in the vault file to open with, defaulting to
+  `master`. Named apart from `key` and `keyid` because those already mean
+  a secret name and an AWS access key id. -/
+  vaultkey : String := ""
+  /-- minivault: PBKDF2 rounds, used only when a key is created. -/
+  iterations : Option Nat := none
+  /-- minivault: make the vault file if it is not there. -/
+  create : Bool := false
   deriving Inhabited
 
 /-- Printed without its credentials. See `AuthSpec`: a derived printer
@@ -340,7 +350,13 @@ def optionsof (spec : ProviderSpec) : Plugin.Value :=
   let out := putstr out "apiversion" spec.apiversion
   let out := putstr out "config" spec.config
   let out := putstr out "environment" spec.environment
-  putstr out "path" spec.path
+  let out := putstr out "path" spec.path
+  let out := putstr out "passphrase" spec.passphrase
+  let out := putstr out "vaultkey" spec.vaultkey
+  let out := match spec.iterations with
+    | none => out
+    | some held => out.set "iterations" (.num (Float.ofNat held))
+  if spec.create then out.set "create" (.bool true) else out
 
 private def strof (options : Plugin.Value) (key : String) : String :=
   (options.get key).asStr
@@ -353,6 +369,8 @@ private def pairsof (value : Plugin.Value) : Pairs String :=
 def specof (options : Plugin.Value) : ProviderSpec :=
   let field := strof options
   let kv := options.get "kv"
+  let iterations := options.get "iterations"
+  let create := options.get "create"
   let authvalue := options.get "auth"
   let auth : Option AuthSpec :=
     if !authvalue.isMap then none
@@ -376,7 +394,10 @@ def specof (options : Plugin.Value) : ProviderSpec :=
     clientsecret := field "clientsecret", loginaddr := field "loginaddr",
     imdsaddr := field "imdsaddr", metadataaddr := field "metadataaddr",
     apiversion := field "apiversion", config := field "config",
-    environment := field "environment", path := field "path" }
+    environment := field "environment", path := field "path",
+    passphrase := field "passphrase", vaultkey := field "vaultkey",
+    iterations := if iterations.isNum then some iterations.asNum.toUInt64.toNat else none,
+    create := create.isBool && create.asBool }
 
 /-- A provider kind, as a voxgig/plugin definition.
 

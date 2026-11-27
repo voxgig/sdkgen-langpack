@@ -38,7 +38,10 @@
   "The struct ports had no route at all: committed copies, older than any",
   "tag here, while the corpus a project runs moved with sdkgen's checkpoint.",
   "Routed when this table moved to sdk-20261125-1959-0, the checkpoint",
-  "sdkgen vendors its own twenty targets at."
+  "sdkgen vendors its own twenty targets at. lean's plugin and sekreto ports",
+  "had no route either, though they carry the header sdkgen's own table",
+  "stamped at sdk-20260908-1556-0 before lean left it; routed at the same",
+  "checkpoint."
  ],
  "tag": "sdk-20261125-1959-0",
  "repo": {
@@ -130,6 +133,34 @@
    }
   },
   {
+   "lib": "plugin",
+   "port": "lean",
+   "lang": "lean",
+   "version": "sdk-20261125-1959-0",
+   "dir": [
+    "tm/lean/src/feature/secrets/plugin",
+    "tm/lean/src/feature/secrets/plugin/Plugin"
+   ],
+   "file": {
+    "lean/src/Plugin.lean": "tm/lean/src/feature/secrets/plugin/Plugin.lean",
+    "lean/src/Plugin/Capability.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Capability.lean",
+    "lean/src/Plugin/Config.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Config.lean",
+    "lean/src/Plugin/Defs.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Defs.lean",
+    "lean/src/Plugin/Depend.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Depend.lean",
+    "lean/src/Plugin/Env.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Env.lean",
+    "lean/src/Plugin/Export.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Export.lean",
+    "lean/src/Plugin/Graph.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Graph.lean",
+    "lean/src/Plugin/Host.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Host.lean",
+    "lean/src/Plugin/Machine.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Machine.lean",
+    "lean/src/Plugin/Order.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Order.lean",
+    "lean/src/Plugin/Ref.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Ref.lean",
+    "lean/src/Plugin/Resolve.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Resolve.lean",
+    "lean/src/Plugin/Types.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Types.lean",
+    "lean/src/Plugin/Value.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Value.lean",
+    "lean/src/Plugin/Version.lean": "tm/lean/src/feature/secrets/plugin/Plugin/Version.lean"
+   }
+  },
+  {
    "lib": "sekreto",
    "port": "dart",
    "lang": "dart",
@@ -167,6 +198,41 @@
      "to": "'../../plugin/plugin.dart'"
     }
    ]
+  },
+  {
+   "lib": "sekreto",
+   "port": "lean",
+   "lang": "lean",
+   "version": "sdk-20261125-1959-0",
+   "dir": [
+    "tm/lean/src/feature/secrets/sekreto",
+    "tm/lean/src/feature/secrets/sekreto/Sekreto",
+    "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins"
+   ],
+   "file": {
+    "lean/plugins/SekretoPlugins/Aws.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Aws.lean",
+    "lean/plugins/SekretoPlugins/Azuresecrets.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Azuresecrets.lean",
+    "lean/plugins/SekretoPlugins/Boru.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Boru.lean",
+    "lean/plugins/SekretoPlugins/Clock.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Clock.lean",
+    "lean/plugins/SekretoPlugins/Crypto.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Crypto.lean",
+    "lean/plugins/SekretoPlugins/Doppler.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Doppler.lean",
+    "lean/plugins/SekretoPlugins/Gcpsecrets.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Gcpsecrets.lean",
+    "lean/plugins/SekretoPlugins/Hashicorp.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Hashicorp.lean",
+    "lean/plugins/SekretoPlugins/Httpjson.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Httpjson.lean",
+    "lean/plugins/SekretoPlugins/Infisical.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Infisical.lean",
+    "lean/plugins/SekretoPlugins/Onepassword.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Onepassword.lean",
+    "lean/plugins/SekretoPlugins/Proc.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Proc.lean",
+    "lean/plugins/SekretoPlugins/Secretspec.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Secretspec.lean",
+    "lean/plugins/SekretoPlugins/Sigv4.lean": "tm/lean/src/feature/secrets/sekreto/plugins/SekretoPlugins/Sigv4.lean",
+    "lean/src/Sekreto.lean": "tm/lean/src/feature/secrets/sekreto/Sekreto.lean",
+    "lean/src/Sekreto/Addr.lean": "tm/lean/src/feature/secrets/sekreto/Sekreto/Addr.lean",
+    "lean/src/Sekreto/Builtin.lean": "tm/lean/src/feature/secrets/sekreto/Sekreto/Builtin.lean",
+    "lean/src/Sekreto/Chain.lean": "tm/lean/src/feature/secrets/sekreto/Sekreto/Chain.lean",
+    "lean/src/Sekreto/Core.lean": "tm/lean/src/feature/secrets/sekreto/Sekreto/Core.lean",
+    "lean/src/Sekreto/Json.lean": "tm/lean/src/feature/secrets/sekreto/Sekreto/Json.lean",
+    "lean/src/Sekreto/Provider.lean": "tm/lean/src/feature/secrets/sekreto/Sekreto/Provider.lean",
+    "lean/src/Sekreto/Text.lean": "tm/lean/src/feature/secrets/sekreto/Sekreto/Text.lean"
+   }
   },
   {
    "lib": "struct",

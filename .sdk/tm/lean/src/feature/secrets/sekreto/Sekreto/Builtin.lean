@@ -1,5 +1,5 @@
--- VENDORED: @voxgig/sekreto sdk-20260908-1556-0 (lean/src/Sekreto/Builtin.lean)
--- Source: https://github.com/voxgig/sekreto @ 1267ee2e5f49566bc92695bc9eb3a60ef4924998  [tag: sdk-20260908-1556-0]
+-- VENDORED: @voxgig/sekreto sdk-20261125-1959-0 (lean/src/Sekreto/Builtin.lean)
+-- Source: https://github.com/voxgig/sekreto @ ee837130bf444ca46a5a46181bdd6743e118898c  [tag: sdk-20261125-1959-0]
 -- License: MIT (c) voxgig - see repository LICENSE. Do not edit: resync from upstream.
 /-
 THE BUILT-IN PROVIDER KINDS - the same four in every port.
@@ -104,6 +104,7 @@ heard of can be told from one the caller did not pass in. Naming them
 costs the core nothing: these are strings, not imports. -/
 def PLUGINKINDS : List String := [
   "hashicorp", "boru", "awssecrets", "awsparams", "gcpsecrets",
-  "azuresecrets", "onepassword", "doppler", "infisical", "secretspec"]
+  "azuresecrets", "onepassword", "doppler", "infisical", "secretspec",
+  "minivault"]
 
 end Sekreto
