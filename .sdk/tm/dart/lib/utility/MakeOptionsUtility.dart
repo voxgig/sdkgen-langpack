@@ -50,10 +50,13 @@ dynamic makeOptions(dynamic ctx) {
     'prefix': '',
     'suffix': '',
     // `basic` and `secret`: HTTP Basic Auth needs a second credential and a
-    // flag to say the pair is Basic rather than a single bearer token.
+    // flag to say the pair is Basic rather than a single bearer token. `in`
+    // and `name` say where the credential travels.
     'auth': {
       'prefix': '',
       'basic': false,
+      'in': '',
+      'name': '',
     },
     'headers': {
       '`\$CHILD`': '`\$STRING`',

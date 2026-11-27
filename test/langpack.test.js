@@ -1532,6 +1532,30 @@ describe('sdkgen-langpack: dart secrets', () => {
 })
 
 
+// Where the credential travels, read from the config's auth at run time.
+describe('credential placement in the templates', () => {
+  const TM = Path.join(PKG, '.sdk', 'tm')
+
+  test('dart: Basic is a header scheme, and the key goes where auth.in says', () => {
+    const src = Fs.readFileSync(Path.join(TM, 'dart/lib/utility/PrepareAuthUtility.dart'), 'utf8')
+    ok(src.includes("if ('header' == where && true == vs.getpath(options, 'auth.basic'))"),
+      'dart: the Basic branch is not gated on the header placement')
+    ok(src.includes("vs.setprop(spec.query, name, apikey.toString())") &&
+      src.includes('_setCookie(spec.headers, name, apikey.toString())'),
+    'dart: prepareAuth places no credential in the query or a cookie')
+    ok(!/HEADER_auth|'authorization'/.test(src), 'dart: prepareAuth names the authorization header itself')
+
+    const opts = Fs.readFileSync(Path.join(TM, 'dart/lib/utility/MakeOptionsUtility.dart'), 'utf8')
+    ok(/'auth': \{[^}]*'in': ''[^}]*'name': ''/.test(opts),
+      'dart: the option spec rejects the placement a config declares')
+
+    const suite = Fs.readFileSync(Path.join(TM, 'dart/test/pipeline_test.dart'), 'utf8')
+    ok(suite.includes("test('Basic under query placement sets no authorization header'"),
+      'dart: the pipeline suite does not run Basic under query placement')
+  })
+})
+
+
 // The request-shaping utilities route a header, cookie or query argument the
 // way sdkgen's bundled targets do (voxgig/sdkgen#327, #331, #28 here), checked
 // on the templates as sdkgen's pathquery.test.ts checks its own.
