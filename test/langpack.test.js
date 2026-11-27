@@ -939,6 +939,17 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // A README describes its own target, and names no sibling the project may lack.
+  test('the lean README compares its Value to no other SDK', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, ''), root: docsRoot(),
+    })
+    const readme = String(files['lean/README.md'])
+    ok(/vendored voxgig `Value`/.test(readme), 'lean: the README no longer describes its Value')
+    ok(!/\b(Go|Python) SDKs?\b/.test(readme), 'lean: the README names the Go or Python SDK')
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {
