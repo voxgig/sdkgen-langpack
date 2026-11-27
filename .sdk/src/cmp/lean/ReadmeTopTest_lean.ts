@@ -1,11 +1,10 @@
-import { cmp, Content } from '@voxgig/sdkgen'
+import { cmp, Content, cdTarget } from '@voxgig/sdkgen'
 
 // The Lean stanza of the top-level README test section.
 const ReadmeTopTest = cmp(function ReadmeTopTest(props: any) {
   const { target } = props
   Content(`\`\`\`bash
-cd ${target.name}
-lake build
+${cdTarget(target)}lake build
 lake exe omnismoke      # the vendored @voxgig/omni corpus engine itself
 lake exe primary        # shared corpus: request-shaping utilities
 lake exe pipeline       # request shaping driven directly: header, cookie and query arguments

@@ -1,4 +1,4 @@
-import { cmp, Content } from '@voxgig/sdkgen'
+import { cmp, Content, cdTarget } from '@voxgig/sdkgen'
 
 import { leanClientOptions } from './utility_lean'
 
@@ -17,7 +17,7 @@ def main : IO Unit := do
   ).run ctx
 \`\`\`
 
-Build it with \`cd ${target.name} && lake build\`.
+Build it with \`${cdTarget(target)}lake build\`.
 
 `)
 })

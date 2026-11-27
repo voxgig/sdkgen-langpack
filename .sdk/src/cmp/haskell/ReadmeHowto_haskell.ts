@@ -1,16 +1,20 @@
 
-import { cmp, Content, isAuthActive, envName, pickExampleEntity } from '@voxgig/sdkgen'
+import { cmp, Content, pickExampleEntity, directRoute, cdTarget } from '@voxgig/sdkgen'
 
 import {
   KIT,
   getModelPath,
 } from '@voxgig/apidef'
 
-import { hsTestCall, hsVarName } from './utility_haskell'
+import { hsClient, hsString, hsTestCall, hsVarName } from './utility_haskell'
 
 
 const ReadmeHowto = cmp(function ReadmeHowto(props: any) {
   const { target, ctx$: { model } } = props
+  const dx = directRoute(model)
+  const client = hsClient(model)
+  const route = (method: string) => `  params <- jo [(${hsString(dx.param)}, VStr "example")]
+  args <- jo [("path", VStr ${hsString(dx.path)}), ("method", VStr ${hsString(method)}), ("params", params)]`
 
   const entity = getModelPath(model, `main.${KIT}.entity`)
   // Pick an entity with a real op (prefer a read op). primaryOp is null only
@@ -37,13 +41,9 @@ const ReadmeHowto = cmp(function ReadmeHowto(props: any) {
   -- eDataGet reads its mock record.
   ${eFn} <- Sdk.e${primaryOp.charAt(0).toUpperCase() + primaryOp.slice(1)} ent arg ctrl
   putStrLn =<< stringify =<< Sdk.eDataGet ${eFn}`
-    : `  args <- jo [("path", VStr "/api/resource"), ("method", VStr "GET")]
+    : `  args <- jo [("path", VStr ${hsString(dx.path)}), ("method", VStr ${hsString(dx.method)})]
   result <- F.direct sdk args
   putStrLn =<< stringify result`
-
-  const apikeyEnvLine = isAuthActive(model)
-    ? `\n${envName(model)}_APIKEY=<your-key>`
-    : ''
 
   Content(`### Make a direct HTTP request
 
@@ -51,16 +51,14 @@ For endpoints not covered by entity accessors, use \`direct\` — it never
 raises and returns a result \`Value\` you branch on via its \`ok\` field:
 
 \`\`\`haskell
-import qualified SdkClient as Sdk
+${client.imports}import qualified SdkClient as Sdk
 import qualified SdkFeatures as F
 import VoxgigStruct (Value (..), stringify)
 import SdkHelpers (jo, getp)
 
 main :: IO ()
 main = do
-  sdk <- Sdk.newSdk0
-  params <- jo [("id", VStr "example")]
-  args <- jo [("path", VStr "/api/resource/{id}"), ("method", VStr "GET"), ("params", params)]
+${client.lines}${route(dx.method)}
   result <- F.direct sdk args
   ok <- getp result "ok"
   case ok of
@@ -81,16 +79,14 @@ main = do
 ### Prepare a request without sending it
 
 \`\`\`haskell
-import qualified SdkClient as Sdk
+${client.imports}import qualified SdkClient as Sdk
 import qualified SdkFeatures as F
 import VoxgigStruct (Value (..), stringify)
 import SdkHelpers (jo, getp)
 
 main :: IO ()
 main = do
-  sdk <- Sdk.newSdk0
-  params <- jo [("id", VStr "example")]
-  args <- jo [("path", VStr "/api/resource/{id}"), ("method", VStr "DELETE"), ("params", params)]
+${client.lines}${route(dx.method)}
   -- prepare returns the fetch definition and raises on error.
   fetchdef <- F.prepare sdk args
   url <- getp fetchdef "url"
@@ -138,18 +134,13 @@ customClient = do
   Sdk.newSdk opts
 \`\`\`
 
-### Run live tests
+### Run the test suite
 
-Create a \`.env.local\` file at the project root:
-
-\`\`\`
-${envName(model)}_TEST_LIVE=TRUE${apikeyEnvLine}
-\`\`\`
-
-Then run the suite (stock GHC, no third-party dependencies):
+The generated suite runs offline, against the mock transport. This SDK
+has no live tests.
 
 \`\`\`bash
-cd ${target.name} && make test
+${cdTarget(target)}make test
 \`\`\`
 
 `)

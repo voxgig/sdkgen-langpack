@@ -1,4 +1,4 @@
-import { cmp, Content } from '@voxgig/sdkgen'
+import { cmp, Content, cdTarget } from '@voxgig/sdkgen'
 
 // The Lean stanza of the top-level README how-to section.
 const ReadmeTopHowto = cmp(function ReadmeTopHowto(props: any) {
@@ -7,7 +7,7 @@ const ReadmeTopHowto = cmp(function ReadmeTopHowto(props: any) {
 and run the entity suite against it with \`SDK_TEST_BASE\`:
 
 \`\`\`bash
-cd ${target.name} && SDK_TEST_BASE=http://localhost:8901 lake exe runner
+${cdTarget(target)}SDK_TEST_BASE=http://localhost:8901 lake exe runner
 \`\`\`
 
 `)

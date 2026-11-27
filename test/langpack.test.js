@@ -1141,6 +1141,43 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // A how-to names what the tests read, a route the API has, and the
+  // directory the target is in.
+  test('the how-tos name the tests\' variables, a real route and the target\'s directory', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, AUTH_MODELS.basic + '\n' + AUTH_MODELS.server),
+      top: true,
+    })
+    const code = Object.entries(files)
+      .filter(([p]) => p.startsWith('dart/') && !p.endsWith('.md')).map(([, v]) => v).join('\n')
+    const named = [...new Set([...String(files['dart/README.md'])
+      .matchAll(/\bDEMO_[A-Z0-9_]*[A-Z0-9]\b/g)].map((m) => m[0]))]
+    deepStrictEqual(named.filter((n) => !code.includes("'" + n + "'")), [],
+      'dart: the README names variables no generated test reads')
+    for (const n of ['DEMO_TEST_LIVE', 'DEMO_APIKEY', 'DEMO_SECRET', 'DEMO_SERVER_TENANT']) {
+      ok(named.includes(n), 'dart: the live how-to does not name ' + n)
+    }
+    ok(!/_TEST_LIVE/.test(String(files['haskell/README.md'])),
+      'haskell: the README documents a live suite haskell does not have')
+
+    const routes = new Set(['/planet', '/planet/{id}'])
+    for (const path of ['README.md', 'dart/README.md', 'haskell/README.md']) {
+      const used = [...String(files[path]).matchAll(/'path': '([^']*)'|\("path", VStr "([^"]*)"\)/g)]
+        .map((m) => m[1] || m[2])
+      ok(0 < used.length, path + ': no direct example')
+      deepStrictEqual(used.filter((r) => !routes.has(r)), [], path + ': a direct example calls a route the API lacks')
+    }
+
+    const atRoot = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, 'main: kit: phase: top: active: false\n' +
+        'main: kit: target: dart: output: root: true'),
+      root: docsRoot(),
+    })
+    ok(!/\bcd dart\b/.test(String(atRoot.files['dart/README.md'])),
+      'dart: the README enters a dart directory a root target does not have')
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {
