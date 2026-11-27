@@ -11,8 +11,6 @@ import {
   configReprSetting,
   each,
   isConfigData,
-  isAuthActive,
-  resolveAuthPrefix,
   targetFeatures,
 } from '@voxgig/sdkgen'
 
@@ -41,23 +39,6 @@ const Config = cmp(async function Config(props: any) {
   const feature = targetFeatures(model, target)
 
   const ff = Path.normalize(__dirname + '/../../../src/cmp/dart/fragment/')
-
-  const headers = getModelPath(model, `main.${KIT}.config.headers`) || {}
-
-  const authActive = isAuthActive(model)
-  const authPrefix = resolveAuthPrefix(model)
-  const authBlock = authActive
-    ? `'auth': <String, dynamic>{
-      'prefix': '${authPrefix}',
-    },
-
-    `
-    : ''
-
-  let baseUrl = ''
-  try {
-    baseUrl = getModelPath(model, `main.${KIT}.info.servers.0.url`)
-  } catch (_e) { }
 
   const { def: configDef, json: configJson } = configDefinition(model, target.name)
   const asData = isConfigData(configJson, configReprSetting(model))
