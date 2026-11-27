@@ -1,5 +1,5 @@
 
-import { cmp, each, Content } from '@voxgig/sdkgen'
+import { cmp, each, Content, fact } from '@voxgig/sdkgen'
 
 import {
   KIT,
@@ -133,7 +133,7 @@ On error, \`ok\` is \`False\` and \`err\` carries the error value.
 | --- | --- |
 `)
     each(fields, (field: any) => {
-      Content(`| \`${field.n}\` | ${field.sh || ''} |
+      Content(`| \`${field.n}\` | ${fact(model.main[KIT], 'field')[ent.name]?.[field.n]?.desc.cell ?? ''} |
 `)
     })
 

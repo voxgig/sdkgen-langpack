@@ -1,5 +1,5 @@
 
-import { cmp, each, Content, canonToType, canonKey, canonScalarKey, entityIdField, opRequestShape, safeVarName, exampleVarName, matchArg, idLiteral } from '@voxgig/sdkgen'
+import { cmp, each, Content, canonToType, canonKey, canonScalarKey, entityIdField, opRequestShape, safeVarName, exampleVarName, matchArg, idLiteral, fact } from '@voxgig/sdkgen'
 
 import {
   KIT,
@@ -68,8 +68,8 @@ const ReadmeEntity = cmp(function ReadmeEntity(props: any) {
 
 `)
 
-    if (entity.short) {
-      Content(`${entity.short}
+    if (fact(entity, 'desc').inline) {
+      Content(`${fact(entity, 'desc').inline}
 
 `)
     }
@@ -104,8 +104,8 @@ const ReadmeEntity = cmp(function ReadmeEntity(props: any) {
 `)
 
       each(fields, (field: any) => {
-        const desc = field.sh || ''
-        Content(`| \`${field.n}\` | \`${canonToType(field.t, target.name)}\` | ${desc} |
+        const desc = fact(model.main[KIT], 'field')[entity.name]?.[field.n]?.desc.cell ?? ''
+        Content(`| \`${field.n}\` | \`${canonToType(field.t, 'dart').replace(/\|/g, '\\|')}\` | ${desc} |
 `)
       })
 
@@ -155,7 +155,7 @@ final ${eVar}s = await client.${entity.Name}().list(${listMatchArg(entity)});
 final ${eVar} = await client.${entity.Name}().create({
 `)
       createItems.map((it: any) => {
-        Content(`  '${it.name}': ${dartLit(it.type, 'example_' + it.name)},  // ${canonToType(it.type, target.name)}
+        Content(`  '${it.name}': ${dartLit(it.type, 'example_' + it.name)},  // ${canonToType(it.type, 'dart')}
 `)
       })
       Content(`});

@@ -1,5 +1,5 @@
 
-import { cmp, each, Content, canonToType, canonKey, canonScalarKey, File, entityIdField, opRequestShape, safeVarName, exampleVarName, matchArg, idLiteral, clientOptions, featureDocs } from '@voxgig/sdkgen'
+import { cmp, each, Content, canonToType, canonKey, canonScalarKey, File, entityIdField, opRequestShape, safeVarName, exampleVarName, matchArg, idLiteral, clientOptions, featureDocs, fact } from '@voxgig/sdkgen'
 import { ReadmeRefFeatures } from '@voxgig/sdkgen'
 
 import {
@@ -185,8 +185,8 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` (or an erro
 
 `)
 
-      if (ent.short) {
-        Content(`${ent.short}
+      if (fact(ent, 'desc').inline) {
+        Content(`${fact(ent, 'desc').inline}
 
 `)
       }
@@ -207,8 +207,8 @@ final ${eVar} = client.${ent.Name}();
 `)
         each(fields, (field: any) => {
           const req = field.r ? 'Yes' : 'No'
-          const desc = field.sh || ''
-          Content(`| \`${field.n}\` | \`${canonToType(field.t, target.name)}\` | ${req} | ${desc} |
+          const desc = fact(model.main[KIT], 'field')[ent.name]?.[field.n]?.desc.cell ?? ''
+          Content(`| \`${field.n}\` | \`${canonToType(field.t, 'dart').replace(/\|/g, '\\|')}\` | ${req} | ${desc} |
 `)
         })
 
@@ -292,7 +292,7 @@ for (final ${eVar} in results) {
 final result = await client.${ent.Name}().create({
 `)
             createItems.map((it: any) => {
-              Content(`  '${it.name}': ${dartLit(it.type, 'example_' + it.name)},  // ${canonToType(it.type, target.name)}
+              Content(`  '${it.name}': ${dartLit(it.type, 'example_' + it.name)},  // ${canonToType(it.type, 'dart')}
 `)
             })
             Content(`});

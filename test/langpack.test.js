@@ -1020,6 +1020,36 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // Text from the spec reaches a table cell escaped, from sdkgen's facts.
+  test('table rows keep their cell count with a pipe and a newline in a description', async () => {
+    const { files } = await generateInto(consumer, {
+      model: consumerModel(consumer.sdk,
+        'main: kit: entity: planet: fields: title: sh: "First line | with a pipe\\nsecond line"\n' +
+        "main: kit: text: entity_desc: planet: 'A planet, as the project says.'"),
+      root: docsRoot(),
+    })
+    const cells = (row) => row.split(/(?<!\\)\|/).length
+    for (const target of ['dart', 'haskell']) {
+      for (const page of ['README.md', 'REFERENCE.md']) {
+        const lines = String(files[target + '/' + page]).split('\n')
+        const broken = []
+        lines.forEach((line, i) => {
+          if (!/^\| ?-+/.test(line) || !lines[i - 1].startsWith('|')) return
+          const want = cells(lines[i - 1])
+          for (let j = i + 1; j < lines.length && lines[j].startsWith('|'); j++) {
+            if (want !== cells(lines[j])) broken.push(lines[j])
+          }
+        })
+        deepStrictEqual(broken, [], target + ' ' + page + ': rows that lost their cell count')
+        ok(String(files[target + '/' + page]).includes('First line \\| with a pipe<br>second line'),
+          target + ' ' + page + ': the description is not in its escaped cell form')
+      }
+      ok(String(files[target + '/README.md']).includes('A planet, as the project says.'),
+        target + ': the README does not take the project\'s entity description')
+    }
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {
