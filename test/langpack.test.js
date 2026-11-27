@@ -903,7 +903,7 @@ describe('sdkgen-langpack', () => {
       off: { dart: [], haskell: [], lean: [] },
       bearer: { dart: ['apikey'], haskell: ['apikey'], lean: ['apikey'] },
       query: { dart: ['apikey'], haskell: ['apikey'], lean: ['apikey'] },
-      basic: { dart: ['apikey', 'secret'], haskell: ['apikey'], lean: ['apikey'] },
+      basic: { dart: ['apikey', 'secret'], haskell: ['apikey', 'secret'], lean: ['apikey'] },
       server: { dart: ['server'], haskell: ['server'], lean: [] },
     }
     for (const [shape, extra] of Object.entries(AUTH_MODELS)) {
@@ -1135,6 +1135,11 @@ describe('sdkgen-langpack', () => {
     for (const code of quick(basic, 'dart')) {
       ok(code.includes("'secret': Platform.environment['DEMO_SECRET'],"),
         'dart: the quick start does not pass the Basic secret:\n' + code)
+    }
+    for (const code of quick(basic, 'haskell')) {
+      ok(code.includes('msecret <- lookupEnv "DEMO_SECRET"') &&
+        code.includes('("secret", maybe VNoval VStr msecret)'),
+      'haskell: the quick start does not pass the Basic secret:\n' + code)
     }
   })
 
@@ -1634,6 +1639,23 @@ describe('credential placement in the templates', () => {
     const suite = Fs.readFileSync(Path.join(TM, 'dart/test/pipeline_test.dart'), 'utf8')
     ok(suite.includes("test('Basic under query placement sets no authorization header'"),
       'dart: the pipeline suite does not run Basic under query placement')
+  })
+
+  test('haskell: Basic joins the key and the secret in a header, and the key goes where auth.in says', () => {
+    const src = Fs.readFileSync(Path.join(TM, 'haskell/src/SdkRuntime.hs'), 'utf8')
+    ok(src.includes('else if "header" == place && isTrueV basicV') &&
+      src.includes('b64 = base64Encode (apikeyStr ++ ":" ++ pass)'),
+    'haskell: prepareAuth has no Basic branch gated on the header placement')
+    ok(/^optSpecValue = do\n  auth <- jo \[\("prefix", VStr ""\), \("basic", VBool False\), \("in", VStr ""\), \("name", VStr ""\)\]/m.test(src) &&
+      /\("secret", VStr ""\)/.test(src),
+    'haskell: the option spec refuses the secret or the placement a config declares')
+
+    const suite = Fs.readFileSync(Path.join(TM, 'haskell/test/TPipeline.hs'), 'utf8')
+    for (const name of ['prepare_auth.basic_header_joins_key_and_secret',
+      'prepare_auth.basic_in_query_sets_no_authorization_header',
+      'prepare_auth.query_placement_named_key_no_header']) {
+      ok(suite.includes('runTest c "' + name + '"'), 'haskell: the pipeline suite does not run ' + name)
+    }
   })
 })
 

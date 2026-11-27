@@ -1055,26 +1055,63 @@ prepareAuthUtil ctx = do
   specV <- readIORef (cSpec ctx)
   case specV of
     VMap _ -> do
-      headers <- getp specV "headers"
       cl <- cc ctx
       options <- clientOptionsMap cl
+      inV <- getpathS options "auth.in"
+      nameV <- getpathS options "auth.name"
+      -- The credential travels where auth.in says (a header, the query or a
+      -- cookie), under auth.name; a header name travels lower-cased.
+      let place = case inV of
+            VStr s | lowerS s `elem` ["query", "cookie"] -> lowerS s
+            _ -> "header"
+          given = case nameV of VStr s | not (null s) -> s; _ -> "Authorization"
+          name = if "header" == place then lowerS given else given
       authv <- getp options "auth"
-      case authv of
-        VNoval -> do delp headers "authorization"; pure (specV, Nothing)
-        VNull -> do delp headers "authorization"; pure (specV, Nothing)
-        _ -> do
-          apikey <- getpropAlt (VStr "__NOTFOUND__") options (VStr "apikey")
-          let isNotFound = case apikey of VStr "__NOTFOUND__" -> True; _ -> False
-              apikeyStr = case apikey of VStr s -> s; _ -> ""
-          if isNotFound || isNoval apikey || apikeyStr == ""
-            then do delp headers "authorization"; pure (specV, Nothing)
-            else do
-              apV <- getpathS options "auth.prefix"
-              let authPrefix = case apV of VStr s -> s; _ -> ""
-                  authval = if authPrefix /= "" then authPrefix ++ " " ++ apikeyStr else apikeyStr
-              setp headers "authorization" (VStr authval)
-              pure (specV, Nothing)
+      apikey <- getpropAlt (VStr "__NOTFOUND__") options (VStr "apikey")
+      apV <- getpathS options "auth.prefix"
+      basicV <- getpathS options "auth.basic"
+      let apikeyStr = case apikey of VStr s | s /= "__NOTFOUND__" -> s; _ -> ""
+          authPrefix = case apV of VStr s -> s; _ -> ""
+          prefixed c = if authPrefix /= "" then authPrefix ++ " " ++ c else c
+          noAuth = case authv of VNoval -> True; VNull -> True; _ -> False
+      if noAuth || apikeyStr == ""
+        then clearCredential specV place name
+        -- True HTTP Basic joins the two credentials, base64-encoded; it is a
+        -- header scheme, and the password may be empty (RFC 7617).
+        else if "header" == place && isTrueV basicV
+          then do
+            secret <- getpropAlt (VStr "__NOTFOUND__") options (VStr "secret")
+            let pass = case secret of VStr s | s /= "__NOTFOUND__" -> s; _ -> ""
+                b64 = base64Encode (apikeyStr ++ ":" ++ pass)
+            -- The joined, encoded pair is a wire form neither credential's
+            -- own registration covers.
+            cleanAddUtil ctx (VStr b64)
+            placeCredential specV place name (prefixed b64)
+          else placeCredential specV place name
+                 (if "header" == place then prefixed apikeyStr else apikeyStr)
+      pure (specV, Nothing)
     _ -> do e <- mkErr "auth_no_spec" "Expected context spec property to be defined."; pure (VNoval, Just e)
+
+-- A cookie has no header of its own: the credential is one name=value piece
+-- of the cookie header, beside the caller's other cookies.
+placeCredential :: Value -> String -> String -> String -> IO ()
+placeCredential specV place name val = case place of
+  "query" -> do q <- getp specV "query"; setp q name (VStr val)
+  "cookie" -> do h <- getp specV "headers"; setCookie h name (Just val)
+  _ -> do h <- getp specV "headers"; setp h name (VStr val)
+
+clearCredential :: Value -> String -> String -> IO ()
+clearCredential specV place name = case place of
+  "query" -> do q <- getp specV "query"; case q of VMap _ -> delp q name; _ -> pure ()
+  "cookie" -> do h <- getp specV "headers"; setCookie h name Nothing
+  _ -> do h <- getp specV "headers"; delp h name
+
+setCookie :: Value -> String -> Maybe String -> IO ()
+setCookie headers name val = do
+  existing <- getp headers "cookie"
+  let kept = (case existing of VStr s -> cookieKeep s [name]; _ -> [])
+        ++ maybe [] (\v -> [name ++ "=" ++ v]) val
+  if null kept then delp headers "cookie" else setp headers "cookie" (VStr (intercalate "; " kept))
 
 -- ----- transforms / result helpers -----
 
@@ -1689,7 +1726,7 @@ fetcherUtil ctx fullurl fetchdef = do
 
 optSpecValue :: IO Value
 optSpecValue = do
-  auth <- jo [("prefix", VStr ""), ("basic", VBool False)]
+  auth <- jo [("prefix", VStr ""), ("basic", VBool False), ("in", VStr ""), ("name", VStr "")]
   hdrs <- jo [("`$CHILD`", VStr "`$STRING`")]
   -- OpenAPI server-variable defaults, carried by the generated config whenever
   -- the spec's server URL is templated. Accepted here so validation does not
@@ -1706,7 +1743,7 @@ optSpecValue = do
   testEnt <- jo [("`$OPEN`", VBool True)]
   test <- jo [("active", VBool False), ("entity", testEnt)]
   clean <- cleanOptSpec
-  jo [ ("apikey", VStr ""), ("base", VStr "http://localhost:8000"), ("prefix", VStr ""), ("suffix", VStr "")
+  jo [ ("apikey", VStr ""), ("secret", VStr ""), ("base", VStr "http://localhost:8000"), ("prefix", VStr ""), ("suffix", VStr "")
      , ("auth", auth), ("headers", hdrs), ("server", srv), ("allow", allow), ("entity", ent), ("feature", feat)
      , ("utility", utilm), ("system", sysm), ("test", test), ("clean", clean) ]
 

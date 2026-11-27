@@ -193,9 +193,8 @@ function hsTestCall(ent: any, op: string, indent: string): { argExpr: string, se
 }
 
 
-// The client options SdkRuntime's makeOptions accepts, which has no `extend`
-// and no `secret`.
-const HS_OPTIONS = ['server', 'apikey', 'base', 'prefix', 'suffix', 'headers', 'feature', 'system']
+// The client options SdkRuntime reads, which has no `extend`.
+const HS_OPTIONS = ['server', 'apikey', 'secret', 'base', 'prefix', 'suffix', 'headers', 'feature', 'system']
 
 const HS_OPTION_KIND: Record<string, string> = { string: 'String', map: 'Value', list: 'Value' }
 
@@ -216,6 +215,10 @@ function hsClient(model: any): { imports: string, lines: string } {
   if (auth.apikey) {
     lines.push('mkey <- lookupEnv ' + hsString(fact(kit, 'env').apikey))
     opts.push('("apikey", maybe VNoval VStr mkey)')
+  }
+  if (auth.secret) {
+    lines.push('msecret <- lookupEnv ' + hsString(fact(kit, 'env').secret))
+    opts.push('("secret", maybe VNoval VStr msecret)')
   }
   const svars = fact(kit, 'server').filter((v: any) => v.required)
   if (0 < svars.length) {
