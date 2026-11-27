@@ -1050,6 +1050,41 @@ describe('sdkgen-langpack', () => {
   })
 
 
+  // Operation prose follows each entity's operations, as sdkgen's does.
+  test('the reference prose names only the operations the entities have', async () => {
+    const docs = async (extra) => (await generateInto(consumer, {
+      model: consumerModel(consumer.sdk, extra), root: docsRoot(),
+    })).files
+
+    const only = await docs(LIST_ONLY)
+    for (const [target, op] of [['dart', 'list'], ['haskell', 'eList']]) {
+      const readme = String(only[target + '/README.md'])
+      const iface = readme.split('### Entity interface')[1].split('###')[0]
+      ok(/All entities share the same/.test(iface), target + ': one entity shares its own interface')
+      deepStrictEqual([...iface.matchAll(/^\| `(e?(?:[Ll]oad|[Ll]ist|[Cc]reate|[Uu]pdate|[Pp]atch|[Rr]emove))` \|/gm)]
+        .map((m) => m[1]), [op],
+        target + ': the interface rows for a list-only API')
+      const shape = readme.split('### Result shape')[1].split('###')[0]
+      ok(!/remove|eRemove|deleted/.test(shape), target + ': the result shape describes a remove no entity has')
+      ok(readme.includes('Operations: ' + op + '.\n'), target + ': the Operations line spells another method')
+    }
+    ok(/^### Comet$/m.test(String(only['lean/README.md'])) &&
+      String(only['lean/README.md']).includes('| `list` | `Comet.list sdk match (← emptyMap)` |'),
+    'lean: the README has no section for the comet entity')
+
+    const mixed = await docs(CHILD)
+    for (const target of ['dart', 'haskell']) {
+      ok(/Each entity has only the operations its model declares/.test(String(mixed[target + '/README.md'])),
+        target + ': entities with different operations are said to share one interface')
+      const ref = String(mixed[target + '/REFERENCE.md'])
+      const moon = (ref.split(/^## (?:Moon\b.*|MoonEntity)$/m)[1] || '').split(/^## /m)[0]
+      ok('' !== moon, target + ': no moon section in the reference')
+      ok(/The match must include `planet_id`\./.test(moon) && !/list all records/.test(moon),
+        target + ': the moon list is said to need no argument')
+    }
+  })
+
+
   test('no page says an entity operation returns a record', async () => {
     const said = []
     for (const shape of Object.keys(DOC_MODELS)) {

@@ -1,5 +1,5 @@
 
-import { cmp, each, Content, canonKey, entityIdField, opRequestShape, fact } from '@voxgig/sdkgen'
+import { cmp, each, Content, canonKey, entityIdField, opRequestShape, fact, entityOps } from '@voxgig/sdkgen'
 
 import {
   KIT,
@@ -62,7 +62,7 @@ const ReadmeEntity = cmp(function ReadmeEntity(props: any) {
 `)
 
   publishedEntities.map((entity: any) => {
-    const opnames = Object.keys(entity.op || {})
+    const opnames = entityOps(entity)
     const fields = Object.values(entity.fields || {})
     const idF = entityIdField(entity)
     const eFn = hsVarName(entity.name)

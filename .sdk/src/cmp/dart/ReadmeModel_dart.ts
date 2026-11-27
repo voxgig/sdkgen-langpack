@@ -1,5 +1,5 @@
 
-import { cmp, each, Content, clientOptions, fact } from '@voxgig/sdkgen'
+import { cmp, each, Content, clientOptions, fact, introOps, entityOps, entityPath, entityClassName, entityCollection } from '@voxgig/sdkgen'
 
 import {
   KIT,
@@ -18,9 +18,8 @@ const ReadmeModel = cmp(function ReadmeModel(props: any) {
 
   // Model-driven op rows for the shared entity interface: emit a row only for
   // operations at least one active entity actually exposes.
-  const opUnion = new Set<string>()
-  entityList.forEach((e: any) => Object.keys(e.op || {})
-    .forEach((o: string) => { if (e.op[o] && e.op[o].active !== false) opUnion.add(o) }))
+  const opUnion = new Set<string>(introOps(model))
+  const sameOps = fact(model.main[KIT], 'sharedOps')
   const opRowDefs: Record<string, string> = {
     load: '| `load` | `(reqmatch, [ctrl]) -> Future<dynamic>` | Load a single entity by match criteria. Returns the entity. Throws on error. |',
     list: '| `list` | `(reqmatch, [ctrl]) -> Future<List>` | List entities matching the criteria. Returns one entity per record. Throws on error. |',
@@ -30,7 +29,7 @@ const ReadmeModel = cmp(function ReadmeModel(props: any) {
     remove: '| `remove` | `(reqmatch, [ctrl]) -> Future<dynamic>` | Remove an entity. Returns the entity, marked as deleted. Throws on error. |',
   }
   const opRows = ['load', 'list', 'create', 'update', 'patch', 'remove']
-    .filter((o) => opUnion.has(o)).map((o) => opRowDefs[o]).join('\n')
+    .filter((o) => opUnion.has(o)).map((o) => opRowDefs[o] + '\n').join('')
 
   const OPTION_KIND: Record<string, string> = { string: 'String', map: 'Map', list: 'List' }
   const optionRows = clientOptions(model)
@@ -69,19 +68,17 @@ Creates a test-mode client with mock transport. Both arguments may be \`null\`.
 
   each(entityList, (ent: any) => {
     const article = /^[aeiou]/i.test(ent.Name) ? 'an' : 'a'
-    Content(`| \`${ent.Name}\` | \`([entopts]) -> ${ent.Name}Entity\` | Create ${article} ${ent.Name} entity instance. |
+    Content(`| \`${ent.Name}\` | \`([entopts]) -> ${entityClassName(ent, entityCollection(model))}\` | Create ${article} ${ent.Name} entity instance. |
 `)
   })
 
   Content(`
 ### Entity interface
 
-All entities share the same interface.
-
-| Method | Signature | Description |
+${0 === entityList.length ? '' : (sameOps ? 'All entities share the same interface.' :
+  'Each entity has only the operations its model declares; see its section below.') + '\n\n'}| Method | Signature | Description |
 | --- | --- | --- |
-${opRows}
-| \`data\` | \`([d]) -> Map\` | Get (or, with an argument, set) entity data. |
+${opRows}| \`data\` | \`([d]) -> Map\` | Get (or, with an argument, set) entity data. |
 | \`match\` | \`([m]) -> Map\` | Get (or, with an argument, set) entity match criteria. |
 | \`make\` | \`() -> Entity\` | Create a new instance with the same options. |
 | \`entopts\` | \`() -> Map\` | Return the entity options. |
@@ -89,10 +86,11 @@ ${opRows}
 
 ### Result shape
 
-Entity operations return the entity, not the raw record — \`list\` a \`List\`
-of entities, one per record — and throw on error. An entity's \`data()\` reads
-its record. \`remove\` returns the entity marked as deleted (\`deleted()\`); it
-keeps the data it held. Wrap calls in \`try\`/\`catch\` to handle failures.
+Entity operations return the entity, not the raw record${opUnion.has('list') ?
+  ` — \`list\` a \`List\`
+of entities, one per record —` : ''} and throw on error. An entity's \`data()\` reads
+its record.${opUnion.has('remove') ? ` \`remove\` returns the entity marked as deleted (\`deleted()\`); it
+keeps the data it held.` : ''} Wrap calls in \`try\`/\`catch\` to handle failures.
 
 The \`direct()\` escape hatch never throws — it returns a result \`Map\` you
 branch on via \`result['ok']\`:
@@ -109,34 +107,32 @@ On error, \`ok\` is \`false\` and \`err\` contains the error value.
 `)
 
   // Entities summary
-  Content(`### Entities
+  if (0 < entityList.length) {
+    Content(`### Entities
 
 `)
+  }
   each(entityList, (ent: any) => {
     const fields = Object.values(ent.fields || {})
-    const opnames = Object.keys(ent.op || {})
-    const ops = ent.op || {}
-    const points = each(ops).map((op: any) =>
-      op.points ? each(op.points) : []
-    ).flat()
-    const path = points.length > 0 ? (points[0] as any).o || '' : ''
+    const opnames = entityOps(ent)
+    const path = entityPath(ent)
 
     Content(`#### ${ent.Name}
 
-| Field | Description |
+${0 === fields.length ? '' : `| Field | Description |
 | --- | --- |
-`)
+`}`)
     each(fields, (field: any) => {
       Content(`| \`${field.n}\` | ${fact(model.main[KIT], 'field')[ent.name]?.[field.n]?.desc.cell ?? ''} |
 `)
     })
 
     Content(`
-Operations: ${opnames.map((n: string) => n.charAt(0).toUpperCase() + n.slice(1)).join(', ')}.
+${0 === opnames.length ? '' : `Operations: ${opnames.join(', ')}.
 
-API path: \`${path}\`
+`}${'' === path ? '' : `API path: \`${path}\`
 
-`)
+`}`)
   })
 
 })

@@ -1,5 +1,5 @@
 
-import { cmp, each, Content, canonToType, canonKey, canonScalarKey, File, entityIdField, opRequestShape, safeVarName, exampleVarName, matchArg, idLiteral, clientOptions, featureDocs, fact } from '@voxgig/sdkgen'
+import { cmp, each, Content, canonToType, canonKey, canonScalarKey, File, entityIdField, opRequestShape, safeVarName, exampleVarName, matchArg, idLiteral, clientOptions, featureDocs, fact, entityOps, entityClassName, entityCollection, requiredItems } from '@voxgig/sdkgen'
 import { ReadmeRefFeatures } from '@voxgig/sdkgen'
 
 import {
@@ -30,6 +30,8 @@ function listMatchArg(ent: any): string {
 }
 
 
+const LIST_ALL = ' The match is optional — call `list()` with no argument to list all records.'
+
 const OP_SIGNATURES: Record<string, { sig: string, returns: string, desc: string }> = {
   load: {
     sig: 'load(reqmatch, [ctrl]) -> Future<dynamic>',
@@ -39,7 +41,7 @@ const OP_SIGNATURES: Record<string, { sig: string, returns: string, desc: string
   list: {
     sig: 'list([reqmatch, ctrl]) -> Future<List>',
     returns: 'one entity per record',
-    desc: 'List entities matching the given criteria. The match is optional — call `list()` with no argument to list all records. Returns a list of entities, one per record, and throws on error.',
+    desc: 'List entities matching the given criteria.' + LIST_ALL + ' Returns a list of entities, one per record, and throws on error.',
   },
   create: {
     sig: 'create(reqdata, [ctrl]) -> Future<dynamic>',
@@ -133,7 +135,7 @@ final client = ${model.const.Name}SDK.test();
     publishedEntities.map((ent: any) => {
       Content(`#### \`${ent.Name}([entopts])\`
 
-Create a new \`${ent.Name}Entity\` instance. Pass no argument for no initial data.
+Create a new \`${entityClassName(ent, entityCollection(model))}\` instance. Pass no argument for no initial data.
 
 `)
     })
@@ -173,7 +175,7 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` (or an erro
 
     // Entity reference sections
     publishedEntities.map((ent: any) => {
-      const opnames = Object.keys(ent.op || {})
+      const opnames = entityOps(ent)
       const fields = Object.values(ent.fields || {})
       const idF = entityIdField(ent)
       const eVar = exampleVarName(ent.name, 'dart')
@@ -181,7 +183,7 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` (or an erro
       Content(`
 ---
 
-## ${ent.Name}Entity
+## ${entityClassName(ent, entityCollection(model))}
 
 `)
 
@@ -219,7 +221,7 @@ final ${eVar} = client.${ent.Name}();
         const hasFieldOps = fields.some((f: any) => f.op && Object.keys(f.op).length > 0)
         if (hasFieldOps) {
           const opcols = ['load', 'list', 'create', 'update', 'patch', 'remove']
-            .filter((op: string) => opnames.includes(op) && ent.op[op]?.active !== false)
+            .filter((op: string) => opnames.includes(op))
           Content(`### Field Usage by Operation
 
 | Field | ${opcols.join(' | ')} |
@@ -252,10 +254,15 @@ final ${eVar} = client.${ent.Name}();
         opnames.map((opname: string) => {
           const info = OP_SIGNATURES[opname]
           if (!info) return
+          const needs = requiredItems(ent, opname).map((it: any) => it.name)
+          const desc = info.desc.replace(' The data must include the entity `id`.',
+            null != idF && needs.includes(idF) ? ' The data must include the entity `' + idF + '`.' : '')
+            .replace(LIST_ALL, 0 === needs.length ? LIST_ALL :
+              ' The match must include ' + needs.map((n: string) => '`' + n + '`').join(', ') + '.')
 
           Content(`#### \`${info.sig}\`
 
-${info.desc}
+${desc}
 
 `)
 
@@ -333,7 +340,7 @@ Get the entity match criteria, or set it when passed an argument.
 
 #### \`make() -> Entity\`
 
-Create a new \`${ent.Name}Entity\` instance with the same options.
+Create a new \`${entityClassName(ent, entityCollection(model))}\` instance with the same options.
 
 #### \`entopts() -> Map\`
 

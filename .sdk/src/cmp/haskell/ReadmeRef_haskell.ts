@@ -1,5 +1,5 @@
 
-import { cmp, each, Content, canonKey, File, entityIdField, opRequestShape, featureDocs, fact } from '@voxgig/sdkgen'
+import { cmp, each, Content, canonKey, File, entityIdField, opRequestShape, featureDocs, fact, entityOps, requiredItems } from '@voxgig/sdkgen'
 
 import {
   KIT,
@@ -31,6 +31,8 @@ function hsType(type: any): string {
 }
 
 
+const LIST_ALL = ' The match is optional \u2014 pass an empty map to list all records.'
+
 const OP_SIGNATURES: Record<string, { sig: string, returns: string, desc: string }> = {
   load: {
     sig: 'eLoad ent match ctrl :: IO Entity',
@@ -40,7 +42,7 @@ const OP_SIGNATURES: Record<string, { sig: string, returns: string, desc: string
   list: {
     sig: 'eList ent match ctrl :: IO [Entity]',
     returns: 'one entity per record',
-    desc: 'List entities matching the given criteria. The match is optional \u2014 pass an empty map to list all records. Resolves to one entity per record and raises on error.',
+    desc: 'List entities matching the given criteria.' + LIST_ALL + ' Resolves to one entity per record and raises on error.',
   },
   create: {
     sig: 'eCreate ent data ctrl :: IO Entity',
@@ -166,7 +168,7 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` and raises 
 
     // Entity reference sections
     publishedEntities.map((ent: any) => {
-      const opnames = Object.keys(ent.op || {})
+      const opnames = entityOps(ent)
       const fields = Object.values(ent.fields || {})
       const idF = entityIdField(ent)
       const eFn = hsVarName(ent.name)
@@ -212,7 +214,7 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` and raises 
         const hasFieldOps = fields.some((f: any) => f.op && Object.keys(f.op).length > 0)
         if (hasFieldOps) {
           const opcols = ['load', 'list', 'create', 'update', 'patch', 'remove']
-            .filter((op: string) => opnames.includes(op) && ent.op[op]?.active !== false)
+            .filter((op: string) => opnames.includes(op))
           Content(`### Field Usage by Operation
 
 | Field | ${opcols.join(' | ')} |
@@ -245,10 +247,15 @@ Prepare a fetch definition without sending. Returns the \`fetchdef\` and raises 
         opnames.map((opname: string) => {
           const info = OP_SIGNATURES[opname]
           if (!info) return
+          const needs = requiredItems(ent, opname).map((it: any) => it.name)
+          const desc = info.desc.replace(' The data must include the entity `id`.',
+            null != idF && needs.includes(idF) ? ' The data must include the entity `' + idF + '`.' : '')
+            .replace(LIST_ALL, 0 === needs.length ? LIST_ALL :
+              ' The match must include ' + needs.map((n: string) => '`' + n + '`').join(', ') + '.')
 
           Content(`#### \`${info.sig}\`
 
-${info.desc}
+${desc}
 
 `)
 
