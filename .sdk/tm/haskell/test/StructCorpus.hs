@@ -7,7 +7,7 @@
 module StructCorpus (runStructCorpus) where
 
 import Control.Exception (SomeException, throwIO, try)
-import Control.Monad (forM_, when)
+import Control.Monad (filterM, forM_, when)
 import Data.Char (toLower)
 import Data.IORef
 import Data.List (intercalate, isPrefixOf)
@@ -255,6 +255,16 @@ nullModifier v key parent _inj =
     VStr s -> do _ <- setprop parent key (VStr (replaceAll s nullmark "null")); return ()
     _ -> return ()
 
+-- Each validate group and its null flag, as struct's own runner drives them
+-- at the vendored tag; a group the corpus holds and this table leaves out
+-- fails the run.
+validateGroups :: [(String, Bool)]
+validateGroups =
+  [ ("basic", False), ("child", True), ("nof", False), ("exact", True)
+  , ("invalid", False), ("special", True), ("directive", False), ("all", False)
+  , ("len", False), ("range", False), ("rest", False), ("like", False)
+  , ("unknown", False) ]
+
 runAll :: Counters -> Value -> IO ()
 runAll c spec = do
   let g k = getpropRaw spec k
@@ -359,15 +369,17 @@ runAll c spec = do
   rsF "transform.format" (getpropRaw transforms "format") (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; transform INone dat sp))
   rsT "transform.apply" (getpropRaw transforms "apply") (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; transform INone dat sp))
 
-  rsF "validate.basic" (getpropRaw validates "basic") (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; validate INone dat sp))
-  forM_ ["child", "one", "exact"] $ \gn ->
-    rsT ("validate." ++ gn) (getpropRaw validates gn) (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; validate INone dat sp))
-  rsF "validate.invalid" (getpropRaw validates "invalid") (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; validate INone dat sp))
-  rsT "validate.special" (getpropRaw validates "special") (arg1 (\vin -> do
-    dat <- vget vin "data"; sp <- vget vin "spec"; injm <- vget vin "inj"
-    mt <- getprop injm (VStr "meta")
-    let d = (defaultInjDef VNoval) { dMeta = mt }
-    validate (if isNullish injm then INone else IDef d) dat sp))
+  forM_ validateGroups $ \(gn, fl) ->
+    rs ("validate." ++ gn) (getpropRaw validates gn) (arg1 (\vin -> do
+      dat <- vget vin "data"; sp <- vget vin "spec"; injm <- vget vin "inj"
+      mt <- getprop injm (VStr "meta")
+      let d = (defaultInjDef VNoval) { dMeta = mt }
+      validate (if isNullish injm then INone else IDef d) dat sp)) fl
+  vkeys <- keysof validates
+  held <- filterM (\k -> ismap <$> getpropRaw validates k) vkeys
+  when (null held) $ record c "validate" "" False "the corpus holds no validate group"
+  forM_ [k | k <- held, k `notElem` map fst validateGroups] $ \k ->
+    record c ("validate." ++ k) "" False "the corpus holds a group this runner does not run"
 
   forM_ ["basic", "operators", "edge", "alts"] $ \gn ->
     rsT ("select." ++ gn) (getpropRaw selects gn) (arg1 (\vin -> do obj <- vget vin "obj"; qry <- vget vin "query"; select obj qry))

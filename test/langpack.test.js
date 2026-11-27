@@ -1824,3 +1824,30 @@ describe('the test mock in the templates', () => {
     deepStrictEqual(Object.keys(SPLIT).sort(), [...TARGETS].sort())
   })
 })
+
+
+// Each struct corpus runner fails at run time on a validate group the corpus
+// holds and its table leaves out; the three tables must also agree.
+describe('the struct corpus runners in the templates', () => {
+  const TM = Path.join(PKG, '.sdk', 'tm')
+
+  const groups = (file, start, end, re) => {
+    const src = Fs.readFileSync(Path.join(TM, file), 'utf8')
+    const from = src.indexOf(start)
+    ok(-1 < from, file + ': no validate group table')
+    const body = src.slice(from, src.indexOf(end, from))
+    return [...body.matchAll(re)].map((m) => m[1] + ':' + m[2].toLowerCase()).sort()
+  }
+
+  test('dart, haskell and lean run the same validate groups with the same null flags', () => {
+    const dart = groups('dart/test/struct_test.dart', 'const _validateGroups = {', '};',
+      /'(\w+)': (true|false)/g)
+    const haskell = groups('haskell/test/StructCorpus.hs', 'validateGroups =', ']',
+      /\("(\w+)", (True|False)\)/g)
+    const lean = groups('lean/test/StructCorpus.lean', 'def validateGroups', ']',
+      /\("(\w+)", (true|false)\)/g)
+    ok(0 < dart.length, 'dart: the validate group table is empty')
+    deepStrictEqual(haskell, dart, 'haskell and dart run different validate groups')
+    deepStrictEqual(lean, dart, 'lean and dart run different validate groups')
+  })
+})
